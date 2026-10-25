@@ -55,6 +55,9 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   `/srv/homelab/repos`, je eigen dev-clones in `~/dev`. Testen kan met lokale bare repo's en
   `DEPLOY_ROOT`/`HOMELAB_REPO`/`SYSTEMCTL`/`TOKEN_FILE` (zie de docstring); `DOCKER_HOST` voor je eigen Docker.
   Het journal van systeemdiensten kun je niet lezen (geen groep `adm`): kijk in `/srv/homelab/state/`.
+- F-019: `bin/homelab-admin` (root-dienst; socket `/run/homelab-admin.sock`), wijzigingen in `changes/`, blijvende
+  pakketten en poorten in `config/machine.conf`, uitleg in `docs/admin.md`. Logboek: `homelab-admin changes`.
+  Meldingen: ntfy op `http://homelab.tail4eb878.ts.net:8102` (topic `homelab`, de telefoon is Android).
 - F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; pagina op poort 8104), `bin/homelab-backup`
   (timer 03:30), extra checks in `bin/homelab-health` (llm, deploy, `svc:<naam>`, backup); instellingen in
   `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.
@@ -73,10 +76,11 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
    `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
    `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker. Nog door de gebruiker: apparaat koppelen,
    LAN-test van 8101, Remote-SSH, reboot en stroom eruit.
-3. F-019 (branch `f-019-admin`): na de merge draait de gebruiker `scripts/19-admin.sh` (vanuit `/home/claude/homelab`,
-   de clone van root bestaat dan nog niet). Daarna de echte test: een PR die SSH via Tailscale blokkeert moet zichzelf
-   terugdraaien. Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/`SOCKET`/
-   `SNAP_PATHS` en `NO_FETCH=1` (zie de docstring).
+3. F-019 staat (2026-10-25): `homelab-admin` en ntfy draaien; `changes/0001` is toegepast. Lockout-test geslaagd:
+   een gemergde wijziging die SSH via Tailscale blokkeerde, werd na 5 min 32 s vanzelf teruggedraaid (test-wijziging
+   daarna weggehaald). Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/
+   `SOCKET`/`SNAP_PATHS` en `NO_FETCH=1` (zie de docstring). Let op: `ufw` ziet een regel die alleen in
+   allow/deny verschilt als dezelfde en slaat hem over; controleer in `apply.sh` altijd of de wijziging er staat.
 4. F-020 (branch `f-020-monitor`): na de merge draait de gebruiker `scripts/20-monitor.sh`. Backups voorlopig op de
    SSD (`/var/backups/homelab`; keuze van de gebruiker); de offline-melding (heartbeat) en een herstel-oefening
    later of niet (keuze van de gebruiker). Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/

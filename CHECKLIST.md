@@ -223,7 +223,15 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         daarna `https://homelab:8101` op de telefoon.
   - [ ] Vanaf Windows met Tailscale **uit**: `Test-NetConnection <lan-ip> -Port 8101` is `False`.
   - [ ] VS Code Remote-SSH naar `homelab`, een repo clonen in `~/dev` en `npm ci && npm test` draaien.
-- [ ] F-019 (machinewijzigingen) kan volledig op de laptop.
+- [ ] F-019 (machinewijzigingen door Claude): zie `docs/admin.md`.
+  - [ ] Op GitHub het token van `deploy` bewerken: ook *Pull requests: Read-only* (voor de PR-meldingen).
+  - [ ] `sudo bash /home/claude/homelab/scripts/19-admin.sh` (de eerste keer; daarna vanuit `/var/lib/homelab/repo`).
+        Kies het wachtwoord voor je ntfy-login. Daarna past de box `changes/0001` toe (kernel en NVIDIA niet meer
+        via unattended-upgrades).
+  - [ ] ntfy-app op de telefoon: server `http://homelab:8102`, je gebruiker, topic `homelab`; de testmelding komt binnen.
+  - [ ] `homelab-admin changes` toont `0001` als toegepast.
+  - [ ] Test: een PR die SSH via Tailscale blokkeert mergen, niet bevestigen; binnen 10 minuten werkt SSH weer en
+        komt er een melding "teruggedraaid".
 - [ ] De externe 2 TB HDD: wacht op het antwoord op de vraag van de lead in F-016.
 
 ## 14. Verhuizen naar de desktop **(desktop)**

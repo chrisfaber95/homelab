@@ -1,0 +1,851 @@
+#!/usr/bin/env python3
+"""homelab-admin: machinewijzigingen door Claude (F-019).
+
+Direct pad (een vaste lijst, met een reden; Claude mag dit zonder te vragen):
+  homelab-admin service start|stop|restart <unit> --reason "..."
+  homelab-admin package install <naam>... --reason "..."      alleen uit Ubuntu's eigen repo's
+  homelab-admin port open|close <poort>[/tcp|udp] --reason "..."  alleen op tailscale0
+  homelab-admin security-updates --reason "..."               zonder kernel en NVIDIA
+Inzien:
+  homelab-admin changes [-n 20]     alle wijzigingen, nieuwste eerst
+  homelab-admin status              lopende bevestigingen, mislukte wijzigingen, wat nog niet in de repo staat
+Alleen voor de gebruiker (root of de groep sudo), niet voor Claude:
+  sudo homelab-admin confirm <id>   een firewall- of netwerkwijziging bevestigen
+De dienst zelf (root, systemd-unit homelab-admin):
+  homelab-admin serve
+
+Goedkeuringspad: een map changes/<NNNN-naam>/ met apply.sh (en eventueel revert.sh) in de homelab-repo. Na de merge
+naar main voert de dienst apply.sh als root uit, vanuit zijn eigen clone. Verandert daarbij de firewall-, netwerk- of
+SSH-configuratie, dan moet de gebruiker binnen CONFIRM_SECONDS bevestigen; anders zet de dienst alles terug.
+Elke wijziging komt in LOG_FILE, daarna draait homelab-health; faalt die, dan volgt een pushmelding.
+
+Instellingen: config/admin.conf en config/deploy.conf naast bin/. Voor tests overschrijfbaar met omgevingsvariabelen
+met dezelfde namen, plus HOMELAB_ADMIN_FAKE=1: dan worden root-commando's alleen gelogd, niet uitgevoerd.
+"""
+import argparse
+import filecmp
+import hashlib
+import ipaddress
+import json
+import os
+import pwd
+import grp
+import re
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_config():
+    conf = {}
+    for name in ("deploy.conf", "admin.conf"):
+        for line in (ROOT / "config" / name).read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                conf[key.strip()] = os.environ.get(key.strip(), value.strip().strip('"'))
+    return conf
+
+
+CONF = load_config()
+FAKE = os.environ.get("HOMELAB_ADMIN_FAKE") == "1"
+STATE = Path(CONF["STATE_DIR"])
+REPO = Path(CONF["REPO_DIR"])
+LOG = Path(CONF["LOG_FILE"])
+NTFY_TOKEN_FILE = Path("/etc/homelab/ntfy-token")
+
+# Wat het directe pad nooit mag: niets dat SSH of Tailscale, het LAN of de firewall zelf kan raken.
+PROTECTED_SERVICES = {"ssh", "sshd", "tailscaled", "ufw", "systemd-networkd", "systemd-resolved", "NetworkManager",
+                      "networking", "dbus", "polkit", "systemd-logind", "homelab-admin", "ntfy"}
+PROTECTED_PREFIXES = ("user@", "systemd-networkd", "netplan-", "dbus-")
+# Kernel en NVIDIA blijven handwerk van de gebruiker (F-016).
+HANDWORK_RE = re.compile(r"^(linux-|(lib)?nvidia-|xserver-xorg-video-nvidia)")
+PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,99}$")
+UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._-]{0,99}$")
+PROTECTED_PORTS = {22}
+RULE_COMMENT = "homelab-admin"
+
+# Wat de box vóór een goedgekeurde wijziging bewaart, om terug te kunnen.
+SNAP_PATHS = [Path(p) for p in os.environ.get("SNAP_PATHS", "/etc/ufw /etc/netplan /etc/ssh /etc/systemd/resolved.conf "
+                                              "/etc/systemd/resolved.conf.d /etc/systemd/network").split()]
+
+_lock = threading.Lock()  # één wijziging tegelijk
+
+
+class Refused(Exception):
+    """Een verzoek dat niet op de lijst staat; er is niets uitgevoerd."""
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def say(msg):
+    print(msg, flush=True)
+
+
+# --- Uitvoeren en vastleggen
+
+def run(cmd, timeout=1800, env=None, check=True, always=False):
+    """Een commando als argumentlijst (nooit via een shell). Geeft (exitcode, uitvoer).
+    In de testmodus draaien alleen commando's met always=True (alleen lezen, of de wijzigingsscripts zelf)."""
+    if FAKE and not always:
+        say("FAKE: " + " ".join(cmd))
+        return 0, ""
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                       env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", **(env or {})})
+    out = (p.stdout + p.stderr).strip()
+    if check and p.returncode != 0:
+        raise RuntimeError(f"{' '.join(cmd[:3])} gaf exit {p.returncode}: {' | '.join(out.splitlines()[-3:])}")
+    return p.returncode, out
+
+
+def record(**entry):
+    entry = {"at": now(), **entry}
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    os.chmod(LOG, 0o644)
+    return entry
+
+
+def read_log():
+    try:
+        return [json.loads(line) for line in LOG.read_text().splitlines() if line.strip()]
+    except OSError:
+        return []
+
+
+def notify(title, message, click=None, actions=None, priority=3):
+    """Een pushmelding via ntfy (als JSON, zodat titels elk teken mogen bevatten). Faalt nooit een wijziging."""
+    if FAKE:
+        say(f"MELDING: {title} | {message}")
+        return
+    try:
+        token = NTFY_TOKEN_FILE.read_text().strip()
+    except OSError:
+        say(f"melding niet verstuurd (geen token): {title}")
+        return
+    body = {"topic": CONF["NTFY_TOPIC"], "title": title, "message": message, "priority": priority,
+            "tags": ["computer"]}
+    if click:
+        body["click"] = click
+    if actions:
+        body["actions"] = actions
+    req = urllib.request.Request(f"http://127.0.0.1:{CONF['NTFY_PORT']}/", data=json.dumps(body).encode(),
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=10).close()
+    except (urllib.error.URLError, OSError) as e:
+        say(f"melding niet verstuurd ({e}): {title}")
+
+
+def health():
+    """homelab-health na elke wijziging; bij een fout een melding. Geeft (ok, foutregels)."""
+    if FAKE:
+        return True, []
+    code, out = run(["/usr/local/bin/homelab-health"], timeout=120, check=False)
+    failing = [l for l in out.splitlines() if l.startswith("FAIL")]
+    if code != 0:
+        notify("Health check faalt na een wijziging", "\n".join(failing) or out[-500:], priority=4)
+    return code == 0, failing
+
+
+# --- Direct pad
+
+def service_action(verb, unit):
+    if verb not in ("start", "stop", "restart"):
+        raise Refused(f"service {verb}: alleen start, stop of restart")
+    if not UNIT_RE.match(unit):
+        raise Refused(f"ongeldige unitnaam {unit!r}")
+    if "." not in unit:
+        unit += ".service"
+    base = unit.rsplit(".", 1)[0]
+    if not unit.endswith(".service"):
+        raise Refused("alleen .service-units")
+    if base in PROTECTED_SERVICES or base.startswith(PROTECTED_PREFIXES):
+        raise Refused(f"{unit} is beschermd (SSH, Tailscale, netwerk of firewall): alleen via een PR")
+    _, out = run(["systemctl", "show", unit, "-p", "LoadState"], check=False, always=True)
+    if "LoadState=loaded" not in out:
+        raise Refused(f"{unit} bestaat niet")
+    run(["systemctl", verb, unit], timeout=300)
+    _, state = run(["systemctl", "is-active", unit], check=False, always=True)
+    return f"{unit}: {verb} gedaan, nu {state or 'onbekend'}", False
+
+
+def apt_cache():
+    import apt  # python3-apt
+    return apt.Cache()
+
+
+def from_ubuntu(version):
+    return any(o.origin == "Ubuntu" and o.site.endswith("ubuntu.com") and o.trusted for o in version.origins)
+
+
+def check_apt_changes(cache):
+    """Wat apt zou doen: geen verwijderingen, alles uit Ubuntu, geen kernel of NVIDIA."""
+    for pkg in cache.get_changes():
+        if pkg.marked_delete:
+            raise Refused(f"apt zou {pkg.name} verwijderen: alleen via een PR")
+        if HANDWORK_RE.match(pkg.name):
+            raise Refused(f"apt zou {pkg.name} installeren of bijwerken: kernel en NVIDIA blijven handwerk")
+        if not from_ubuntu(pkg.candidate):
+            raise Refused(f"{pkg.name} komt niet uit Ubuntu's eigen repo's")
+    return [p.name for p in cache.get_changes()]
+
+
+def apt_get(args):
+    return run(["apt-get", "-y", "-q", "--no-remove", "-o", "Dpkg::Options::=--force-confold", *args],
+               env={"DEBIAN_FRONTEND": "noninteractive"})[1]
+
+
+def package_install(names):
+    if not names:
+        raise Refused("geen pakket opgegeven")
+    for n in names:
+        if not PACKAGE_RE.match(n):
+            raise Refused(f"ongeldige pakketnaam {n!r} (alleen namen, geen opties of bestanden)")
+        if HANDWORK_RE.match(n):
+            raise Refused(f"{n}: kernel en NVIDIA blijven handwerk")
+    run(["apt-get", "update", "-q"], timeout=600)
+    cache = apt_cache()
+    for n in names:
+        if n not in cache or not cache[n].candidate:
+            raise Refused(f"pakket {n} bestaat niet")
+        if not from_ubuntu(cache[n].candidate):
+            raise Refused(f"{n} komt niet uit Ubuntu's eigen repo's")
+        cache[n].mark_install()
+    changes = check_apt_changes(cache)
+    if not changes:
+        return "al geïnstalleerd: " + " ".join(names), False
+    apt_get(["install", "--", *names])
+    return "geïnstalleerd: " + " ".join(changes), True
+
+
+def security_updates():
+    run(["apt-get", "update", "-q"], timeout=600)
+    cache = apt_cache()
+    codename = re.search(r"^VERSION_CODENAME=(\S+)", Path("/etc/os-release").read_text(), re.M).group(1)
+    skipped, chosen = [], []
+    for pkg in cache:
+        if not pkg.is_upgradable:
+            continue
+        if not any(o.origin == "Ubuntu" and o.archive == f"{codename}-security" for o in pkg.candidate.origins):
+            continue
+        (skipped if HANDWORK_RE.match(pkg.name) else chosen).append(pkg.name)
+    if not chosen:
+        return "geen beveiligingsupdates" + (f" (overgeslagen, handwerk: {' '.join(skipped)})" if skipped else ""), False
+    for n in chosen:
+        cache[n].mark_upgrade()
+    check_apt_changes(cache)
+    apt_get(["install", "--only-upgrade", "--", *chosen])
+    return f"bijgewerkt: {' '.join(chosen)}" + (f"; overgeslagen (handwerk): {' '.join(skipped)}" if skipped else ""), False
+
+
+def parse_port(spec):
+    m = re.fullmatch(r"(\d{1,5})(?:/(tcp|udp))?", spec)
+    if not m or not 1 <= int(m.group(1)) <= 65535:
+        raise Refused(f"ongeldige poort {spec!r} (bijvoorbeeld 8150 of 8150/udp)")
+    return int(m.group(1)), m.group(2) or "tcp"
+
+
+def ufw_rules():
+    return run(["ufw", "status"], check=False)[1] if not FAKE else os.environ.get("FAKE_UFW_STATUS", "")
+
+
+def has_admin_rule(port, proto):
+    return any(re.match(rf"^{port}/{proto} on tailscale0\s+ALLOW", l) and f"# {RULE_COMMENT}" in l
+               for l in ufw_rules().splitlines())
+
+
+def port_action(verb, spec):
+    port, proto = parse_port(spec)
+    if port in PROTECTED_PORTS:
+        raise Refused(f"poort {port} is beschermd (SSH): alleen via een PR")
+    rule = ["in", "on", "tailscale0", "to", "any", "port", str(port), "proto", proto]
+    if verb == "open":
+        run(["ufw", "allow", *rule, "comment", RULE_COMMENT])
+        return f"{port}/{proto} open op tailscale0", True
+    if verb == "close":
+        if not has_admin_rule(port, proto):
+            raise Refused(f"{port}/{proto}: er is geen regel van homelab-admin om te sluiten "
+                          "(andere regels alleen via een PR)")
+        run(["ufw", "delete", "allow", *rule])
+        return f"{port}/{proto} dicht op tailscale0", True
+    raise Refused(f"port {verb}: alleen open of close")
+
+
+def instant(req, user):
+    action, args, reason = req.get("action"), req.get("args") or [], (req.get("reason") or "").strip()
+    if len(reason) < 5:
+        raise Refused("geef een reden (--reason), minstens een paar woorden")
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise Refused("ongeldige argumenten")
+    if action == "service" and len(args) == 2:
+        do = lambda: service_action(*args)
+    elif action == "package" and args[:1] == ["install"]:
+        do = lambda: package_install(args[1:])
+    elif action == "port" and len(args) == 2:
+        do = lambda: port_action(*args)
+    elif action == "security-updates" and not args:
+        do = security_updates
+    else:
+        raise Refused(f"{action} {' '.join(args)} staat niet op de lijst")
+    with _lock:
+        try:
+            (result, changed), ok = do(), True
+        except Refused:
+            raise
+        except Exception as e:
+            result, changed, ok = f"mislukt: {e}", False, False
+        h_ok, failing = health()
+        entry = record(kind="instant", user=user, action=action, args=args, reason=reason, ok=ok, result=result,
+                       changed=changed, health_ok=h_ok, health_failing=failing)
+    return ok, result + ("" if h_ok else "\nHealth check faalt daarna: " + "; ".join(failing)), entry
+
+
+# --- Goedgekeurde wijzigingen (changes/ in de repo)
+
+def state(name, default):
+    try:
+        return json.loads((STATE / f"{name}.json").read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def save_state(name, value):
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / f".{name}.tmp"
+    tmp.write_text(json.dumps(value, indent=2))
+    tmp.replace(STATE / f"{name}.json")
+
+
+def git(*args, timeout=120):
+    helper = ('!f() { test "$1" = get && echo username=x-access-token && '
+              f'echo "password=$(cat {CONF["TOKEN_FILE"]})"; }}; f')
+    return run(["git", "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-C", str(REPO), *args],
+               timeout=timeout, env={"GIT_TERMINAL_PROMPT": "0", "HOME": "/root"})[1]
+
+
+def update_repo():
+    if os.environ.get("NO_FETCH") == "1":
+        return
+    git("fetch", "--quiet", "origin", "main")
+    git("reset", "--quiet", "--hard", "origin/main")
+    git("clean", "-ffdxq")
+
+
+def change_summary(path):
+    for line in (path / "apply.sh").read_text().splitlines()[1:6]:
+        if line.startswith("# "):
+            return line[2:].strip()
+    return path.name
+
+
+def file_hash(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def snapshot(dest):
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    for p in SNAP_PATHS:
+        if p.exists():
+            target = dest / p.relative_to("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if p.is_dir():
+                shutil.copytree(p, target, symlinks=True)
+            else:
+                shutil.copy2(p, target)
+
+
+def changed_paths(snap):
+    """De SNAP_PATHS die nu anders zijn dan in de snapshot."""
+    def differs(a, b):
+        if a.is_dir() != b.is_dir():
+            return True
+        if a.is_file():
+            return not filecmp.cmp(a, b, shallow=False)
+        c = filecmp.dircmp(a, b)
+        if c.left_only or c.right_only or c.funny_files:
+            return True
+        return any(not filecmp.cmp(a / f, b / f, shallow=False) for f in c.common_files) or \
+            any(differs(a / d, b / d) for d in c.common_dirs)
+    return [p for p in SNAP_PATHS
+            if p.exists() != (snap / p.relative_to("/")).exists()
+            or (p.exists() and differs(p, snap / p.relative_to("/")))]
+
+
+# Wat er opnieuw geladen moet worden als een pad terugkomt.
+RELOAD = {"/etc/ufw": ["ufw", "reload"], "/etc/netplan": ["netplan", "apply"],
+          "/etc/systemd/network": ["netplan", "apply"], "/etc/ssh": ["systemctl", "restart", "ssh.service"],
+          "/etc/systemd/resolved.conf": ["systemctl", "restart", "systemd-resolved"],
+          "/etc/systemd/resolved.conf.d": ["systemctl", "restart", "systemd-resolved"]}
+
+
+def restore(snap, change_dir):
+    """Zet de veranderde configuratie terug, laadt alleen die opnieuw, en draait revert.sh als die er is."""
+    changed = changed_paths(snap)
+    for p in changed:
+        saved = snap / p.relative_to("/")
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.exists():
+            p.unlink()
+        if saved.is_dir():
+            shutil.copytree(saved, p, symlinks=True)
+        elif saved.exists():
+            shutil.copy2(saved, p)
+    steps = []
+    for p in changed:
+        if RELOAD.get(str(p)) and RELOAD[str(p)] not in steps:
+            steps.append(RELOAD[str(p)])
+    if change_dir and (change_dir / "revert.sh").is_file():
+        steps.append(["bash", str(change_dir / "revert.sh")])
+    errors = []
+    for step in steps:
+        code, out = run(step, timeout=300, check=False, always=step[0] == "bash")
+        if code != 0:
+            errors.append(f"{' '.join(step)}: {out[-200:]}")
+    return errors
+
+
+def still_reachable():
+    """Wat de box zelf kan zien: Tailscale verbonden, SSH luistert, en de SSH-regel op tailscale0 staat er."""
+    if FAKE:
+        return os.environ.get("FAKE_REACHABLE", "1") == "1", "testmodus: onbereikbaar"
+    _, ts = run(["tailscale", "status", "--json"], check=False)
+    try:
+        if json.loads(ts).get("BackendState") != "Running":
+            return False, "Tailscale is niet verbonden"
+    except ValueError:
+        return False, "tailscale status faalt"
+    if not re.search(r"^22/tcp on tailscale0\s+ALLOW", ufw_rules(), re.M):
+        return False, "de ufw-regel voor SSH op tailscale0 is weg"
+    if ":22 " not in run(["ss", "-Htln"], check=False)[1]:
+        return False, "niets luistert op poort 22"
+    return True, ""
+
+
+def apply_change(path, applied, pending):
+    cid = path.name
+    digest = file_hash(path / "apply.sh")
+    summary = change_summary(path)
+    snap = STATE / "snapshots" / cid
+    snapshot(snap)
+    say(f"{cid}: toepassen ({summary})")
+    code, out = run(["bash", str(path / "apply.sh")], timeout=1800, check=False, always=True)
+    network = bool(changed_paths(snap))
+    entry = {"kind": "approved", "change": cid, "summary": summary, "ok": code == 0, "network": network,
+             "result": " | ".join(out.splitlines()[-5:])}
+    if code != 0:
+        errors = restore(snap, None) if network else []
+        entry["result"] += "; teruggezet" if network else ""
+        notify(f"Wijziging {cid} mislukt", f"{summary}\n{entry['result'][-400:]}", priority=4)
+    elif network:
+        ok, why = still_reachable()
+        if not ok:
+            errors = restore(snap, path)
+            entry.update(ok=False, result=f"teruggedraaid: {why}" + (f" ({'; '.join(errors)})" if errors else ""))
+            notify(f"Wijziging {cid} teruggedraaid", f"{summary}\n{why}. De vorige configuratie staat terug.",
+                   priority=5)
+        else:
+            key = secrets.token_urlsafe(24)
+            deadline = (datetime.now(timezone.utc) + timedelta(seconds=int(CONF["CONFIRM_SECONDS"]))).isoformat(
+                timespec="seconds")
+            pending[cid] = {"key": key, "deadline": deadline, "summary": summary}
+            entry["result"] = f"wacht op bevestiging tot {deadline}"
+            url = f"http://homelab:{CONF['CONFIRM_PORT']}/confirm/{cid}/{key}"
+            notify(f"Bevestig {cid} binnen {int(CONF['CONFIRM_SECONDS']) // 60} min",
+                   f"{summary}\nDe firewall of het netwerk is veranderd. Werkt SSH naar homelab nog? Bevestig dan. "
+                   f"Zonder bevestiging gaat alles vanzelf terug.\nVia SSH: sudo homelab-admin confirm {cid}",
+                   actions=[{"action": "http", "label": "Bevestig", "url": url, "method": "POST", "clear": True}],
+                   priority=5)
+    h_ok, failing = health()
+    entry.update(health_ok=h_ok, health_failing=failing)
+    record(**entry)
+    applied[cid] = {"sha256": digest, "at": now(), "ok": entry["ok"]}
+
+
+def finish_pending(pending, cid, confirmed_by=None):
+    item = pending.pop(cid)
+    if confirmed_by:
+        record(kind="confirmed", change=cid, summary=item["summary"], user=confirmed_by, ok=True)
+        notify(f"{cid} bevestigd", item["summary"], priority=2)
+        return
+    change_dir = REPO / "changes" / cid
+    errors = restore(STATE / "snapshots" / cid, change_dir if change_dir.is_dir() else None)
+    h_ok, failing = health()
+    record(kind="rollback", change=cid, summary=item["summary"], ok=not errors,
+           result="niet bevestigd binnen de tijd; teruggedraaid" + (f" ({'; '.join(errors)})" if errors else ""),
+           health_ok=h_ok, health_failing=failing)
+    notify(f"{cid} teruggedraaid", f"{item['summary']}\nNiet op tijd bevestigd: de vorige configuratie staat terug.",
+           priority=5)
+
+
+def reconcile_machine():
+    """Leg aan wat in config/machine.conf staat en ontbreekt (pakketten, tailnet-poorten)."""
+    conf = REPO / "config" / "machine.conf"
+    if not conf.is_file():
+        return
+    digest = file_hash(conf)
+    if state("machine", {}).get("sha256") == digest:
+        return
+    packages, ports = [], []
+    for line in conf.read_text().splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) == 2 and parts[0] == "package":
+            packages.append(parts[1])
+        elif len(parts) == 2 and parts[0] == "port":
+            ports.append(parts[1])
+    results, ok = [], True
+    with _lock:
+        try:
+            if packages:
+                results.append(package_install(packages)[0])
+            rules = ufw_rules()
+            for spec in ports:
+                port, proto = parse_port(spec)
+                if not re.search(rf"^{port}/{proto} on tailscale0\s+ALLOW", rules, re.M):
+                    results.append(port_action("open", spec)[0])
+        except Exception as e:
+            ok = False
+            results.append(f"mislukt: {e}")
+        if results:
+            record(kind="machine", ok=ok, result="; ".join(results))
+    if ok:
+        save_state("machine", {"sha256": digest, "at": now()})
+
+
+def github_get(path):
+    token = Path(CONF["TOKEN_FILE"]).read_text().strip()
+    req = urllib.request.Request(f"https://api.github.com{path}", headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def notify_new_prs():
+    seen = state("prs", {"seen": [], "error": None})
+    try:
+        prs = github_get(f"/repos/{CONF['HOMELAB_REPO']}/pulls?state=open&per_page=50")
+        seen["error"] = None
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        seen["error"] = str(e)
+        save_state("prs", seen)
+        return
+    for pr in prs:
+        if pr["number"] not in seen["seen"]:
+            notify(f"PR #{pr['number']}: {pr['title']}"[:120], "Klaar om te bekijken; mergen = goedkeuren.",
+                   click=pr["html_url"], actions=[{"action": "view", "label": "Openen", "url": pr["html_url"]}])
+            seen["seen"].append(pr["number"])
+    seen["seen"] = seen["seen"][-200:]
+    save_state("prs", seen)
+
+
+def daily_summary():
+    local = datetime.now().astimezone()
+    last = state("summary", {}).get("date")
+    if local.hour < int(CONF["SUMMARY_HOUR"]) or last == local.date().isoformat():
+        return
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    entries = [e for e in read_log() if datetime.fromisoformat(e["at"]) >= since]
+    lines = []
+    for e in entries:
+        what = e.get("change") or " ".join([e.get("action", e["kind"]), *e.get("args", [])])
+        lines.append(f"{'ok' if e.get('ok') else 'FOUT'} {e['kind']}: {what}")
+    unrecorded = unrecorded_changes()
+    try:
+        waiting = sorted(p.name for p in apt_cache() if p.is_upgradable and HANDWORK_RE.match(p.name))
+    except Exception:
+        waiting = []
+    body = (f"{len(entries)} wijziging(en) in 24 uur:\n" + "\n".join(lines[-15:])) if entries else "Niets veranderd."
+    if unrecorded:
+        body += f"\nNog niet in de repo: {'; '.join(unrecorded)}"
+    if waiting:
+        body += f"\nKernel/NVIDIA-updates wachten op jou: {' '.join(waiting[:8])}"
+    notify("homelab: dagoverzicht", body, priority=2)
+    save_state("summary", {"date": local.date().isoformat()})
+
+
+def apply_loop():
+    while True:
+        try:
+            update_repo()
+            reconcile_machine()
+            applied, pending = state("applied", {}), state("pending", {})
+            for path in sorted((REPO / "changes").glob("[0-9]*")):
+                if not (path / "apply.sh").is_file():
+                    continue
+                prev = applied.get(path.name)
+                if prev and (prev["sha256"] == file_hash(path / "apply.sh") or prev.get("ok")):
+                    continue  # al toegepast; een mislukte wijziging alleen opnieuw als apply.sh verandert
+                with _lock:
+                    apply_change(path, applied, pending)
+                    save_state("applied", applied)
+                    save_state("pending", pending)
+                if path.name in pending:
+                    break  # eerst deze bevestigen, dan pas de volgende
+            notify_new_prs()
+            daily_summary()
+        except Exception as e:
+            say(f"ronde mislukt: {e}")
+        save_state("loop", {"at": now()})
+        for _ in range(int(CONF["POLL_SECONDS"])):
+            time.sleep(1)
+            check_deadlines()
+
+
+def check_deadlines():
+    with _lock:
+        pending = state("pending", {})
+        for cid, item in list(pending.items()):
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(item["deadline"]):
+                finish_pending(pending, cid)
+                save_state("pending", pending)
+
+
+def confirm(cid, by):
+    with _lock:
+        pending = state("pending", {})
+        if cid not in pending:
+            return False
+        finish_pending(pending, cid, confirmed_by=by)
+        save_state("pending", pending)
+        return True
+
+
+# --- Status
+
+def unrecorded_changes():
+    """Directe wijzigingen die een herbouw niet terugbrengt, omdat ze niet in config/machine.conf staan."""
+    conf = REPO / "config" / "machine.conf"
+    lines = conf.read_text().splitlines() if conf.is_file() else []
+    listed = {tuple(l.split("#", 1)[0].split()) for l in lines}
+    current = {}
+    for e in read_log():
+        if e["kind"] != "instant" or not e.get("ok") or not e.get("changed"):
+            continue
+        args = e.get("args", [])
+        if e["action"] == "package" and args[:1] == ["install"]:
+            for n in args[1:]:
+                current[("package", n)] = "geïnstalleerd"
+        elif e["action"] == "port" and len(args) == 2:
+            port, proto = parse_port(args[1])
+            current[("port", f"{port}/{proto}")] = "open" if args[0] == "open" else "dicht"
+    out = []
+    for key, how in current.items():
+        if how in ("geïnstalleerd", "open") and key not in listed:
+            out.append(f"{key[0]} {key[1]} ({how}, zet het in config/machine.conf)")
+        if how == "dicht" and key in listed:
+            out.append(f"{key[0]} {key[1]} (dicht, maar staat nog in config/machine.conf)")
+    return out
+
+
+def status_text():
+    lines = []
+    loop = state("loop", {})
+    lines.append(f"Dienst: laatste ronde {loop.get('at', 'nooit')}")
+    for cid, item in state("pending", {}).items():
+        lines.append(f"WACHT OP BEVESTIGING: {cid} ({item['summary']}), uiterlijk {item['deadline']}")
+    for cid, item in state("applied", {}).items():
+        if not item.get("ok"):
+            lines.append(f"MISLUKT: {cid} op {item['at']} (zie homelab-admin changes)")
+    prs = state("prs", {})
+    if prs.get("error"):
+        lines.append(f"PR-meldingen werken niet: {prs['error']} (het token heeft 'Pull requests: Read-only' nodig)")
+    unrecorded = unrecorded_changes()
+    lines += [f"NIET IN DE REPO: {u}" for u in unrecorded] or ["Alle directe wijzigingen staan in de repo."]
+    bad = any(l.startswith(("WACHT", "MISLUKT", "NIET", "PR-")) for l in lines)
+    return bad, "\n".join(lines)
+
+
+def changes_text(n):
+    out = []
+    for e in reversed(read_log()[-n:] if n else read_log()):
+        mark = "ok  " if e.get("ok") else "FOUT"
+        if e["kind"] in ("instant", "refused"):
+            what = f"{e.get('action')} {' '.join(e.get('args') or [])} — {e.get('reason') or ''} [{e.get('user', '?')}]"
+        elif e["kind"] in ("approved", "rollback", "confirmed"):
+            what = f"{e['change']}: {e.get('summary', '')}"
+        else:
+            what = "machine.conf"
+        out.append(f"{e['at']}  {mark}  {e['kind']:9} {what}")
+        if e.get("result"):
+            out.append(f"{'':37}{e['result'][:150]}")
+        if e.get("health_ok") is False:
+            out.append(f"{'':37}health check faalde: {'; '.join(e.get('health_failing') or [])}")
+    return "\n".join(out) or "Nog geen wijzigingen."
+
+
+# --- Socket (direct pad en inzien) en bevestig-knop
+
+def peer_user(conn):
+    import struct
+    creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    _, uid, _ = struct.unpack("3i", creds)
+    name = pwd.getpwuid(uid).pw_name
+    admin = uid == 0 or name in grp.getgrnam("sudo").gr_mem
+    return name, admin
+
+
+def handle(conn):
+    with conn:
+        user, admin = peer_user(conn)
+        req, raw = {}, b""
+        while not raw.endswith(b"\n") and len(raw) < 65536:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        try:
+            req = json.loads(raw)
+            if not isinstance(req, dict):
+                req = {}
+                raise Refused("ongeldig verzoek")
+            cmd = req.get("cmd")
+            if cmd == "instant":
+                if user != "claude" and not admin:
+                    raise Refused("alleen claude en beheerders")
+                ok, text, _ = instant(req, user)
+                reply = {"ok": ok, "text": text}
+            elif cmd == "confirm":
+                if not admin:
+                    raise Refused("bevestigen kan alleen de gebruiker (sudo homelab-admin confirm), niet Claude")
+                ok = confirm(str(req.get("change")), user)
+                reply = {"ok": ok, "text": "bevestigd" if ok else "die wijziging wacht niet op bevestiging"}
+            elif cmd == "status":
+                bad, text = status_text()
+                reply = {"ok": not bad, "text": text}
+            elif cmd == "changes":
+                reply = {"ok": True, "text": changes_text(int(req.get("n") or 0))}
+            else:
+                raise Refused("onbekend verzoek")
+        except Refused as e:
+            if req.get("cmd") == "instant":
+                record(kind="refused", user=user, action=req.get("action"), args=req.get("args"),
+                       reason=req.get("reason"), ok=False, result=str(e))
+            reply = {"ok": False, "text": f"geweigerd: {e}"}
+        except Exception as e:
+            reply = {"ok": False, "text": f"fout: {e}"}
+        conn.sendall(json.dumps(reply, ensure_ascii=False).encode() + b"\n")
+
+
+def own_addresses():
+    out = {"127.0.0.1", "::1"}
+    _, ips = run(["tailscale", "ip"], check=False, always=True)
+    return out | set(ips.split())
+
+
+class ConfirmHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_POST(self):
+        ip = self.client_address[0].removeprefix("::ffff:")
+        parts = self.path.strip("/").split("/")
+        addr = ipaddress.ip_address(ip)
+        # Van de box zelf telt niet (dan bewijst het niets, en Claude zit op de box); alleen vanaf het tailnet.
+        if ip in self.server.own or not (addr in ipaddress.ip_network("100.64.0.0/10")
+                                         or addr in ipaddress.ip_network("fd7a:115c:a1e0::/48")):
+            return self.reply(403, "alleen vanaf een ander apparaat op het tailnet")
+        if len(parts) != 3 or parts[0] != "confirm":
+            return self.reply(404, "onbekend")
+        item = state("pending", {}).get(parts[1])
+        if not item or not secrets.compare_digest(item["key"], parts[2]):
+            return self.reply(404, "die wijziging wacht niet op bevestiging")
+        confirm(parts[1], f"knop ({ip})")
+        self.reply(200, "bevestigd")
+
+    def reply(self, code, text):
+        data = (text + "\n").encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def serve():
+    if os.geteuid() != 0 and not FAKE:
+        sys.exit("homelab-admin serve draait als root (systemd-unit homelab-admin).")
+    STATE.mkdir(parents=True, exist_ok=True)
+    os.chmod(STATE, 0o700)  # de snapshots bevatten ook de SSH-hostkeys
+    sock_path = Path(CONF["SOCKET"])
+    sock_path.unlink(missing_ok=True)
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(sock_path))
+    os.chmod(sock_path, 0o666)  # iedereen mag vragen; de dienst kijkt zelf wie het is (SO_PEERCRED)
+    srv.listen(8)
+    threading.Thread(target=apply_loop, daemon=True).start()
+    http = ThreadingHTTPServer(("0.0.0.0", int(CONF["CONFIRM_PORT"])), ConfirmHandler)
+    http.own = own_addresses()
+    threading.Thread(target=http.serve_forever, daemon=True).start()
+    say(f"homelab-admin: socket {sock_path}, bevestig-knop op poort {CONF['CONFIRM_PORT']}")
+    while True:
+        conn, _ = srv.accept()
+        threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+
+# --- Client
+
+def ask(req):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(CONF["SOCKET"])
+    except OSError as e:
+        sys.exit(f"homelab-admin draait niet ({e}).")
+    s.sendall(json.dumps(req).encode() + b"\n")
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    reply = json.loads(data)
+    print(reply["text"])
+    return 0 if reply["ok"] else 1
+
+
+def main():
+    p = argparse.ArgumentParser(prog="homelab-admin", description="Machinewijzigingen (F-019).")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for name, nargs in (("service", 2), ("package", "+"), ("port", 2)):
+        s = sub.add_parser(name)
+        s.add_argument("args", nargs=nargs)
+        s.add_argument("--reason", required=True)
+    s = sub.add_parser("security-updates")
+    s.add_argument("--reason", required=True)
+    c = sub.add_parser("changes")
+    c.add_argument("-n", type=int, default=20)
+    sub.add_parser("status")
+    f = sub.add_parser("confirm")
+    f.add_argument("change")
+    sub.add_parser("serve")
+    a = p.parse_args()
+    if a.cmd == "serve":
+        serve()
+    elif a.cmd in ("service", "package", "port", "security-updates"):
+        sys.exit(ask({"cmd": "instant", "action": a.cmd, "args": getattr(a, "args", []), "reason": a.reason}))
+    elif a.cmd == "changes":
+        sys.exit(ask({"cmd": "changes", "n": a.n}))
+    elif a.cmd == "confirm":
+        sys.exit(ask({"cmd": "confirm", "change": a.change}))
+    else:
+        sys.exit(ask({"cmd": "status"}))
+
+
+if __name__ == "__main__":
+    main()

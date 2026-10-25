@@ -34,7 +34,7 @@ install -d -m 750 -o ntfy -g ntfy /var/lib/ntfy /var/cache/ntfy
 install -d -m 755 /etc/ntfy
 cat > /etc/ntfy/server.yml <<EOF
 # homelab (F-019): alleen via het tailnet (ufw), iedereen moet inloggen.
-base-url: "http://homelab:$NTFY_PORT"
+base-url: "http://$TAILNET_NAME:$NTFY_PORT"
 listen-http: ":$NTFY_PORT"
 cache-file: "/var/cache/ntfy/cache.db"
 auth-file: "/var/lib/ntfy/user.db"
@@ -151,4 +151,4 @@ if [[ $pr != 200 ]]; then
 fi
 sleep 3
 sudo -u "$phone_user" -- homelab-admin status || true
-echo "Klaar. Op je telefoon: de ntfy-app, server http://homelab:$NTFY_PORT, gebruiker $phone_user, topic $NTFY_TOPIC."
+echo "Klaar. Op je telefoon: de ntfy-app, server http://$TAILNET_NAME:$NTFY_PORT, gebruiker $phone_user, topic $NTFY_TOPIC."

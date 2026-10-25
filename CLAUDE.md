@@ -21,6 +21,10 @@ Dat is een kopie; het origineel staat in `team-hq` op de Windows-pc en wordt daa
 - De NVIDIA-driver (580-server) en de kernel blijven handwerk van de gebruiker.
 - Laptopfase: verwacht GTX 1050 / 2048 MiB; na de verhuizing GTX 1080 / 8192 MiB. Leg dat vast in één
   instelling, niet in code.
+- Push nooit naar `main` (ook niet van deze repo): werk op een branch, push die en open een PR; de gebruiker merget.
+  Een globale pre-push-hook in `~/.config/git/hooks` houdt dat tegen; zet hem niet uit. `gh pr merge` doe je niet.
+- Root-scripts laat je de gebruiker draaien vanuit de deploy-clone `/srv/homelab/repos/homelab/scripts/` (dat is
+  gemergde `main`), niet vanuit je eigen werkkopie.
 
 ## Stand (2026-10-25)
 
@@ -49,8 +53,11 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 1. F-017: de gebruiker draait `scripts/17-llm.sh` opnieuw (model `llama3.1:8b`) en test `llm` vanaf Windows.
    Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker); de brief eist 100% GPU
    voor de desktop.
-2. Daarna de ROADMAP-volgorde: F-018, F-019, ...
+2. F-018 (branch `f-018-projects`): na de merge draait de gebruiker `scripts/18-projects.sh`, daarna draai jij
+   `scripts/18-claude.sh`. Nog te testen zodra Docker er is: een compose-repo deployen (en een mislukte start).
+3. Daarna de ROADMAP-volgorde: F-019, F-020, ...
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.
-- Welke GitHub-rechten Claude op de box houdt (alleen lezen of ook pushen): open vraag in F-018.
+- Beantwoord (2026-10-25): Claude pusht naar branches en opent PR's, niet naar `main`. De dashboard op de box toont
+  sessies en mag Claude-sessies starten.

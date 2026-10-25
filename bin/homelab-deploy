@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""homelab-deploy: repo's bijhouden en deployen (F-018).
+
+  homelab-deploy status        per repo: gedeployde commit, laatste sync, resultaat van de laatste deploy
+  homelab-deploy run [--once]  de sync-lus (draait als dienst homelab-deploy onder het account deploy)
+
+De lus vraagt elke POLL_SECONDS met `git ls-remote` of main veranderd is (alleen uitgaand verkeer), zet de
+deploy-clone op origin/main, en deployt repo's van soort compose of service. Een mislukte build of start laat de
+vorige versie draaien. Instellingen: config/deploy.conf naast bin/; de repo-lijst: config/repos.conf in de
+deploy-clone van de homelab-repo. Voor tests overschrijfbaar met omgevingsvariabelen met dezelfde namen,
+plus SYSTEMCTL (bijvoorbeeld een nep-systemctl).
+
+Exit van status: 0 als alles in orde is, 1 als een deploy of sync faalt of de lus niet meer loopt.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+KINDS = ("sync", "compose", "service")
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+BUILD_TIMEOUT = 20 * 60
+RETRY_SECONDS = 30 * 60  # een mislukte build (bijvoorbeeld npm even onbereikbaar) daarna opnieuw proberen
+HOMELAB = "homelab"
+
+
+def load_config():
+    conf = {}
+    for line in (ROOT / "config" / "deploy.conf").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            conf[key.strip()] = os.environ.get(key.strip(), value.strip().strip('"'))
+    conf["SYSTEMCTL"] = os.environ.get("SYSTEMCTL", "systemctl")
+    return conf
+
+
+CONF = load_config()
+DEPLOY_ROOT = Path(CONF["DEPLOY_ROOT"])
+REPOS, RELEASES, STATE = DEPLOY_ROOT / "repos", DEPLOY_ROOT / "releases", DEPLOY_ROOT / "state"
+
+
+class StepError(Exception):
+    pass
+
+
+class NotInstalled(StepError):
+    pass
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def log(name, message):
+    print(f"{name}: {message}", flush=True)
+
+
+def run(cmd, cwd=None, timeout=300):
+    """Draai een commando; bij een fout een StepError met de laatste regels uitvoer."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except subprocess.TimeoutExpired:
+        raise StepError(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''}: na {timeout} s afgebroken")
+    if p.returncode != 0:
+        tail = " | ".join((p.stderr or p.stdout).strip().splitlines()[-3:])
+        raise StepError(f"{' '.join(cmd[:3])} gaf exit {p.returncode}: {tail}")
+    return p.stdout
+
+
+def git(*args, cwd=None, timeout=120):
+    # Het token komt alleen uit het bestand, op het moment dat git erom vraagt; het staat nergens in een URL of log.
+    helper = ('!f() { test "$1" = get && echo username=x-access-token && '
+              f'echo "password=$(cat {CONF["TOKEN_FILE"]})"; }}; f')
+    return run(["git", "-c", "credential.helper=", "-c", f"credential.helper={helper}", *args],
+               cwd=cwd, timeout=timeout)
+
+
+def remote_url(repo):
+    return repo if "://" in repo or repo.startswith("/") else f"https://github.com/{repo}.git"
+
+
+# --- Status per repo
+
+def read_state(name):
+    try:
+        return json.loads((STATE / f"{name}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(name, state):
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / f".{name}.json.tmp"
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(STATE / f"{name}.json")
+
+
+# --- Sync
+
+def sync_clone(name, repo):
+    """Zet de deploy-clone precies op origin/main en geef de commit terug."""
+    clone, url = REPOS / name, remote_url(repo)
+    if not (clone / ".git").is_dir():
+        shutil.rmtree(clone, ignore_errors=True)
+        REPOS.mkdir(parents=True, exist_ok=True)
+        git("clone", "--quiet", "--branch", "main", "--single-branch", url, str(clone), timeout=600)
+        log(name, "gekloond")
+    remote = git("ls-remote", url, "refs/heads/main").split()
+    if not remote:
+        raise StepError("de remote heeft geen branch main")
+    local = git("rev-parse", "HEAD", cwd=clone).strip()
+    if local != remote[0]:
+        git("fetch", "--quiet", "origin", "main", cwd=clone, timeout=600)
+        git("reset", "--quiet", "--hard", "origin/main", cwd=clone)
+        log(name, f"{local[:7]} -> {remote[0][:7]}")
+    if git("status", "--porcelain", "--ignored", cwd=clone).strip():
+        # Niemand wijzigt een deploy-clone; staat er toch iets, dan gaat het weg.
+        git("reset", "--quiet", "--hard", "origin/main", cwd=clone)
+        git("clean", "-ffdxq", cwd=clone)
+        log(name, "lokale wijzigingen in de deploy-clone weggehaald")
+    return git("rev-parse", "HEAD", cwd=clone).strip()
+
+
+def load_list():
+    """De repo-lijst uit de deploy-clone van de homelab-repo: [(naam, repo, soort)]."""
+    entries, seen = [], set()
+    path = REPOS / HOMELAB / "config" / "repos.conf"
+    for n, line in enumerate(path.read_text().splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 3 or not NAME_RE.match(parts[0]) or parts[2] not in KINDS or parts[0] in seen:
+            print(f"repos.conf regel {n} overgeslagen: {line!r}", file=sys.stderr)
+            continue
+        seen.add(parts[0])
+        entries.append(tuple(parts))
+    if HOMELAB not in seen:
+        entries.insert(0, (HOMELAB, CONF["HOMELAB_REPO"], "sync"))
+    return entries
+
+
+# --- Deploy
+
+def compose_file(release):
+    for f in COMPOSE_FILES:
+        if (release / f).is_file():
+            return release / f
+    raise StepError(f"geen compose-bestand ({', '.join(COMPOSE_FILES)})")
+
+
+def compose(name, release, *args, timeout=600):
+    return run(["docker", "compose", "-p", name, "-f", str(compose_file(release)), *args],
+               cwd=release, timeout=timeout)
+
+
+def unit(name):
+    return f"homelab-app-{name}.service"
+
+
+def unit_state(name):
+    out = run([CONF["SYSTEMCTL"], "show", unit(name), "-p", "LoadState", "-p", "ActiveState", "-p", "NRestarts"])
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def make_release(name, sha):
+    """Een kopie van de commit (git archive) in releases/<naam>/<sha>; een al gebouwde release blijft staan."""
+    release = RELEASES / name / sha
+    if (release / ".homelab-built").exists():
+        return release, True
+    shutil.rmtree(release, ignore_errors=True)
+    release.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(dir=release.parent, prefix=f".{sha[:7]}-"))
+    archive = subprocess.Popen(["git", "archive", "--format=tar", sha], cwd=REPOS / name, stdout=subprocess.PIPE)
+    untar = subprocess.run(["tar", "-x", "-C", str(tmp)], stdin=archive.stdout, capture_output=True, text=True)
+    archive.stdout.close()
+    if archive.wait() != 0 or untar.returncode != 0:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise StepError(f"git archive {sha[:7]} mislukt: {untar.stderr.strip()}")
+    tmp.chmod(0o755)  # mkdtemp maakt 0700; een service draait mogelijk onder een ander account
+    tmp.rename(release)
+    return release, False
+
+
+def build(name, kind, release):
+    if kind == "compose":
+        compose(name, release, "build", timeout=BUILD_TIMEOUT)
+    elif (release / "package.json").is_file():
+        run(["npm", "ci", "--no-audit", "--no-fund"], cwd=release, timeout=BUILD_TIMEOUT)
+        run(["npm", "run", "build", "--if-present"], cwd=release, timeout=BUILD_TIMEOUT)
+    (release / ".homelab-built").touch()
+
+
+def point_current(name, sha):
+    link, tmp = RELEASES / name / "current", RELEASES / name / ".current.tmp"
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(sha)
+    tmp.replace(link)  # atomisch: de dienst ziet altijd een hele release
+
+
+def start(name, kind, release):
+    """Start de release; een StepError als hij niet goed opkomt."""
+    if kind == "compose":
+        compose(name, release, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "120")
+        return
+    if unit_state(name).get("LoadState") != "loaded":
+        raise NotInstalled(f"{unit(name)} is niet geïnstalleerd: zet deploy/{name}.service in de homelab-repo "
+                        "en draai scripts/18-projects.sh")
+    run([CONF["SYSTEMCTL"], "restart", unit(name)])
+    restarts = unit_state(name).get("NRestarts")
+    time.sleep(int(CONF["SERVICE_SETTLE_SECONDS"]))
+    after = unit_state(name)
+    if after.get("ActiveState") != "active" or after.get("NRestarts") != restarts:
+        raise StepError(f"{unit(name)} bleef niet draaien ({after.get('ActiveState')}); "
+                        f"zie journalctl -u {unit(name)}")
+
+
+def subject(name, sha):
+    try:
+        return git("log", "-1", "--format=%s", sha, cwd=REPOS / name).strip()
+    except StepError:
+        return ""
+
+
+def deploy(name, kind, sha, state):
+    previous = state.get("deployed_sha")
+    log(name, f"deploy {sha[:7]} (nu {previous[:7] if previous else 'niets'})")
+    result = {"at": now(), "sha": sha, "ok": False, "message": ""}
+    try:
+        release, built = make_release(name, sha)
+        if not built:
+            build(name, kind, release)
+    except StepError as e:
+        # De build faalde: er is niets omgezet, de vorige versie draait gewoon door.
+        result.update(message=f"build mislukt: {e}", retry=True)
+        log(name, result["message"])
+        state["last_deploy"] = result
+        return state
+    point_current(name, sha)
+    try:
+        start(name, kind, release)
+    except StepError as e:
+        result.update(message=f"start mislukt: {e}", retry=isinstance(e, NotInstalled))
+        log(name, result["message"])
+        if previous and (RELEASES / name / previous).is_dir():
+            point_current(name, previous)
+            try:
+                if kind == "compose":
+                    compose(name, RELEASES / name / previous, "up", "-d", "--remove-orphans", "--build")
+                else:
+                    run([CONF["SYSTEMCTL"], "restart", unit(name)])
+                result["message"] += f"; terug naar {previous[:7]}"
+            except StepError as e2:
+                result["message"] += f"; terugzetten naar {previous[:7]} mislukte ook: {e2}"
+        state["last_deploy"] = result
+        return state
+    result.update(ok=True, message="gedeployd")
+    state.update(deployed_sha=sha, deployed_subject=subject(name, sha), previous_sha=previous, last_deploy=result)
+    prune(name, keep={sha, previous})
+    log(name, f"{sha[:7]} draait")
+    return state
+
+
+def prune(name, keep):
+    for d in (RELEASES / name).iterdir():
+        if d.is_dir() and not d.is_symlink() and d.name not in keep:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def remove(name, state):
+    """Een repo is uit de lijst: dienst stoppen, clone en releases weg. Volumes van compose blijven."""
+    log(name, "niet meer in de lijst: stoppen en opruimen")
+    current = RELEASES / name / "current"
+    try:
+        if state.get("kind") == "compose" and current.exists():
+            compose(name, current.resolve(), "down", "--remove-orphans")
+        elif state.get("kind") == "service":
+            run([CONF["SYSTEMCTL"], "stop", unit(name)])
+    except StepError as e:
+        log(name, f"stoppen mislukt: {e}")
+        return  # volgende ronde opnieuw proberen
+    shutil.rmtree(REPOS / name, ignore_errors=True)
+    shutil.rmtree(RELEASES / name, ignore_errors=True)
+    (STATE / f"{name}.json").unlink(missing_ok=True)
+
+
+def ensure_running(entries):
+    """Na een (re)boot: compose-repo's opnieuw starten vanuit hun huidige release, zonder build."""
+    for name, _, kind in entries:
+        current = RELEASES / name / "current"
+        if kind == "compose" and current.exists():
+            try:
+                compose(name, current.resolve(), "up", "-d", "--remove-orphans", "--no-build")
+            except StepError as e:
+                log(name, f"opnieuw starten mislukt: {e}")
+
+
+def cycle():
+    """Eén ronde: alles syncen, dan hoogstens één deploy (zodat syncs niet lang op een build wachten)."""
+    states = {}
+    try:
+        sha = sync_clone(HOMELAB, CONF["HOMELAB_REPO"])
+        entries = load_list()
+    except (StepError, OSError) as e:
+        log(HOMELAB, f"sync mislukt: {e}")
+        if not (REPOS / HOMELAB / "config" / "repos.conf").exists():
+            return False
+        entries, sha = load_list(), None
+    for name, repo, kind in entries:
+        state = read_state(name) | {"name": name, "repo": repo, "kind": kind}
+        try:
+            state["synced_sha"] = sha if name == HOMELAB and sha else sync_clone(name, repo)
+            state["synced_at"], state["sync_error"] = now(), None
+        except StepError as e:
+            state["sync_error"] = str(e)
+            log(name, f"sync mislukt: {e}")
+        if kind == "sync" and state.get("synced_sha") and state.get("deployed_sha") != state["synced_sha"]:
+            state.update(deployed_sha=state["synced_sha"], deployed_subject=subject(name, state["synced_sha"]),
+                         last_deploy={"at": now(), "sha": state["synced_sha"], "ok": True, "message": "gesynct"})
+        write_state(name, state)
+        states[name] = state
+
+    listed = {name for name, _, _ in entries}
+    for f in STATE.glob("*.json"):
+        if f.stem not in listed and not f.stem.startswith("_"):
+            remove(f.stem, read_state(f.stem))
+
+    for name, _, kind in entries:
+        state = states[name]
+        target, last = state.get("synced_sha"), state.get("last_deploy") or {}
+        if kind == "sync" or not target or target == state.get("deployed_sha"):
+            continue
+        if last.get("sha") == target and not last.get("ok"):
+            waited = (datetime.now(timezone.utc) - datetime.fromisoformat(last["at"])).total_seconds()
+            if not last.get("retry") or waited < RETRY_SECONDS:
+                continue  # deze commit faalde al; wacht op een nieuwe push (of de herkansing)
+        write_state(name, deploy(name, kind, target, state))
+        return True  # meteen een nieuwe ronde, zodat de andere repo's eerst weer gesynct worden
+    return False
+
+
+def cmd_run(once):
+    DEPLOY_ROOT.mkdir(parents=True, exist_ok=True)
+    if not once:
+        cycle()
+        if (REPOS / HOMELAB / "config" / "repos.conf").exists():
+            ensure_running(load_list())
+    while True:
+        busy = cycle()
+        write_state("_loop", {"at": now(), "poll_seconds": int(CONF["POLL_SECONDS"])})
+        if once:
+            return
+        if not busy:
+            time.sleep(int(CONF["POLL_SECONDS"]))
+
+
+# --- Status
+
+def age(iso):
+    if not iso:
+        return "nooit"
+    s = int((datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds())
+    return f"{s} s geleden" if s < 120 else f"{s // 60} min geleden" if s < 7200 else f"{s // 3600} u geleden"
+
+
+def cmd_status():
+    bad = False
+    loop = read_state("_loop")
+    if not loop:
+        print("homelab-deploy heeft nog nooit een ronde gedraaid.")
+        bad = True
+    else:
+        stale = (datetime.now(timezone.utc) - datetime.fromisoformat(loop["at"])).total_seconds() > \
+            max(180, 5 * loop.get("poll_seconds", 20))
+        print(f"Sync-lus: laatste ronde {age(loop['at'])}" + ("  << LOOPT NIET (systemctl status homelab-deploy)" if stale else ""))
+        bad |= stale
+    print(f"\n{'repo':20} {'soort':8} {'draait':9} {'laatste sync':16} laatste deploy")
+    for f in sorted(STATE.glob("*.json")):
+        if f.stem.startswith("_"):
+            continue
+        s = read_state(f.stem)
+        last = s.get("last_deploy") or {}
+        deployed = (s.get("deployed_sha") or "-")[:7]
+        synced = "FOUT" if s.get("sync_error") else age(s.get("synced_at"))
+        if last:
+            result = ("ok" if last.get("ok") else "FOUT") + f" {last.get('sha', '')[:7]}, {age(last.get('at'))}"
+        else:
+            result = "-"
+        print(f"{f.stem:20} {s.get('kind', '?'):8} {deployed:9} {synced:16} {result}")
+        if s.get("deployed_subject"):
+            print(f"{'':20} {'':8} {s['deployed_subject'][:70]}")
+        if s.get("sync_error"):
+            print(f"{'':20} sync: {s['sync_error']}")
+            bad = True
+        if last and not last.get("ok"):
+            print(f"{'':20} {last.get('message', '')}")
+            bad = True
+    return 1 if bad else 0
+
+
+def main():
+    p = argparse.ArgumentParser(prog="homelab-deploy", description="Repo's bijhouden en deployen (F-018).")
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("status", help="per repo: commit, laatste sync en deploy")
+    r = sub.add_parser("run", help="de sync-lus (de dienst homelab-deploy)")
+    r.add_argument("--once", action="store_true", help="één ronde en stoppen")
+    args = p.parse_args()
+    if args.cmd == "run":
+        cmd_run(args.once)
+    else:
+        sys.exit(cmd_status())
+
+
+if __name__ == "__main__":
+    main()

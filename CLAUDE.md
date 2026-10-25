@@ -42,6 +42,11 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - Health check: `bin/homelab-health`, verwachte GPU in `config/health.conf` (`EXPECTED_GPU`). Draait ook
   rechtstreeks uit de repo; `scripts/13-health-check.sh` kopieert hem naar `/usr/local/lib/homelab`.
   `/home/claude` is 750, dus scripts geef je de gebruiker met hun volledige pad.
+- F-018: `bin/homelab-deploy` (sync-lus als dienst `homelab-deploy` onder `deploy`, `homelab-deploy status`),
+  lijst in `config/repos.conf`, units in `deploy/`; uitleg in `docs/projects.md`. Deploy-clones in
+  `/srv/homelab/repos`, je eigen dev-clones in `~/dev`. Testen kan met lokale bare repo's en
+  `DEPLOY_ROOT`/`HOMELAB_REPO`/`SYSTEMCTL`/`TOKEN_FILE` (zie de docstring); `DOCKER_HOST` voor je eigen Docker.
+  Het journal van systeemdiensten kun je niet lezen (geen groep `adm`): kijk in `/srv/homelab/state/`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
   eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -53,9 +58,10 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 1. F-017: de gebruiker draait `scripts/17-llm.sh` opnieuw (model `llama3.1:8b`) en test `llm` vanaf Windows.
    Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker); de brief eist 100% GPU
    voor de desktop.
-2. F-018: gemerged; `18-projects.sh` zette een kapot token neer (opgelost in PR #2). `18-claude.sh` is gedraaid
-   (rootless Docker van claude werkt); de compose-deploy is getest met lokale repo's. Nog: het token herstellen,
-   dan de dashboard-deploy, het koppelen en de LAN-test door de gebruiker.
+2. F-018 staat (2026-10-25): `homelab-deploy` synct `homelab` en `claude-dashboard`; de dashboard draait als
+   `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
+   `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker. Nog door de gebruiker: apparaat koppelen,
+   LAN-test van 8101, Remote-SSH, reboot en stroom eruit.
 3. Daarna de ROADMAP-volgorde: F-019, F-020, ...
 
 Open vragen die je niet zelf beslist:

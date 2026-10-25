@@ -219,7 +219,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `sudo bash /home/claude/homelab/scripts/18-projects.sh` (vraagt om het token; controleert dat het niet kan pushen).
   - [ ] Als `claude`: `bash /home/claude/homelab/scripts/18-claude.sh` (rootless Docker en de pre-push-hook).
   - [ ] `homelab-deploy status`: `homelab` en `claude-dashboard` staan er, de dashboard draait.
-  - [ ] Dashboard koppelen: `ssh -L 4777:127.0.0.1:8101 homelab`, `https://localhost:4777`, apparaat aanmaken;
+  - [ ] Dashboard koppelen: `ssh -N -L 18101:127.0.0.1:8101 homelab`, `https://localhost:18101`, apparaat aanmaken;
         daarna `https://homelab:8101` op de telefoon.
   - [ ] Vanaf Windows met Tailscale **uit**: `Test-NetConnection <lan-ip> -Port 8101` is `False`.
   - [ ] VS Code Remote-SSH naar `homelab`, een repo clonen in `~/dev` en `npm ci && npm test` draaien.

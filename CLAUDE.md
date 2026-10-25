@@ -53,8 +53,9 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 1. F-017: de gebruiker draait `scripts/17-llm.sh` opnieuw (model `llama3.1:8b`) en test `llm` vanaf Windows.
    Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker); de brief eist 100% GPU
    voor de desktop.
-2. F-018 (branch `f-018-projects`): na de merge draait de gebruiker `scripts/18-projects.sh`, daarna draai jij
-   `scripts/18-claude.sh`. Nog te testen zodra Docker er is: een compose-repo deployen (en een mislukte start).
+2. F-018: gemerged; `18-projects.sh` zette een kapot token neer (opgelost in PR #2). `18-claude.sh` is gedraaid
+   (rootless Docker van claude werkt); de compose-deploy is getest met lokale repo's. Nog: het token herstellen,
+   dan de dashboard-deploy, het koppelen en de LAN-test door de gebruiker.
 3. Daarna de ROADMAP-volgorde: F-019, F-020, ...
 
 Open vragen die je niet zelf beslist:

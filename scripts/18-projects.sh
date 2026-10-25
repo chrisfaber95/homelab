@@ -74,17 +74,27 @@ as_deploy docker info --format '{{.SecurityOptions}}' | grep -q rootless
 
 echo "== Read-only GitHub-token voor deploy ($TOKEN_FILE)"
 install -d -m 755 "$(dirname "$TOKEN_FILE")"
-if [[ ! -s "$TOKEN_FILE" ]]; then
+helper='!f() { test "$1" = get && echo username=x-access-token && echo "password=$(cat '"$TOKEN_FILE"')"; }; f'
+token_works() {
+  [[ -s "$TOKEN_FILE" ]] && as_deploy git -c credential.helper= -c "credential.helper=$helper" \
+    ls-remote "https://github.com/$HOMELAB_REPO.git" refs/heads/main >/dev/null 2>&1
+}
+# Een bestaand token wordt getest; werkt het niet (verlopen, of verkeerd geplakt), dan vraagt het script opnieuw.
+for attempt in 1 2 3; do
+  if [[ -e "$TOKEN_FILE" ]]; then chown deploy:deploy "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"; fi
+  if token_works; then echo "Het token kan $HOMELAB_REPO lezen."; break; fi
+  if (( attempt == 3 )); then echo "Het token werkt na drie pogingen niet." >&2; exit 1; fi
+  [[ -s "$TOKEN_FILE" ]] && echo "Het token in $TOKEN_FILE kan $HOMELAB_REPO niet lezen."
   echo "Maak op GitHub een fine-grained token (Settings > Developer settings > Fine-grained tokens):"
   echo "  Repository access: All repositories; Permissions: Contents = Read-only (Metadata wordt vanzelf Read-only)."
   read -r -s -p "Plak het token (je ziet het niet) en druk op Enter: " token </dev/tty
   echo
-  [[ -n "$token" ]] || { echo "Geen token." >&2; exit 1; }
+  token=$(tr -d '[:space:]' <<<"$token")
+  echo "Ontvangen: ${#token} tekens, begint met '${token:0:11}'."
+  [[ $token == github_pat_* ]] || echo "Dat lijkt geen fine-grained token (die beginnen met github_pat_)."
   (umask 077 && printf '%s\n' "$token" > "$TOKEN_FILE")
   unset token
-fi
-chown deploy:deploy "$TOKEN_FILE"
-chmod 600 "$TOKEN_FILE"
+done
 
 echo "== homelab-deploy installeren"
 install -d -m 755 "$DEST/bin" "$DEST/config"
@@ -158,7 +168,6 @@ ufw status | grep -E '^8100:8199/tcp on tailscale0 +ALLOW'
 for _ in $(seq 60); do [[ -d "$DEPLOY_ROOT/repos/homelab/.git" ]] && break; sleep 2; done
 [[ -d "$DEPLOY_ROOT/repos/homelab/.git" ]] || { echo "De homelab-repo is niet gekloond: journalctl -u homelab-deploy" >&2; exit 1; }
 # Het token mag niet kunnen pushen: GitHub moet de push-handshake weigeren.
-helper='!f() { test "$1" = get && echo username=x-access-token && echo "password=$(cat '"$TOKEN_FILE"')"; }; f'
 if out=$(cd "$DEPLOY_ROOT/repos/homelab" && sudo -u deploy git -c credential.helper= -c "credential.helper=$helper" \
          push --dry-run "https://github.com/$HOMELAB_REPO.git" HEAD:refs/heads/homelab-push-test 2>&1); then
   echo "Het token kan pushen; maak een token met Contents = Read-only." >&2

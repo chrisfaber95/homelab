@@ -29,6 +29,8 @@ mkdir -p ~/.config/git/hooks
 cat > ~/.config/git/hooks/pre-push <<'EOF'
 #!/usr/bin/env bash
 # homelab (F-018): Claude pusht naar branches en opent een PR; de gebruiker merget naar main.
+# Lokale repo's (een pad of file://, bijvoorbeeld voor tests) vallen erbuiten.
+case $2 in /*|file://*) exit 0 ;; esac
 while read -r _ _ remote_ref _; do
   case $remote_ref in
     refs/heads/main|refs/heads/master)

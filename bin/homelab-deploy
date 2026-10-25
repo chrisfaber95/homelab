@@ -161,8 +161,11 @@ def compose_file(release):
 
 
 def compose(name, release, *args, timeout=600):
-    return run(["docker", "compose", "-p", name, "-f", str(compose_file(release)), *args],
-               cwd=release, timeout=timeout)
+    try:
+        return run(["docker", "compose", "-p", name, "-f", str(compose_file(release)), *args],
+                   cwd=release, timeout=timeout)
+    except StepError as e:
+        raise StepError(f"compose {args[0]}: {str(e).split(': ', 1)[-1]}")
 
 
 def unit(name):
@@ -268,6 +271,11 @@ def deploy(name, kind, sha, state):
     result.update(ok=True, message="gedeployd")
     state.update(deployed_sha=sha, deployed_subject=subject(name, sha), previous_sha=previous, last_deploy=result)
     prune(name, keep={sha, previous})
+    if kind == "compose":
+        try:
+            run(["docker", "image", "prune", "-f"])  # images van oude builds die nergens meer bij horen
+        except StepError as e:
+            log(name, f"oude images opruimen mislukt: {e}")
     log(name, f"{sha[:7]} draait")
     return state
 
@@ -279,12 +287,12 @@ def prune(name, keep):
 
 
 def remove(name, state):
-    """Een repo is uit de lijst: dienst stoppen, clone en releases weg. Volumes van compose blijven."""
+    """Een repo is uit de lijst: dienst stoppen, clone, releases en images weg. Volumes van compose blijven."""
     log(name, "niet meer in de lijst: stoppen en opruimen")
     current = RELEASES / name / "current"
     try:
         if state.get("kind") == "compose" and current.exists():
-            compose(name, current.resolve(), "down", "--remove-orphans")
+            compose(name, current.resolve(), "down", "--remove-orphans", "--rmi", "local")
         elif state.get("kind") == "service":
             run([CONF["SYSTEMCTL"], "stop", unit(name)])
     except StepError as e:

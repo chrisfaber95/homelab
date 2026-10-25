@@ -61,6 +61,8 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; pagina op poort 8104), `bin/homelab-backup`
   (timer 03:30), extra checks in `bin/homelab-health` (llm, deploy, `svc:<naam>`, backup); instellingen in
   `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.
+- F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105) en
+  `bin/homelab-inbox-task` (draait als `inbox`, via één sudo-regel); uitleg in `docs/inbox.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
   eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -81,12 +83,17 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
    daarna weggehaald). Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/
    `SOCKET`/`SNAP_PATHS` en `NO_FETCH=1` (zie de docstring). Let op: `ufw` ziet een regel die alleen in
    allow/deny verschilt als dezelfde en slaat hem over; controleer in `apply.sh` altijd of de wijziging er staat.
-4. F-020 (branch `f-020-monitor`): na de merge draait de gebruiker `scripts/20-monitor.sh`. Backups voorlopig op de
-   SSD (`/var/backups/homelab`; keuze van de gebruiker); de offline-melding (heartbeat) en een herstel-oefening
-   later of niet (keuze van de gebruiker). Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/
+4. F-020 staat (2026-10-25): monitor, overzicht (poort 8104) en backups draaien; test "dienst gestopt → melding,
+   weer aan → melding" geslaagd. Later (keuze van de gebruiker): de offline-melding (heartbeat) en de backups naar
+   de USB-HDD; geen herstel-oefening. Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/
    `HEALTH_CMD`/`NTFY_FAKE=1`; `homelab-backup` met `BACKUP_LIST`/`BACKUP_DIR`/`BACKUP_STATUS`/`RESTORE_ROOT`/
    `NO_SERVICES=1`.
-5. Daarna de ROADMAP-volgorde: F-021, F-022, ...
+5. F-021 (branch `f-021-inbox`): na de merge draait de gebruiker `scripts/21-inbox.sh` (met twee tokens). Taken
+   draaien in auto mode, nooit `bypassPermissions` (keuze van de gebruiker, na een weigering door de veiligheidscheck).
+   `--max-turns` van `claude -p` werkt niet; de inbox telt de beurten zelf in de stream-json. Testen zonder root:
+   `INBOX_FAKE_GITHUB=1`, `TASK_CMD`, `INBOX_RUNNER_HOME`/`INBOX_TASK_HOME`, `REPOS_CONF`, `REMOTE_<NAAM>`,
+   `INBOX_ALLOW_ALL=1` (zie de docstring).
+6. Daarna de ROADMAP-volgorde: F-022, F-023, F-024.
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.

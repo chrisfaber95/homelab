@@ -241,6 +241,12 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         een melding, en na `start` een melding "weer in orde".
   - [ ] Later: de offline-melding (healthchecks.io, `/etc/homelab/heartbeat-url`) en de backups naar de USB-HDD.
 
+- [ ] F-021 (task inbox): zie `docs/inbox.md`.
+  - [ ] `claude setup-token` (op Windows of als `claude` op de box) voor een token van Claude Code.
+  - [ ] Op GitHub een fine-grained token voor de inbox: All repositories, Contents en Pull requests: Read and write.
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (vraagt om beide tokens).
+  - [ ] `http://homelab.tail4eb878.ts.net:8105` op de telefoon: een vraag-taak geeft een antwoord, een code-taak een PR.
+
 ## 14. Verhuizen naar de desktop **(desktop)**
 
 - [ ] Nieuwe PSU erin. BIOS/UEFI van de desktop:

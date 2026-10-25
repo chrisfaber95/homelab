@@ -728,8 +728,9 @@ def handle(conn):
                 raise Refused("ongeldig verzoek")
             cmd = req.get("cmd")
             if cmd == "instant":
-                if user != "claude" and not admin:
-                    raise Refused("alleen claude en beheerders")
+                # inbox: de taken van de homelab-inbox (F-021) volgen dezelfde lijst als Claude.
+                if user not in ("claude", "inbox") and not admin:
+                    raise Refused("alleen claude, inbox en beheerders")
                 ok, text, _ = instant(req, user)
                 reply = {"ok": ok, "text": text}
             elif cmd == "confirm":

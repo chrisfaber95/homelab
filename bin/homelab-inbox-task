@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# homelab: de kant van de task inbox die als `inbox` draait (F-021). Alleen aangeroepen door homelab-inbox, via
+#   sudo -u inbox homelab-inbox-task <actie> ...
+# (één vaste regel in /etc/sudoers.d/homelab-inbox). `inbox` heeft geen GitHub-toegang en kan niet bij /home/claude.
+#   prepare <id> <repo-map>      werkkopie in TASK_HOME/work/<id> (clone van de kopie van de dienst), branch inbox/<id>
+#   run <id> <sessie> <new|resume>  Claude in auto mode, prompt uit RUNNER_HOME/share/<id>/prompt.txt, stream-json op stdout
+#   bundle <id>                  de nieuwe commits van inbox/<id> als bundle in TASK_HOME/out/<id>.bundle (exit 3: geen)
+#   kill <id>                    de lopende Claude van deze taak stoppen
+#   cleanup <id>                 werkkopie en bundle weg
+set -euo pipefail
+
+ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")"
+# shellcheck source=../config/inbox.conf
+source "$ROOT/config/inbox.conf"
+TASK_HOME="${INBOX_TASK_HOME:-$TASK_HOME}"
+RUNNER_HOME="${INBOX_RUNNER_HOME:-$RUNNER_HOME}"
+TOKEN_FILE="${INBOX_CLAUDE_TOKEN:-/etc/homelab/inbox-claude-token}"
+
+action=${1:-}
+id=${2:-}
+[[ $id =~ ^[0-9]{1,6}$ ]] || { echo "ongeldig taaknummer" >&2; exit 2; }
+work="$TASK_HOME/work/$id"
+umask 027
+# sudo zet PATH en HOME op standaardwaarden; Claude Code van inbox staat in ~/.local/bin.
+export HOME="$TASK_HOME" PATH="$TASK_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+if [[ -n ${INBOX_TASK_HOME:-} ]]; then  # tests als claude (export klapt $HOME uit vóór de toewijzing: twee stappen)
+  export HOME=~claude
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+case $action in
+  prepare)
+    name=${3:-}
+    [[ $name =~ ^[a-z0-9][a-z0-9-]*$ && -d "$RUNNER_HOME/repos/$name/.git" ]] || { echo "onbekende repo" >&2; exit 2; }
+    rm -rf "$work"
+    mkdir -p "$work"
+    # De bron is van inbox-runner; git weigert een repo van een ander account, behalve voor deze ene clone.
+    git -c safe.directory='*' clone --quiet --no-hardlinks "$RUNNER_HOME/repos/$name" "$work/repo"
+    cd "$work/repo"
+    git checkout --quiet -b "inbox/$id" origin/main
+    git config user.name "Claude (homelab-inbox)"
+    git config user.email "noreply@anthropic.com"
+    git rev-parse HEAD > "$work/base"
+    ;;
+  run)
+    sid=${3:-}; mode=${4:-}
+    [[ $sid =~ ^[0-9a-f-]{36}$ && $mode =~ ^(new|resume)$ ]] || { echo "ongeldige sessie" >&2; exit 2; }
+    [[ -d "$work/repo" ]] || { echo "geen werkkopie" >&2; exit 2; }
+    prompt="$RUNNER_HOME/share/$id/prompt.txt"
+    system="$RUNNER_HOME/share/$id/system.txt"
+    cd "$work/repo"
+    if [[ -r "$TOKEN_FILE" ]]; then
+      CLAUDE_CODE_OAUTH_TOKEN=$(cat "$TOKEN_FILE")
+      export CLAUDE_CODE_OAUTH_TOKEN
+    fi
+    if [[ $mode == new ]]; then session=(--session-id "$sid"); else session=(--resume "$sid"); fi
+    echo $$ > "$work/pid"
+    # auto mode: de veiligheidscheck van Claude Code beoordeelt elke actie; nooit bypassPermissions.
+    exec claude -p "$(cat "$prompt")" --append-system-prompt "$(cat "$system")" "${session[@]}" \
+      --permission-mode auto --output-format stream-json --verbose
+    ;;
+  bundle)
+    cd "$work/repo"
+    base=$(cat "$work/base")
+    mkdir -p "$TASK_HOME/out"
+    rm -f "$TASK_HOME/out/$id.bundle"
+    count=$(git rev-list --count "$base..inbox/$id")
+    (( count > 0 )) || exit 3
+    git bundle create --quiet "$TASK_HOME/out/$id.bundle" "inbox/$id" "^$base"
+    chmod 640 "$TASK_HOME/out/$id.bundle"
+    git log --format='%h %s' "$base..inbox/$id"
+    ;;
+  kill)
+    if [[ -f "$work/pid" ]]; then
+      pid=$(cat "$work/pid")
+      # Claude en alles wat hij startte (zelfde procesgroep niet gegarandeerd: eerst de kinderen, dan hem).
+      pkill -TERM -P "$pid" 2>/dev/null || true
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 3
+      pkill -KILL -P "$pid" 2>/dev/null || true
+      kill -KILL "$pid" 2>/dev/null || true
+      rm -f "$work/pid"
+    fi
+    ;;
+  cleanup)
+    rm -rf "$work" "$TASK_HOME/out/$id.bundle"
+    ;;
+  *)
+    echo "onbekende actie" >&2; exit 2 ;;
+esac

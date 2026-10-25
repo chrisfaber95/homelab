@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""llm: summarize- en extract-jobs op de homelab (F-017). Werkt op de box en op Windows (alleen stdlib).
+
+  llm summarize [bestand ...]            samenvatting van stdin of de bestanden
+  llm extract --fields naam,bedrag:number [--labels bug,vraag] [bestand ...]
+                                         JSON met precies die velden
+  llm usage [--days 7]                   gebruik per caller en per job
+
+Omgeving: LLM_URL (standaard http://homelab:8017), LLM_CALLER (standaard unknown).
+Exit 0 bij succes, 1 bij een fout van de job, 2 bij een verkeerde aanroep, 3 als de homelab onbereikbaar is,
+4 bij een timeout.
+"""
+import argparse
+import http.client
+import json
+import os
+import socket
+import sys
+import urllib.parse
+
+CONNECT_TIMEOUT = 5
+EXIT_JOB, EXIT_USAGE, EXIT_UNREACHABLE, EXIT_TIMEOUT = 1, 2, 3, 4
+
+
+def fail(code, message):
+    print(f"llm: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def call(url, method, path, body=None, caller="unknown", timeout=60):
+    u = urllib.parse.urlsplit(url)
+    conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(u.hostname, u.port, timeout=CONNECT_TIMEOUT)
+    try:
+        conn.connect()
+    except (OSError, socket.timeout) as e:
+        fail(EXIT_UNREACHABLE, f"de homelab is onbereikbaar ({u.netloc}): {e}")
+    # De server bewaakt de job-timeout zelf; wij wachten iets langer, zodat zijn melding nog binnenkomt.
+    conn.sock.settimeout(timeout + 10)
+    headers = {"X-LLM-Caller": caller}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    try:
+        conn.request(method, path, body=data, headers=headers)
+        resp = conn.getresponse()
+        raw = resp.read()
+    except (socket.timeout, TimeoutError):
+        fail(EXIT_TIMEOUT, f"geen antwoord binnen {timeout + 10:.0f} s (timeout)")
+    except OSError as e:
+        fail(EXIT_UNREACHABLE, f"de verbinding met de homelab viel weg: {e}")
+    try:
+        result = json.loads(raw)
+    except ValueError:
+        fail(EXIT_JOB, f"onverwacht antwoord van de homelab (HTTP {resp.status})")
+    if resp.status != 200:
+        err = result.get("error") if isinstance(result, dict) else None
+        message = err.get("message") if isinstance(err, dict) else err or f"HTTP {resp.status}"
+        code = err.get("code") if isinstance(err, dict) else None
+        fail({"timeout": EXIT_TIMEOUT, "bad_request": EXIT_USAGE}.get(code, EXIT_JOB), message)
+    return result
+
+
+def read_text(files):
+    if not files:
+        if sys.stdin.isatty():
+            fail(EXIT_USAGE, "geen tekst: geef een bestand op of stuur tekst via stdin")
+        return sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    parts = []
+    for name in files:
+        try:
+            with open(name, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+        except OSError as e:
+            fail(EXIT_USAGE, f"{name}: {e.strerror}")
+    return "\n\n".join(parts)
+
+
+def parse_fields(spec):
+    fields = []
+    for item in filter(None, (s.strip() for s in spec.split(","))):
+        name, _, typ = item.partition(":")
+        fields.append({"name": name, "type": typ or "string"})
+    return fields
+
+
+def main():
+    p = argparse.ArgumentParser(prog="llm", description="Jobs op het lokale model van de homelab.")
+    p.add_argument("--url", default=os.environ.get("LLM_URL", "http://homelab:8017"),
+                   help="adres van de helper (LLM_URL, standaard http://homelab:8017)")
+    p.add_argument("--caller", default=os.environ.get("LLM_CALLER", "unknown"),
+                   help="naam in het usage-log (LLM_CALLER, standaard unknown)")
+    p.add_argument("--timeout", type=float, default=60, help="seconden voor de job (standaard 60)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("summarize", help="vat tekst samen")
+    s.add_argument("--instructions", help="extra instructie, bijvoorbeeld 'in drie bullets'")
+    s.add_argument("files", nargs="*")
+
+    e = sub.add_parser("extract", help="haal velden of een label uit tekst, als JSON")
+    e.add_argument("--fields", default="", help="naam,datum,bedrag:number (types: string, number, integer, boolean)")
+    e.add_argument("--labels", default="", help="toegestane labels; het antwoord krijgt een veld 'label'")
+    e.add_argument("--instructions", help="extra instructie voor het model")
+    e.add_argument("files", nargs="*")
+
+    u = sub.add_parser("usage", help="gebruik per caller en per job")
+    u.add_argument("--days", type=int, default=7)
+
+    args = p.parse_args()
+    sys.stdout.reconfigure(errors="replace")  # een Windows-console zonder UTF-8 mag niet op een teken crashen
+
+    if args.cmd == "usage":
+        r = call(args.url, "GET", f"/usage?days={args.days}", caller=args.caller, timeout=15)
+        print(f"Laatste {r['days']} dagen: {r['total']['count']} calls, gemiddeld {r['total']['avg_seconds']} s, "
+              f"{r['total']['failures']} mislukt.")
+        if r["min_gpu_pct"]:
+            print("Laagste deel op de GPU (100% hoort): " +
+                  ", ".join(f"{m} {pct}%" for m, pct in r["min_gpu_pct"].items()))
+        for group, title in (("caller", "Per caller"), ("job", "Per job")):
+            print(f"\n{title}:")
+            print(f"  {'':24} {'calls':>6} {'gem. s':>7} {'mislukt':>8}")
+            for row in r["by_" + group]:
+                print(f"  {row[group]:24} {row['count']:>6} {row['avg_seconds']:>7} {row['failures']:>8}")
+        return
+
+    text = read_text(args.files)
+    if not text.strip():
+        fail(EXIT_USAGE, "de tekst is leeg")
+    messages = [{"role": "user", "content": text}]
+    if args.instructions:
+        messages.insert(0, {"role": "system", "content": args.instructions})
+    body = {"model": args.cmd, "messages": messages, "timeout": args.timeout}
+    if args.cmd == "extract":
+        body["fields"] = parse_fields(args.fields)
+        body["labels"] = [x.strip() for x in args.labels.split(",") if x.strip()]
+        if not body["fields"] and not body["labels"]:
+            fail(EXIT_USAGE, "extract heeft --fields en/of --labels nodig")
+    r = call(args.url, "POST", "/v1/chat/completions", body, caller=args.caller, timeout=args.timeout)
+    print(r["choices"][0]["message"]["content"])
+
+
+if __name__ == "__main__":
+    main()

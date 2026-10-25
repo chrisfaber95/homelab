@@ -38,14 +38,16 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - Health check: `bin/homelab-health`, verwachte GPU in `config/health.conf` (`EXPECTED_GPU`). Draait ook
   rechtstreeks uit de repo; `scripts/13-health-check.sh` kopieert hem naar `/usr/local/lib/homelab`.
   `/home/claude` is 750, dus scripts geef je de gebruiker met hun volledige pad.
+- F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
+  `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
+  eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
 
 Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 
 ## Volgende werk
 
-1. F-016: de gebruiker installeert de health check (`sudo bash /home/claude/homelab/scripts/13-health-check.sh`);
-   daarna draait `homelab-health` voor iedereen.
-2. Daarna de ROADMAP-volgorde: F-017, F-018, F-019, ...
+1. F-017: de gebruiker draait `scripts/17-llm.sh` en test `llm` vanaf Windows; op de desktop het ~8B-model kiezen.
+2. Daarna de ROADMAP-volgorde: F-018, F-019, ...
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.

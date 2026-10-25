@@ -209,7 +209,11 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       instelling (`EXPECTED_GPU` in `config/health.conf`: GTX 1050 / 2048 MiB nu, GTX 1080 / 8192 MiB na de verhuizing).
       Installeren met je eigen account: `sudo bash /home/claude/homelab/scripts/13-health-check.sh`.
       Daarna `homelab-health`: één regel per check, exit 0 als alles in orde is, 1 bij een FAIL.
-- [ ] F-017 (Ollama, `llm`): op de laptop alleen met een klein model (~1–3B, Q4) dat in 2 GB past.
+- [ ] F-017 (Ollama, `llm`): `sudo bash /home/claude/homelab/scripts/17-llm.sh`. Installeert Ollama (versie en hash
+      in `config/llm.conf`), de helper `llm-helper` op poort 8017 (ufw: alleen `tailscale0`) en het model.
+      Op de laptop `gemma3:1b` (past in 2 GB). Controle: `echo test | llm summarize` werkt, `ollama ps` toont
+      `100% GPU`, en vanaf Windows met Tailscale **uit** is `Test-NetConnection <lan-ip> -Port 8017` `False`.
+      Zie `docs/llm.md` voor `llm` op Windows.
 - [ ] F-018 (projecten, rootless Docker, Node) en F-019 (machinewijzigingen) kunnen volledig op de laptop.
 - [ ] De externe 2 TB HDD: wacht op het antwoord op de vraag van de lead in F-016.
 
@@ -226,4 +230,5 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] In `config/health.conf`: `EXPECTED_GPU="NVIDIA GeForce GTX 1080, 8192 MiB"` (commit en push), dan
       `sudo bash /home/claude/homelab/scripts/13-health-check.sh`; `homelab-health` slaagt.
 - [ ] `sudo reboot`, en daarna stekker eruit en er weer in: de box komt beide keren terug en de health check slaagt.
-- [ ] F-017: het ~8B-model laden en met `ollama ps` controleren dat het voor 100% op de GPU draait.
+- [ ] F-017: in `config/llm.conf` een ~8B-model op Q4 en `LLM_NUM_CTX=8192` (commit en push), dan
+      `sudo bash /home/claude/homelab/scripts/17-llm.sh`; `ollama ps` en `llm usage` tonen 100% GPU.

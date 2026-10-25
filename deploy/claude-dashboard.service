@@ -1,0 +1,25 @@
+# homelab: claude-dashboard (F-018). Draait als claude, zodat hij Claudes sessies op de box ziet en kan starten.
+# De code komt uit de release die homelab-deploy bouwt; claude kan die niet wijzigen.
+# LAN-modus van de dashboard: HTTPS met login. Op alle adressen, zodat loopback (de vrijstelling "this PC", nodig om
+# apparaten te koppelen) werkt via een SSH-tunnel; ufw laat 8101 alleen via tailscale0 toe.
+[Unit]
+Description=claude-dashboard (homelab, F-018)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=claude
+WorkingDirectory=/srv/homelab/releases/claude-dashboard/current
+Environment=DASHBOARD_HOST=0.0.0.0
+Environment=DASHBOARD_PORT=8101
+Environment=DASHBOARD_DATA_DIR=/home/claude/.local/share/claude-dashboard
+Environment=PROJECTS_ROOT=/home/claude/dev
+Environment=TEAM_HQ_DIR=/home/claude/dev/team-hq
+Environment=CLAUDE_BIN=/home/claude/.local/bin/claude
+Environment=PATH=/home/claude/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node src/server/server.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

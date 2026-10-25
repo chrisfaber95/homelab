@@ -186,7 +186,7 @@ Claude draait onder een eigen account dat niet in de `sudo`-groep zit; jouw acco
 - [ ] `ssh homelab-claude`, dan `tmux` (zodat de sessie blijft lopen als SSH wegvalt).
 - [ ] `curl -fsSL https://claude.ai/install.sh | bash`, daarna `claude` → `/login`: open de URL op de Windows-pc.
 - [ ] `gh auth login` (GitHub.com, HTTPS, login with a web browser: de code invoeren op de pc), dan `gh auth setup-git`.
-      Welke rechten Claude krijgt (alleen lezen of ook pushen) is nog een open vraag in F-018.
+      Claude pusht naar branches en opent PR's, niet naar `main` (F-018; de pre-push-hook komt in stap 13).
 - [ ] `gh repo clone <een privé-repo van jou>` werkt.
 - [ ] `git config --global user.name` / `user.email` instellen.
 
@@ -214,7 +214,16 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       Op de laptop `llama3.1:8b`, bewust grotendeels op de CPU (zie `docs/llm.md`). Controle: `echo test | llm summarize`
       werkt, en vanaf Windows met Tailscale **uit** is `Test-NetConnection <lan-ip> -Port 8017` `False`.
       Zie `docs/llm.md` voor `llm` op Windows.
-- [ ] F-018 (projecten, rootless Docker, Node) en F-019 (machinewijzigingen) kunnen volledig op de laptop.
+- [ ] F-018 (projecten, rootless Docker, Node): zie `docs/projects.md`.
+  - [ ] Op GitHub een fine-grained token: All repositories, Contents = Read-only.
+  - [ ] `sudo bash /home/claude/homelab/scripts/18-projects.sh` (vraagt om het token; controleert dat het niet kan pushen).
+  - [ ] Als `claude`: `bash /home/claude/homelab/scripts/18-claude.sh` (rootless Docker en de pre-push-hook).
+  - [ ] `homelab-deploy status`: `homelab` en `claude-dashboard` staan er, de dashboard draait.
+  - [ ] Dashboard koppelen: `ssh -L 4777:127.0.0.1:8101 homelab`, `https://localhost:4777`, apparaat aanmaken;
+        daarna `https://homelab:8101` op de telefoon.
+  - [ ] Vanaf Windows met Tailscale **uit**: `Test-NetConnection <lan-ip> -Port 8101` is `False`.
+  - [ ] VS Code Remote-SSH naar `homelab`, een repo clonen in `~/dev` en `npm ci && npm test` draaien.
+- [ ] F-019 (machinewijzigingen) kan volledig op de laptop.
 - [ ] De externe 2 TB HDD: wacht op het antwoord op de vraag van de lead in F-016.
 
 ## 14. Verhuizen naar de desktop **(desktop)**
@@ -229,6 +238,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] `sudo rm /etc/systemd/logind.conf.d/laptop-lid.conf`
 - [ ] In `config/health.conf`: `EXPECTED_GPU="NVIDIA GeForce GTX 1080, 8192 MiB"` (commit en push), dan
       `sudo bash /home/claude/homelab/scripts/13-health-check.sh`; `homelab-health` slaagt.
-- [ ] `sudo reboot`, en daarna stekker eruit en er weer in: de box komt beide keren terug en de health check slaagt.
+- [ ] `sudo reboot`, en daarna stekker eruit en er weer in: de box komt beide keren terug, de health check slaagt en
+      `homelab-deploy status` toont alle diensten draaiend.
 - [ ] F-017: in `config/llm.conf` `LLM_NUM_CTX=8192` (het model `llama3.1:8b` blijft; commit en push), dan
       `sudo bash /home/claude/homelab/scripts/17-llm.sh`; `ollama ps` en `llm usage` tonen 100% GPU.

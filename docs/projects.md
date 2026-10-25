@@ -100,10 +100,13 @@ wijzigen). Hij ziet Claudes sessies op de box en kan Claude-sessies starten in `
 **Een apparaat koppelen** kan alleen vanaf de box zelf (de vrijstelling "this PC": loopback). Vanaf Windows:
 
 ```
-ssh -L 4777:127.0.0.1:8101 homelab
+ssh -N -L 18101:127.0.0.1:8101 homelab
 ```
 
-Open dan `https://localhost:4777`: daar ben je "this PC" en maak je een apparaat aan, met een token of een QR-code voor
+Laat dat venster open (met `-N` is er geen prompt; de tunnel draait zolang het venster open is). Neem niet 4777: dat
+is de poort van de dashboard op je pc, en dan opent `ssh` de tunnel niet (alleen een regel `bind ... 4777` als
+waarschuwing). Open dan `https://localhost:18101` (https, de browser waarschuwt voor het certificaat): daar ben je
+"this PC" en maak je een apparaat aan, met een token of een QR-code voor
 je telefoon. Daarna logt dat apparaat in op `https://homelab:8101`.
 
 **Let op**: net als op de pc kan elk proces op de box via loopback een apparaat aanmaken, en dus Claude laten handelen.

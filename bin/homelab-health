@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# homelab: health check (F-016). Driver/GPU, netwerk, schijf en pending reboot.
+# homelab: health check (F-016, uitgebreid in F-020). Driver/GPU, netwerk, schijf, pending reboot; en zodra ze
+# geïnstalleerd zijn: de LLM-helper (F-017), de gedeployde diensten (F-018) en de backup (F-020).
 # Exit 0: alles in orde (WARN mag). Exit 1: minstens één FAIL. Exit 2: de check zelf kan niet draaien.
-# Draait zonder root. Instellingen: config/health.conf naast bin/.
+# Eén regel per check: <OK|WARN|FAIL> <naam> <tekst>; elke naam komt één keer voor (homelab-monitor leest dat).
+# Draait zonder root. Instellingen: config/health.conf (en llm.conf, backup.conf) naast bin/.
 set -uo pipefail
 
-CONF="$(dirname "$(dirname "$(readlink -f "$0")")")/config/health.conf"
+CONFDIR="$(dirname "$(dirname "$(readlink -f "$0")")")/config"
+CONF="$CONFDIR/health.conf"
 if [[ ! -r "$CONF" ]]; then
   echo "Kan $CONF niet lezen." >&2
   exit 2
@@ -42,12 +45,18 @@ else
 fi
 
 # Elke geïnstalleerde kernel heeft kant-en-klare NVIDIA-modules nodig, anders werkt de GPU na de volgende reboot niet.
+missing_mod=()
 for img in /boot/vmlinuz-*; do
   kver="${img#/boot/vmlinuz-}"
   if ! dpkg-query -W -f='${Status}\n' "linux-modules-nvidia-*-$kver" 2>/dev/null | grep -q 'install ok installed'; then
-    report FAIL nvidia-mod "geen linux-modules-nvidia-*-$kver voor kernel $kver"
+    missing_mod+=("$kver")
   fi
 done
+if (( ${#missing_mod[@]} )); then
+  report FAIL nvidia-mod "geen linux-modules-nvidia-* voor kernel ${missing_mod[*]}"
+else
+  report OK nvidia-mod "modules voor elke geïnstalleerde kernel"
+fi
 
 # --- Netwerk
 wired=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 ~ /^en/ {print $2" "$4; exit}')
@@ -114,6 +123,80 @@ elif [[ -n "$newest" && "$newest" != "$(uname -r)" ]]; then
   report FAIL reboot "kernel $(uname -r) draait, $newest is geïnstalleerd"
 else
   report OK reboot "geen reboot nodig (kernel $(uname -r))"
+fi
+
+# --- LLM-helper (F-017)
+if [[ -r "$CONFDIR/llm.conf" ]]; then
+  llm_port=$(sed -n 's/^LLM_PORT=//p' "$CONFDIR/llm.conf")
+  if h=$(timeout 8 curl -fsS "http://127.0.0.1:${llm_port:-8017}/health" 2>&1); then
+    report OK llm "helper antwoordt, model $(jq -r .model <<<"$h")"
+  else
+    report FAIL llm "helper antwoordt niet op poort ${llm_port:-8017}: $(jq -r '.error // empty' <<<"$h" 2>/dev/null || echo "$h")"
+  fi
+fi
+
+# --- Gedeployde diensten (F-018): de sync-lus, en per service of compose-repo of hij draait
+STATE_DIR=/srv/homelab/state
+if [[ -d $STATE_DIR ]] && command -v homelab-deploy >/dev/null; then
+  if out=$(timeout 15 homelab-deploy status 2>&1); then
+    report OK deploy "sync en laatste deploys in orde"
+  else
+    report FAIL deploy "$(grep -E 'FOUT|LOOPT|nooit|mislukt' <<<"$out" | head -3 | tr -s ' ' | paste -sd';')"
+  fi
+  for f in "$STATE_DIR"/*.json; do
+    name=$(basename "$f" .json)
+    [[ $name == _* ]] && continue
+    kind=$(jq -r .kind "$f")
+    if [[ $kind == service ]]; then
+      if systemctl is-active --quiet "homelab-app-$name.service"; then
+        report OK "svc:$name" "homelab-app-$name draait"
+      else
+        report FAIL "svc:$name" "homelab-app-$name draait niet ($(systemctl is-active "homelab-app-$name.service"))"
+      fi
+    elif [[ $kind == compose ]]; then
+      at=$(jq -r '.running_at // empty' "$f")
+      if [[ -z $at ]] || (( $(date +%s) - $(date -d "$at" +%s) > 300 )); then
+        report FAIL "svc:$name" "geen recente status van homelab-deploy"
+      elif [[ $(jq -r .running "$f") == true ]]; then
+        report OK "svc:$name" "$(jq -r .running_detail "$f")"
+      else
+        report FAIL "svc:$name" "$(jq -r .running_detail "$f")"
+      fi
+    fi
+  done
+fi
+
+# --- Backup (F-020): de laatste geslaagde backup, en ruimte op de backupschijf
+if [[ -r "$CONFDIR/backup.conf" ]]; then
+  # shellcheck source=../config/backup.conf
+  source "$CONFDIR/backup.conf"
+  if [[ ! -r "$BACKUP_STATUS" ]]; then
+    report FAIL backup "nog geen backup gemaakt ($BACKUP_STATUS ontbreekt)"
+  else
+    last_ok=$(jq -r '.last_ok // empty' "$BACKUP_STATUS")
+    if [[ -z $last_ok ]]; then
+      report FAIL backup "nog nooit gelukt: $(jq -r '.error // "onbekend"' "$BACKUP_STATUS")"
+    else
+      age_h=$(( ($(date +%s) - $(date -d "$last_ok" +%s)) / 3600 ))
+      if (( age_h >= BACKUP_MAX_AGE_HOURS )); then
+        report FAIL backup "laatste geslaagde backup is $age_h uur oud (max. $BACKUP_MAX_AGE_HOURS)"
+      elif [[ $(jq -r .ok "$BACKUP_STATUS") != true ]]; then
+        report FAIL backup "laatste run mislukt: $(jq -r '.error // "onbekend"' "$BACKUP_STATUS")"
+      else
+        report OK backup "$(jq -r .file "$BACKUP_STATUS"), $age_h uur oud"
+      fi
+    fi
+  fi
+  if [[ ! -d "$BACKUP_DIR" ]]; then
+    report FAIL backup-disk "$BACKUP_DIR bestaat niet (schijf niet aangesloten?)"
+  else
+    read -r bpct bfree < <(df -P "$BACKUP_DIR" | awk 'NR==2 {sub("%", "", $5); printf "%s %.0f\n", 100-$5, $4/1048576}')
+    if (( bpct < BACKUP_MIN_FREE_PCT )); then
+      report FAIL backup-disk "nog ${bpct}% vrij op $BACKUP_DIR (${bfree} GB; min. ${BACKUP_MIN_FREE_PCT}%)"
+    else
+      report OK backup-disk "${bfree} GB (${bpct}%) vrij op $BACKUP_DIR"
+    fi
+  fi
 fi
 
 exit "$failed"

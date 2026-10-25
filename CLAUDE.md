@@ -55,6 +55,9 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   `/srv/homelab/repos`, je eigen dev-clones in `~/dev`. Testen kan met lokale bare repo's en
   `DEPLOY_ROOT`/`HOMELAB_REPO`/`SYSTEMCTL`/`TOKEN_FILE` (zie de docstring); `DOCKER_HOST` voor je eigen Docker.
   Het journal van systeemdiensten kun je niet lezen (geen groep `adm`): kijk in `/srv/homelab/state/`.
+- F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; pagina op poort 8104), `bin/homelab-backup`
+  (timer 03:30), extra checks in `bin/homelab-health` (llm, deploy, `svc:<naam>`, backup); instellingen in
+  `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
   eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -74,7 +77,12 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
    de clone van root bestaat dan nog niet). Daarna de echte test: een PR die SSH via Tailscale blokkeert moet zichzelf
    terugdraaien. Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/`SOCKET`/
    `SNAP_PATHS` en `NO_FETCH=1` (zie de docstring).
-4. Daarna de ROADMAP-volgorde: F-020, F-021, ...
+4. F-020 (branch `f-020-monitor`): na de merge draait de gebruiker `scripts/20-monitor.sh`. Backups voorlopig op de
+   SSD (`/var/backups/homelab`; keuze van de gebruiker); de offline-melding (heartbeat) en een herstel-oefening
+   later of niet (keuze van de gebruiker). Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/
+   `HEALTH_CMD`/`NTFY_FAKE=1`; `homelab-backup` met `BACKUP_LIST`/`BACKUP_DIR`/`BACKUP_STATUS`/`RESTORE_ROOT`/
+   `NO_SERVICES=1`.
+5. Daarna de ROADMAP-volgorde: F-021, F-022, ...
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.

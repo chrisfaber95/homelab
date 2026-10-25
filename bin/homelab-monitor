@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""homelab-monitor: bewaking en overzicht (F-020).
+
+  homelab-monitor check      health check draaien, meldingen bij falen en herstel, overzichtspagina (root; timer)
+  homelab-overview           alles in één scherm: checks (sinds wanneer), deploys, LLM-gebruik, wijzigingen, backup
+  (= homelab-monitor overview; --html geeft de pagina)
+
+Een check die FAIL_ROUNDS keer achter elkaar niet OK is, geeft één melding; als hij weer OK is volgt één melding
+"hersteld". Daartussen geen herhaling; het dagoverzicht van homelab-admin noemt hem tot hij hersteld is.
+Na elke check pingt de box HEARTBEAT_URL (als die is ingevuld), zodat een dienst buiten de box merkt dat hij uit staat.
+Instellingen: config/backup.conf (en llm.conf, admin.conf) naast bin/. Voor tests: MONITOR_DIR, OVERVIEW_DIR,
+HEALTH_CMD, NTFY_FAKE=1 (meldingen alleen printen).
+"""
+import argparse
+import html
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LINE_STATUS = ("OK", "WARN", "FAIL")
+
+
+def load_config():
+    conf = {}
+    for name in ("backup.conf", "admin.conf", "llm.conf"):
+        f = ROOT / "config" / name
+        if not f.exists():
+            continue
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                conf[key.strip()] = os.environ.get(key.strip(), value.strip().strip('"'))
+    return conf
+
+
+CONF = load_config()
+MONITOR = Path(CONF["MONITOR_DIR"])
+CHECKS = MONITOR / "checks.json"
+HEALTH_CMD = os.environ.get("HEALTH_CMD", "/usr/local/bin/homelab-health").split()
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def read_json(path, default):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False))
+    tmp.chmod(0o644)
+    tmp.replace(path)
+
+
+def notify(title, message, priority=4):
+    if os.environ.get("NTFY_FAKE") == "1":
+        print(f"MELDING: {title} | {message}")
+        return
+    try:
+        token = Path("/etc/homelab/ntfy-token").read_text().strip()
+        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message,
+                "priority": priority, "tags": ["warning" if priority >= 4 else "white_check_mark"]}
+        req = urllib.request.Request(f"http://127.0.0.1:{CONF.get('NTFY_PORT', '8102')}/",
+                                     data=json.dumps(body).encode(), method="POST",
+                                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).close()
+    except (OSError, urllib.error.URLError) as e:
+        print(f"melding niet verstuurd ({e}): {title}", file=sys.stderr)
+
+
+# --- check
+
+def run_health():
+    """De checks als {naam: (status, tekst)}; kan de health check niet draaien, dan één FAIL 'health'."""
+    try:
+        p = subprocess.run(HEALTH_CMD, capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"health": ("FAIL", f"homelab-health draait niet: {e}")}
+    results = {}
+    for line in p.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[0] in LINE_STATUS:
+            results[parts[1]] = (parts[0], parts[2] if len(parts) == 3 else "")
+    if p.returncode == 2 or not results:
+        results["health"] = ("FAIL", (p.stderr or p.stdout).strip()[-300:] or f"exit {p.returncode}")
+    return results
+
+
+def update(checks, results, rounds):
+    """Werk de staat per check bij; geef de meldingen terug die nu moeten (falen en herstel)."""
+    messages, t = [], now()
+    for name, (status, text) in results.items():
+        c = checks.get(name) or {"status": "OK", "since": t, "fails": 0, "notified": False}
+        if status == "OK":
+            if c["notified"]:
+                messages.append((f"homelab: {name} weer in orde", text, 3))
+            if c["status"] != "OK":
+                c["since"] = t
+            c.update(status="OK", text=text, fails=0, notified=False)
+        else:
+            if c["status"] == "OK":
+                c["since"] = t
+            c.update(status=status, text=text, fails=c["fails"] + 1)
+            if c["fails"] >= rounds and not c["notified"]:
+                messages.append((f"homelab: {status} {name}", text, 5 if status == "FAIL" else 4))
+                c["notified"] = True
+        checks[name] = c
+    for name in [n for n in checks if n not in results]:
+        if checks[name]["notified"]:
+            messages.append((f"homelab: {name} weer in orde", "de check is er niet meer", 3))
+        del checks[name]
+    return messages
+
+
+def heartbeat():
+    f = Path(CONF.get("HEARTBEAT_URL_FILE", "/nonexistent"))
+    try:
+        url = f.read_text().strip()
+    except OSError:
+        return
+    if url:
+        try:
+            urllib.request.urlopen(url, timeout=10).close()
+        except (OSError, urllib.error.URLError) as e:
+            print(f"heartbeat mislukt: {e}", file=sys.stderr)
+
+
+def cmd_check():
+    checks = read_json(CHECKS, {})
+    messages = update(checks, run_health(), int(CONF.get("FAIL_ROUNDS", 2)))
+    write_json(CHECKS, checks)
+    write_json(MONITOR / "last.json", {"at": now()})
+    for title, text, prio in messages:
+        notify(title, text, prio)
+    heartbeat()
+    out = Path(CONF["OVERVIEW_DIR"])
+    out.mkdir(parents=True, exist_ok=True)
+    write_html(out / "index.html", gather())
+    bad = [n for n, c in checks.items() if c["status"] != "OK"]
+    print(f"{len(checks)} checks, niet OK: {', '.join(bad) or 'geen'}")
+    return 0
+
+
+# --- overzicht
+
+def ago(iso):
+    if not iso:
+        return "nooit"
+    s = int((datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds())
+    return f"{s} s" if s < 120 else f"{s // 60} min" if s < 7200 else f"{s // 3600} u" if s < 172800 else f"{s // 86400} d"
+
+
+def local(iso):
+    return datetime.fromisoformat(iso).astimezone().strftime("%d-%m %H:%M") if iso else "-"
+
+
+def gather():
+    data = {"generated": now(), "checks": read_json(CHECKS, {}), "deploys": [], "llm": None, "changes": [],
+            "backup": read_json(CONF["BACKUP_STATUS"], {}), "last_check": read_json(MONITOR / "last.json", {})}
+    for f in sorted(Path("/srv/homelab/state").glob("*.json")):
+        if not f.stem.startswith("_"):
+            data["deploys"].append(read_json(f, {}) | {"name": f.stem})
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{CONF.get('LLM_PORT', '8017')}/usage?days=7", timeout=5) as r:
+            data["llm"] = json.load(r)
+    except (OSError, urllib.error.URLError, ValueError):
+        pass
+    try:
+        lines = Path(CONF.get("LOG_FILE", "/var/log/homelab/changes.jsonl")).read_text().splitlines()
+        data["changes"] = [json.loads(l) for l in lines[-5:]][::-1]
+    except (OSError, ValueError):
+        pass
+    return data
+
+
+def change_line(e):
+    if e.get("kind") in ("instant", "refused"):
+        what = f"{e.get('action')} {' '.join(e.get('args') or [])}"
+    else:
+        what = f"{e.get('change', 'machine.conf')}: {e.get('summary', '')}"
+    return f"{'ok' if e.get('ok') else 'FOUT'} {e.get('kind')}: {what}"[:110]
+
+
+def text(d):
+    out = [f"homelab, {local(d['generated'])} (laatste check {ago(d['last_check'].get('at'))} geleden)", "", "Checks"]
+    for name, c in sorted(d["checks"].items(), key=lambda kv: (kv[1]["status"] == "OK", kv[0])):
+        out.append(f"  {c['status']:4}  {name:22} sinds {local(c['since']):11}  {c['text'][:70]}")
+    if not d["checks"]:
+        out.append("  (nog geen check gedraaid: homelab-monitor check)")
+    out += ["", "Deploys"]
+    for s in d["deploys"]:
+        last = s.get("last_deploy") or {}
+        result = ("ok" if last.get("ok") else "FOUT") + f" {ago(last.get('at'))} geleden" if last else "-"
+        out.append(f"  {s['name']:20} {s.get('kind', '?'):8} {(s.get('deployed_sha') or '-')[:7]:8} "
+                   f"sync {ago(s.get('synced_at'))} geleden, deploy {result}")
+    out += ["", "LLM, 7 dagen"]
+    if d["llm"]:
+        t = d["llm"]["total"]
+        out.append(f"  {t['count']} calls, gemiddeld {t['avg_seconds']} s, {t['failures']} mislukt")
+        for r in d["llm"]["by_caller"][:5]:
+            out.append(f"  caller {r['caller']:18} {r['count']:>5} calls  {r['avg_seconds']:>5} s  {r['failures']} mislukt")
+        for r in d["llm"]["by_job"]:
+            out.append(f"  job    {r['job']:18} {r['count']:>5} calls  {r['avg_seconds']:>5} s  {r['failures']} mislukt")
+    else:
+        out.append("  (helper niet bereikbaar)")
+    out += ["", "Laatste wijzigingen"]
+    out += [f"  {local(e['at'])}  {change_line(e)}" for e in d["changes"]] or ["  (geen)"]
+    b = d["backup"]
+    out += ["", "Backup"]
+    if b:
+        out.append(f"  laatste run {local(b.get('at'))}: {'ok, ' + b.get('file', '') if b.get('ok') else 'MISLUKT: ' + b.get('error', '')}")
+        out.append(f"  laatste geslaagde {local(b.get('last_ok'))}; vrij {b.get('free_bytes', 0) // 2**30} GB "
+                   f"({b.get('free_pct', '?')}%) op {b.get('dir')}")
+    else:
+        out.append("  (nog geen backup)")
+    return "\n".join(out)
+
+
+def render_html(d):
+    e = html.escape
+    rows = "".join(
+        f"<tr class='{c['status'].lower()}'><td>{e(c['status'])}</td><td>{e(n)}</td><td>{e(local(c['since']))}</td>"
+        f"<td>{e(c['text'])}</td></tr>"
+        for n, c in sorted(d["checks"].items(), key=lambda kv: (kv[1]["status"] == "OK", kv[0])))
+    deploys = "".join(
+        f"<tr class='{'ok' if (s.get('last_deploy') or {}).get('ok') else 'fail'}'><td>{e(s['name'])}</td>"
+        f"<td>{e(s.get('kind', ''))}</td><td><code>{e((s.get('deployed_sha') or '-')[:7])}</code></td>"
+        f"<td>{e(ago(s.get('synced_at')))}</td><td>{e((s.get('last_deploy') or {}).get('message', '-'))}</td></tr>"
+        for s in d["deploys"])
+    if d["llm"]:
+        t = d["llm"]["total"]
+        llm = f"<p>{t['count']} calls, gemiddeld {t['avg_seconds']} s, {t['failures']} mislukt.</p><table>" + "".join(
+            f"<tr><td>{e(k)}</td><td>{e(str(r[k]))}</td><td>{r['count']}</td><td>{r['avg_seconds']} s</td>"
+            f"<td>{r['failures']}</td></tr>"
+            for k, group in (("caller", d["llm"]["by_caller"]), ("job", d["llm"]["by_job"])) for r in group) + "</table>"
+    else:
+        llm = "<p>Helper niet bereikbaar.</p>"
+    changes = "".join(f"<li>{e(local(c['at']))} {e(change_line(c))}</li>" for c in d["changes"]) or "<li>geen</li>"
+    b = d["backup"]
+    backup = (f"<p>Laatste run {e(local(b.get('at')))}: {'ok' if b.get('ok') else 'MISLUKT: ' + e(b.get('error', ''))}."
+              f" Laatste geslaagde {e(local(b.get('last_ok')))}. Vrij {b.get('free_bytes', 0) // 2**30} GB"
+              f" ({b.get('free_pct', '?')}%).</p>") if b else "<p>Nog geen backup.</p>"
+    bad = sum(c["status"] != "OK" for c in d["checks"].values())
+    page = f"""<!doctype html><html lang="nl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60">
+<title>homelab</title><style>
+:root {{ --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --ok:#15803d; --warn:#b45309; --fail:#b91c1c; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c;
+  --ok:#4ade80; --warn:#fbbf24; --fail:#f87171; }} }}
+body {{ background:var(--bg); color:var(--fg); font:15px/1.45 system-ui,sans-serif; margin:0 auto; max-width:900px;
+  padding:16px; }}
+h1 {{ font-size:1.4em; margin:0 }} h2 {{ font-size:1.05em; margin:1.6em 0 .4em; }}
+.meta {{ color:var(--muted); font-size:.9em }} table {{ border-collapse:collapse; width:100% }}
+td {{ border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; overflow-wrap:anywhere }}
+tr.ok td:first-child {{ color:var(--ok) }} tr.warn td:first-child {{ color:var(--warn); font-weight:600 }}
+tr.fail td:first-child {{ color:var(--fail); font-weight:600 }} ul {{ padding-left:1.2em }}
+.state {{ font-weight:600; color:{'var(--fail)' if bad else 'var(--ok)'} }}
+</style></head><body>
+<h1>homelab</h1>
+<p class="meta">Bijgewerkt {e(local(d['generated']))}; laatste check {e(ago(d['last_check'].get('at')))} geleden.
+Alleen lezen.</p>
+<p class="state">{f'{bad} check(s) niet in orde' if bad else 'Alles in orde'}</p>
+<h2>Checks</h2><table>{rows}</table>
+<h2>Deploys</h2><table>{deploys}</table>
+<h2>LLM, 7 dagen</h2>{llm}
+<h2>Laatste wijzigingen</h2><ul>{changes}</ul>
+<h2>Backup</h2>{backup}
+</body></html>"""
+    return page
+
+
+def write_html(path, d):
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(render_html(d))
+    tmp.chmod(0o644)
+    tmp.replace(path)
+
+
+def main():
+    overview = Path(sys.argv[0]).name == "homelab-overview"
+    p = argparse.ArgumentParser(prog=Path(sys.argv[0]).name, description="Bewaking en overzicht (F-020).")
+    if overview:
+        p.add_argument("--html", action="store_true")
+        a = p.parse_args()
+        a.cmd = "overview"
+    else:
+        sub = p.add_subparsers(dest="cmd", required=True)
+        sub.add_parser("check")
+        o = sub.add_parser("overview")
+        o.add_argument("--html", action="store_true")
+        a = p.parse_args()
+    if a.cmd == "check":
+        sys.exit(cmd_check())
+    d = gather()
+    if a.html:
+        print(render_html(d))
+    else:
+        print(text(d))
+
+
+if __name__ == "__main__":
+    main()

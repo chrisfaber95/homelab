@@ -234,6 +234,13 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         komt er een melding "teruggedraaid".
 - [ ] De externe 2 TB HDD: wacht op het antwoord op de vraag van de lead in F-016.
 
+- [ ] F-020 (bewaking, overzicht, backups): zie `docs/monitor.md`.
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/20-monitor.sh` (maakt meteen een backup en een eerste check).
+  - [ ] `http://homelab.tail4eb878.ts.net:8104` op de telefoon toont het overzicht.
+  - [ ] Test: een gedeployde dienst stoppen (`sudo systemctl stop homelab-app-claude-dashboard`): binnen 10 minuten
+        een melding, en na `start` een melding "weer in orde".
+  - [ ] Later: de offline-melding (healthchecks.io, `/etc/homelab/heartbeat-url`) en de backups naar de USB-HDD.
+
 ## 14. Verhuizen naar de desktop **(desktop)**
 
 - [ ] Nieuwe PSU erin. BIOS/UEFI van de desktop:

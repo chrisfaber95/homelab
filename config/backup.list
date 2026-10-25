@@ -1,0 +1,23 @@
+# homelab: wat homelab-backup elke dag bewaart (F-020): de staat die een herbouw uit de repo niet terugbrengt.
+# Eén pad of glob per regel. SQLite-bestanden (*.db) worden met de backup-API gekopieerd, zodat ze heel zijn.
+
+# Tailscale: dezelfde machine op het tailnet, zonder opnieuw inloggen.
+/var/lib/tailscale/tailscaled.state
+# SSH-hostkeys: geen waarschuwing in Windows na een herbouw.
+/etc/ssh/ssh_host_*
+# Claude Code en gh van claude: ingelogd blijven. Plus Claudes geheugen.
+/home/claude/.claude/.credentials.json
+/home/claude/.claude.json
+/home/claude/.claude/projects/*/memory
+/home/claude/.config/gh/hosts.yml
+# Tokens: deploy (GitHub, read-only), ntfy (melden), heartbeat-URL.
+/etc/homelab
+# ntfy: gebruikers, wachtwoorden en tokens.
+/var/lib/ntfy/user.db
+# claude-dashboard: gekoppelde apparaten, certificaat, commands.log.
+/home/claude/.local/share/claude-dashboard
+# Logboeken: LLM-gebruik (F-017) en machinewijzigingen (F-019), plus de staat van homelab-admin.
+/var/lib/private/llm-helper/usage.db
+/var/log/homelab/changes.jsonl
+/var/lib/homelab/admin/applied.json
+/var/lib/homelab/admin/machine.json

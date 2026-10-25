@@ -49,7 +49,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def load_config():
     conf = {}
-    for name in ("deploy.conf", "admin.conf"):
+    for name in ("deploy.conf", "admin.conf", "backup.conf"):
+        if not (ROOT / "config" / name).exists():
+            continue  # backup.conf komt met F-020
         for line in (ROOT / "config" / name).read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
@@ -574,6 +576,15 @@ def daily_summary():
     body = (f"{len(entries)} wijziging(en) in 24 uur:\n" + "\n".join(lines[-15:])) if entries else "Niets veranderd."
     if unrecorded:
         body += f"\nNog niet in de repo: {'; '.join(unrecorded)}"
+    checks = {}
+    try:
+        checks = json.loads((Path(CONF.get("MONITOR_DIR", "/var/lib/homelab/monitor")) / "checks.json").read_text())
+    except (OSError, ValueError):
+        pass
+    failing = [f"{n} ({c['status']} sinds {datetime.fromisoformat(c['since']).astimezone():%d-%m %H:%M})"
+               for n, c in sorted(checks.items()) if c.get("status") != "OK"]
+    if failing:
+        body += f"\nChecks niet in orde: {'; '.join(failing)}"
     if waiting:
         body += f"\nKernel/NVIDIA-updates wachten op jou: {' '.join(waiting[:8])}"
     notify("homelab: dagoverzicht", body, priority=2)

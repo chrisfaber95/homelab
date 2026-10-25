@@ -314,6 +314,23 @@ def ensure_running(entries):
                 log(name, f"opnieuw starten mislukt: {e}")
 
 
+def compose_running(name):
+    """Draaien alle containers van een compose-repo (en is geen ervan unhealthy)? Voor de health check (F-020)."""
+    current = RELEASES / name / "current"
+    if not current.exists():
+        return False, "geen release"
+    try:
+        out = compose(name, current.resolve(), "ps", "--all", "--format", "json", timeout=60)
+    except StepError as e:
+        return False, str(e)
+    rows = [json.loads(l) for l in out.splitlines() if l.strip().startswith("{")]
+    if not rows:
+        return False, "geen containers"
+    bad = [f"{r.get('Service')}: {r.get('State')}{' (' + r['Health'] + ')' if r.get('Health') else ''}"
+           for r in rows if r.get("State") != "running" or r.get("Health") == "unhealthy"]
+    return not bad, "; ".join(bad) or f"{len(rows)} container(s) draaien"
+
+
 def cycle():
     """Eén ronde: alles syncen, dan hoogstens één deploy (zodat syncs niet lang op een build wachten)."""
     states = {}
@@ -333,6 +350,9 @@ def cycle():
         except StepError as e:
             state["sync_error"] = str(e)
             log(name, f"sync mislukt: {e}")
+        if kind == "compose":
+            state["running"], state["running_detail"] = compose_running(name)
+            state["running_at"] = now()
         if kind == "sync" and state.get("synced_sha") and state.get("deployed_sha") != state["synced_sha"]:
             state.update(deployed_sha=state["synced_sha"], deployed_subject=subject(name, state["synced_sha"]),
                          last_deploy={"at": now(), "sha": state["synced_sha"], "ok": True, "message": "gesynct"})

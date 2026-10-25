@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""homelab-backup: dagelijkse backup van wat een herbouw niet terugbrengt (F-020).
+
+  homelab-backup run                  één backup naar BACKUP_DIR, ouder dan BACKUP_KEEP_DAYS weg (root; timer)
+  homelab-backup list                 de backups, nieuwste eerst
+  homelab-backup restore <bestand>    na een herbouw: alles terugzetten (root; vraagt eerst om bevestiging)
+
+Wat erin gaat staat in config/backup.list; instellingen in config/backup.conf. De backups zijn alleen voor root
+leesbaar. De status van de laatste backup (zonder geheimen) staat in BACKUP_STATUS, voor de health check.
+Voor tests overschrijfbaar met BACKUP_DIR, BACKUP_STATUS, BACKUP_LIST, RESTORE_ROOT en NO_SERVICES=1.
+"""
+import argparse
+import glob
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_config():
+    conf = {}
+    for line in (ROOT / "config" / "backup.conf").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            conf[key.strip()] = os.environ.get(key.strip(), value.strip().strip('"'))
+    return conf
+
+
+CONF = load_config()
+BACKUP_DIR = Path(CONF["BACKUP_DIR"])
+STATUS = Path(CONF["BACKUP_STATUS"])
+LIST = Path(os.environ.get("BACKUP_LIST", ROOT / "config" / "backup.list"))
+# Wat er tijdens een restore stil moet liggen, zodat niets de teruggezette bestanden overschrijft.
+SERVICES = ["tailscaled", "ntfy", "llm-helper", "homelab-admin", "homelab-app-claude-dashboard"]
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def paths():
+    """Alle bestanden uit backup.list (globs uitgeklapt, mappen doorlopen), en wat ontbreekt."""
+    found, missing = [], []
+    for line in LIST.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        hits = sorted(glob.glob(line))
+        if not hits:
+            missing.append(line)
+        for hit in hits:
+            p = Path(hit)
+            if p.is_dir() and not p.is_symlink():
+                found += [Path(d) / f for d, _, files in os.walk(p) for f in sorted(files)]
+            else:
+                found.append(p)
+    return found, missing
+
+
+def add(tar, path, tmpdir):
+    """Een bestand in de tar, met eigenaar en rechten; een SQLite-database eerst als consistente kopie."""
+    info = tar.gettarinfo(str(path), arcname=str(path).lstrip("/"))
+    if path.suffix == ".db" and path.is_file() and not path.is_symlink():
+        copy = Path(tmpdir) / f"{abs(hash(str(path)))}.db"
+        src = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        dst = sqlite3.connect(copy)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+        info.size = copy.stat().st_size
+        with open(copy, "rb") as f:
+            tar.addfile(info, f)
+        return
+    if info.isfile():
+        with open(path, "rb") as f:
+            tar.addfile(info, f)
+    else:
+        tar.addfile(info)
+
+
+def free_space():
+    st = os.statvfs(BACKUP_DIR)
+    return st.f_bavail * st.f_frsize, round(100 * st.f_bavail / st.f_blocks)
+
+
+def write_status(status):
+    STATUS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATUS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(status, indent=2))
+    tmp.chmod(0o644)
+    tmp.replace(STATUS)
+
+
+def cmd_run():
+    status = {"at": now(), "ok": False, "dir": str(BACKUP_DIR)}
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        BACKUP_DIR.chmod(0o700)
+        files, missing = paths()
+        name = f"homelab-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+        tmp_file = BACKUP_DIR / f".{name}.tmp"
+        old_umask = os.umask(0o077)
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir, tarfile.open(tmp_file, "w:gz") as tar:
+                for p in files:
+                    add(tar, p, tmpdir)
+        finally:
+            os.umask(old_umask)
+        tmp_file.chmod(0o600)
+        tmp_file.rename(BACKUP_DIR / name)
+        removed = prune()
+        status.update(ok=True, file=name, size=(BACKUP_DIR / name).stat().st_size, files=len(files),
+                      missing=missing, removed=removed)
+        print(f"{name}: {len(files)} bestanden, {status['size'] // 1024} KiB"
+              + (f"; ontbreekt: {', '.join(missing)}" if missing else ""))
+    except Exception as e:
+        status["error"] = str(e)
+        print(f"backup mislukt: {e}", file=sys.stderr)
+    try:
+        status["free_bytes"], status["free_pct"] = free_space()
+    except OSError:
+        pass
+    last_ok = read_status().get("last_ok")
+    status["last_ok"] = status["at"] if status["ok"] else last_ok
+    write_status(status)
+    return 0 if status["ok"] else 1
+
+
+def read_status():
+    try:
+        return json.loads(STATUS.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def backups():
+    return sorted(BACKUP_DIR.glob("homelab-*.tar.gz"), reverse=True)
+
+
+def prune():
+    keep_after = time.time() - int(CONF["BACKUP_KEEP_DAYS"]) * 86400
+    removed = []
+    for f in backups()[1:]:  # de nieuwste blijft altijd
+        if f.stat().st_mtime < keep_after:
+            f.unlink()
+            removed.append(f.name)
+    return removed
+
+
+def cmd_list():
+    for f in backups():
+        print(f"{f.name}  {f.stat().st_size // 1024:>8} KiB")
+    s = read_status()
+    if s:
+        print(f"\nLaatste run {s['at']}: {'ok' if s.get('ok') else 'MISLUKT: ' + s.get('error', '')}; "
+              f"vrij {s.get('free_bytes', 0) // 2**30} GB ({s.get('free_pct', '?')}%)")
+
+
+def services(action):
+    if os.environ.get("NO_SERVICES") == "1":
+        print(f"(test) systemctl {action} {' '.join(SERVICES)}")
+        return
+    subprocess.run(["systemctl", action, *SERVICES], check=False)
+
+
+def cmd_restore(file, yes):
+    path = Path(file)
+    if not path.is_absolute() and not path.exists():
+        path = BACKUP_DIR / file
+    target = Path(os.environ.get("RESTORE_ROOT", "/"))
+    with tarfile.open(path) as tar:
+        members = tar.getmembers()
+        print(f"{path.name}: {len(members)} bestanden, bijvoorbeeld:")
+        for m in members[:8]:
+            print(f"  /{m.name}")
+        if not yes:
+            if input(f"Terugzetten naar {target}? Bestaande bestanden worden overschreven. [ja/nee] ").strip() != "ja":
+                print("Niets gedaan.")
+                return 1
+        services("stop")
+        try:
+            # filter="tar": eigenaar en rechten blijven (op naam), maar geen paden buiten target of setuid-bits.
+            tar.extractall(target, filter="tar")
+        finally:
+            services("start")
+        # De teruggezette hostkeys gelden pas na een herstart van sshd; open sessies blijven gewoon lopen.
+        if os.environ.get("NO_SERVICES") != "1":
+            subprocess.run(["systemctl", "restart", "ssh.service"], check=False)
+    print("Teruggezet. Controle: tailscale status (zelfde naam, geen login), ssh vanaf Windows (geen waarschuwing),"
+          " homelab-health.")
+    return 0
+
+
+def main():
+    p = argparse.ArgumentParser(prog="homelab-backup", description="Backups van de homelab (F-020).")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("run")
+    sub.add_parser("list")
+    r = sub.add_parser("restore")
+    r.add_argument("file", help="een backupbestand (naam in BACKUP_DIR of een pad)")
+    r.add_argument("--yes", action="store_true", help="niet vragen")
+    a = p.parse_args()
+    if a.cmd in ("run", "restore") and os.geteuid() != 0 and "BACKUP_LIST" not in os.environ:
+        sys.exit(f"homelab-backup {a.cmd} draait als root.")
+    sys.exit({"run": cmd_run, "list": cmd_list}.get(a.cmd, lambda: cmd_restore(a.file, a.yes))())
+
+
+if __name__ == "__main__":
+    main()

@@ -34,13 +34,18 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - Account `claude` zonder sudo; Claude Code, `gh` (ingelogd als `chrisfaber95`, HTTPS) en git-identiteit staan.
 - Alleen-laptop: `/etc/systemd/logind.conf.d/laptop-lid.conf` (klep dicht laat de box aan); weghalen na de verhuizing.
 
+- Repo: privé `chrisfaber95/homelab`, branch `main`.
+- Health check: `bin/homelab-health`, verwachte GPU in `config/health.conf` (`EXPECTED_GPU`). Draait ook
+  rechtstreeks uit de repo; `scripts/13-health-check.sh` kopieert hem naar `/usr/local/lib/homelab`.
+  `/home/claude` is 750, dus scripts geef je de gebruiker met hun volledige pad.
+
 Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 
 ## Volgende werk
 
-1. Maak deze map een privé-repo `chrisfaber95/homelab` (`git init`, `gh repo create --private --source . --push`).
-2. F-016 afmaken: de health check (driver/GPU, netwerk, schijf, pending reboot; exit-code niet 0 bij een fout).
-3. Daarna de ROADMAP-volgorde: F-017, F-018, F-019, ...
+1. F-016: de gebruiker installeert de health check (`sudo bash /home/claude/homelab/scripts/13-health-check.sh`);
+   daarna draait `homelab-health` voor iedereen.
+2. Daarna de ROADMAP-volgorde: F-017, F-018, F-019, ...
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.

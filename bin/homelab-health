@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# homelab: health check (F-016). Driver/GPU, netwerk, schijf en pending reboot.
+# Exit 0: alles in orde (WARN mag). Exit 1: minstens één FAIL. Exit 2: de check zelf kan niet draaien.
+# Draait zonder root. Instellingen: config/health.conf naast bin/.
+set -uo pipefail
+
+CONF="$(dirname "$(dirname "$(readlink -f "$0")")")/config/health.conf"
+if [[ ! -r "$CONF" ]]; then
+  echo "Kan $CONF niet lezen." >&2
+  exit 2
+fi
+# shellcheck source=../config/health.conf
+source "$CONF"
+if [[ ! "${EXPECTED_GPU:-}" =~ ^(.+),\ ([0-9]+)\ MiB$ ]]; then
+  echo "EXPECTED_GPU in $CONF moet eruitzien als \"NVIDIA GeForce GTX 1080, 8192 MiB\"." >&2
+  exit 2
+fi
+EXPECTED_GPU_NAME="${BASH_REMATCH[1]}"
+EXPECTED_VRAM_MIB="${BASH_REMATCH[2]}"
+
+failed=0
+report() { # report OK|WARN|FAIL <check> <tekst>
+  printf '%-4s  %-10s %s\n' "$1" "$2" "$3"
+  [[ $1 == FAIL ]] && failed=1
+  return 0
+}
+
+# --- Driver en GPU
+if ! gpu=$(timeout 15 nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version \
+             --format=csv,noheader,nounits 2>&1); then
+  report FAIL gpu "nvidia-smi faalt: ${gpu//$'\n'/ }"
+else
+  IFS=',' read -r name total used driver <<<"$(head -n1 <<<"$gpu")"
+  name="${name# }"; total="${total// /}"; used="${used// /}"; driver="${driver// /}"
+  if [[ "$name" != "$EXPECTED_GPU_NAME" ]]; then
+    report FAIL gpu "$name gevonden, $EXPECTED_GPU_NAME verwacht (EXPECTED_GPU in $CONF)"
+  elif (( total * 100 < EXPECTED_VRAM_MIB * 95 )); then
+    report FAIL gpu "$name heeft $total MiB VRAM, $EXPECTED_VRAM_MIB MiB verwacht"
+  else
+    report OK gpu "$name, $total MiB ($used MiB in gebruik), driver $driver"
+  fi
+fi
+
+# Elke geïnstalleerde kernel heeft kant-en-klare NVIDIA-modules nodig, anders werkt de GPU na de volgende reboot niet.
+for img in /boot/vmlinuz-*; do
+  kver="${img#/boot/vmlinuz-}"
+  if ! dpkg-query -W -f='${Status}\n' "linux-modules-nvidia-*-$kver" 2>/dev/null | grep -q 'install ok installed'; then
+    report FAIL nvidia-mod "geen linux-modules-nvidia-*-$kver voor kernel $kver"
+  fi
+done
+
+# --- Netwerk
+wired=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 ~ /^en/ {print $2" "$4; exit}')
+if [[ -n "$wired" ]]; then
+  report OK wired "$wired"
+else
+  report FAIL wired "geen en*-interface met een IPv4-adres"
+fi
+
+if gw=$(ip route show default 2>/dev/null | awk '/^default/ {print "via "$3" op "$5; exit}') && [[ -n "$gw" ]]; then
+  report OK route "$gw"
+else
+  report FAIL route "geen default route"
+fi
+
+if timeout 5 getent hosts github.com >/dev/null; then
+  report OK dns "github.com wordt opgezocht"
+else
+  report FAIL dns "github.com is niet op te zoeken"
+fi
+
+if timeout 10 curl -fsS -o /dev/null --max-time 8 https://github.com 2>/dev/null; then
+  report OK internet "https://github.com antwoordt"
+else
+  report FAIL internet "https://github.com antwoordt niet"
+fi
+
+if ts=$(timeout 5 tailscale status --json 2>/dev/null) &&
+   [[ $(jq -r '.BackendState' <<<"$ts") == Running ]]; then
+  report OK tailscale "$(jq -r '[.Self.DNSName, (.TailscaleIPs[] | select(test("^[0-9.]+$")))] | join(" ")' <<<"$ts")"
+else
+  report FAIL tailscale "tailscaled draait niet of is niet verbonden (BackendState: $(jq -r '.BackendState' <<<"${ts:-null}" 2>/dev/null))"
+fi
+
+if ss -Htln 'sport = :22' | grep -q .; then
+  report OK ssh "luistert op poort 22"
+else
+  report FAIL ssh "niets luistert op poort 22"
+fi
+
+# --- Schijf en swap
+read -r pct avail < <(df -P / | awk 'NR==2 {sub("%", "", $5); printf "%s %.0f\n", $5, $4/1048576}')
+if (( pct >= DISK_FAIL_PCT )); then
+  report FAIL disk "/ is ${pct}% vol, ${avail} GB vrij (faalt vanaf ${DISK_FAIL_PCT}%)"
+elif (( pct >= DISK_WARN_PCT )); then
+  report WARN disk "/ is ${pct}% vol, ${avail} GB vrij (waarschuwt vanaf ${DISK_WARN_PCT}%)"
+else
+  report OK disk "/ is ${pct}% vol, ${avail} GB vrij"
+fi
+
+swap_kb=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
+if (( swap_kb > 0 )); then
+  report OK swap "$(( (swap_kb + 524288) / 1048576 )) GB"
+else
+  report FAIL swap "geen swap actief"
+fi
+
+# --- Pending reboot
+newest=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||' | sort -V | tail -n1)
+if [[ -e /run/reboot-required ]]; then
+  pkgs=$(sort -u /run/reboot-required.pkgs 2>/dev/null | paste -sd' ')
+  report FAIL reboot "reboot nodig${pkgs:+ voor: $pkgs}"
+elif [[ -n "$newest" && "$newest" != "$(uname -r)" ]]; then
+  report FAIL reboot "kernel $(uname -r) draait, $newest is geïnstalleerd"
+else
+  report OK reboot "geen reboot nodig (kernel $(uname -r))"
+fi
+
+exit "$failed"

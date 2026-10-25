@@ -55,6 +55,9 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   `/srv/homelab/repos`, je eigen dev-clones in `~/dev`. Testen kan met lokale bare repo's en
   `DEPLOY_ROOT`/`HOMELAB_REPO`/`SYSTEMCTL`/`TOKEN_FILE` (zie de docstring); `DOCKER_HOST` voor je eigen Docker.
   Het journal van systeemdiensten kun je niet lezen (geen groep `adm`): kijk in `/srv/homelab/state/`.
+- F-019: `bin/homelab-admin` (root-dienst; socket `/run/homelab-admin.sock`), wijzigingen in `changes/`, blijvende
+  pakketten en poorten in `config/machine.conf`, uitleg in `docs/admin.md`. Logboek: `homelab-admin changes`.
+  Meldingen: ntfy op `http://homelab.tail4eb878.ts.net:8102` (topic `homelab`, de telefoon is Android).
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
   eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -70,10 +73,11 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
    `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
    `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker. Nog door de gebruiker: apparaat koppelen,
    LAN-test van 8101, Remote-SSH, reboot en stroom eruit.
-3. F-019 (branch `f-019-admin`): na de merge draait de gebruiker `scripts/19-admin.sh` (vanuit `/home/claude/homelab`,
-   de clone van root bestaat dan nog niet). Daarna de echte test: een PR die SSH via Tailscale blokkeert moet zichzelf
-   terugdraaien. Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/`SOCKET`/
-   `SNAP_PATHS` en `NO_FETCH=1` (zie de docstring).
+3. F-019 staat (2026-10-25): `homelab-admin` en ntfy draaien; `changes/0001` is toegepast. Lockout-test geslaagd:
+   een gemergde wijziging die SSH via Tailscale blokkeerde, werd na 5 min 32 s vanzelf teruggedraaid (test-wijziging
+   daarna weggehaald). Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/
+   `SOCKET`/`SNAP_PATHS` en `NO_FETCH=1` (zie de docstring). Let op: `ufw` ziet een regel die alleen in
+   allow/deny verschilt als dezelfde en slaat hem over; controleer in `apply.sh` altijd of de wijziging er staat.
 4. Daarna de ROADMAP-volgorde: F-020, F-021, ...
 
 Open vragen die je niet zelf beslist:

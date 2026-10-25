@@ -9,11 +9,16 @@ Dat is een kopie; het origineel staat in `team-hq` op de Windows-pc en wordt daa
 
 ## Regels
 
-- Je draait als `claude`, zonder sudo. Vraag nooit om sudo of een wachtwoord. Elke stap die root nodig heeft
-  wordt een script in `scripts/` dat de gebruiker (`chris`) draait met `sudo bash scripts/<naam>.sh`.
+- Je draait als `claude`, zonder sudo. Vraag nooit om sudo of een wachtwoord. Root-wijzigingen (F-019, `docs/admin.md`):
+  - Op de lijst (service start/stop/restart, pakket uit Ubuntu installeren, tailnet-poort open/dicht,
+    security-updates): doe het zelf met `homelab-admin <actie> --reason "..."`. Blijvend nodig? Zet het ook in
+    `config/machine.conf` (via een PR); `homelab-admin status` meldt wat daar nog ontbreekt.
+  - Al het andere: `changes/<NNNN-naam>/apply.sh` (eerste commentaarregel = samenvatting; eventueel `revert.sh`) in
+    een PR. Na de merge voert de box het uit, met vangnet voor firewall en netwerk.
+  - Installatie of herbouw van een onderdeel: een script in `scripts/` dat de gebruiker (`chris`) draait.
   Schrijf scripts idempotent, met `set -euo pipefail`, en laat ze zelf controleren of het gelukt is.
-- Alles wat op de box staat moet uit deze repo te herbouwen zijn: elke wijziging staat in `CHECKLIST.md` of in een
-  script. Een wijziging die je niet vastlegt, bestaat na een herbouw niet meer.
+- Alles wat op de box staat moet uit deze repo te herbouwen zijn: elke wijziging staat in `CHECKLIST.md`, in een
+  script, in `changes/` of in `config/machine.conf`. Een wijziging die je niet vastlegt, bestaat na een herbouw niet meer.
 - Niets bereikbaar vanaf internet. Vanaf het LAN alleen SSH; diensten alleen via Tailscale.
 - ufw filtert ook het tailnet (Tailscale staat op `--netfilter-mode=nodivert`); een nieuwe dienst krijgt een
   eigen `ufw allow in on tailscale0 to any port <p>`-regel. Docker-poorten omzeilen ufw: bind ze aan `127.0.0.1`
@@ -23,8 +28,11 @@ Dat is een kopie; het origineel staat in `team-hq` op de Windows-pc en wordt daa
   instelling, niet in code.
 - Push nooit naar `main` (ook niet van deze repo): werk op een branch, push die en open een PR; de gebruiker merget.
   Een globale pre-push-hook in `~/.config/git/hooks` houdt dat tegen; zet hem niet uit. `gh pr merge` doe je niet.
-- Root-scripts laat je de gebruiker draaien vanuit de deploy-clone `/srv/homelab/repos/homelab/scripts/` (dat is
-  gemergde `main`), niet vanuit je eigen werkkopie.
+- Root-scripts laat je de gebruiker draaien vanuit de clone van root, `/var/lib/homelab/repo/scripts/` (gemergde
+  `main`, alleen door root te wijzigen). Niet vanuit de deploy-clone in `/srv/homelab` (die is van `deploy`, dat
+  npm-code van projecten draait) en niet vanuit je eigen werkkopie.
+- Een merge naar `main` van homelab betekent root-acties op de box. Dat Claude niet naar `main` pusht of merget is een
+  afspraak (keuze van de gebruiker), geen technische grens: houd je eraan.
 
 ## Stand (2026-10-25)
 
@@ -62,9 +70,14 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
    `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
    `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker. Nog door de gebruiker: apparaat koppelen,
    LAN-test van 8101, Remote-SSH, reboot en stroom eruit.
-3. Daarna de ROADMAP-volgorde: F-019, F-020, ...
+3. F-019 (branch `f-019-admin`): na de merge draait de gebruiker `scripts/19-admin.sh` (vanuit `/home/claude/homelab`,
+   de clone van root bestaat dan nog niet). Daarna de echte test: een PR die SSH via Tailscale blokkeert moet zichzelf
+   terugdraaien. Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/`SOCKET`/
+   `SNAP_PATHS` en `NO_FETCH=1` (zie de docstring).
+4. Daarna de ROADMAP-volgorde: F-020, F-021, ...
 
 Open vragen die je niet zelf beslist:
 - De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.
-- Beantwoord (2026-10-25): Claude pusht naar branches en opent PR's, niet naar `main`. De dashboard op de box toont
-  sessies en mag Claude-sessies starten.
+- Beantwoord (2026-10-25): Claude pusht naar branches en opent PR's, niet naar `main` (afspraak + hook; geen
+  technische afscherming, ook niet na F-019). De dashboard op de box toont sessies en mag Claude-sessies starten.
+  Meldingen via een eigen ntfy op het tailnet. Kernel en NVIDIA niet via unattended-upgrades (`changes/0001`).

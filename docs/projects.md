@@ -31,8 +31,8 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   `sudo bash /srv/homelab/repos/homelab/scripts/18-projects.sh`: een nieuwe systemd-unit heeft root nodig. Zonder unit
   meldt de status `is niet geïnstalleerd`. Na het script probeert de box het binnen 30 minuten opnieuw.
 
-**Weghalen**: de regel eruit en mergen. De dienst stopt (`compose down`, volumes blijven; of de unit stopt) en de
-deploy-clone en releases worden verwijderd. De unit van een service haal je weg met `deploy/<naam>.service` eruit en
+**Weghalen**: de regel eruit en mergen. De dienst stopt (`compose down`; de images gaan weg, volumes blijven; of de
+unit stopt) en de deploy-clone en releases worden verwijderd. De unit van een service haal je weg met `deploy/<naam>.service` eruit en
 het script opnieuw.
 
 ## Sync en deploy
@@ -46,7 +46,8 @@ het script opnieuw.
 - **Start mislukt** (compose: een container komt niet op binnen 120 s; service: de unit draait na 15 s niet meer):
   `current` gaat terug naar de vorige release en die wordt opnieuw gestart. Die commit wordt niet nog eens geprobeerd.
 - Per ronde hoogstens één deploy; daarna wordt eerst alles weer gesynct, zodat een lange build de rest niet ophoudt.
-- De box bewaart de draaiende en de vorige release.
+- De box bewaart de draaiende en de vorige release. Na een geslaagde compose-deploy ruimt hij images op die nergens
+  meer bij horen (`docker image prune`, in de Docker van `deploy`).
 - Na een reboot: de rootless Docker van `deploy` en `homelab-deploy` starten via systemd (linger), en
   `homelab-deploy` doet `compose up` voor elke compose-repo. Services zijn gewone systemd-units.
 

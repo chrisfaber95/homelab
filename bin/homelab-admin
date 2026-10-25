@@ -467,7 +467,7 @@ def apply_change(path, applied, pending):
                 timespec="seconds")
             pending[cid] = {"key": key, "deadline": deadline, "summary": summary}
             entry["result"] = f"wacht op bevestiging tot {deadline}"
-            url = f"http://homelab:{CONF['CONFIRM_PORT']}/confirm/{cid}/{key}"
+            url = f"http://{CONF['TAILNET_NAME']}:{CONF['CONFIRM_PORT']}/confirm/{cid}/{key}"
             notify(f"Bevestig {cid} binnen {int(CONF['CONFIRM_SECONDS']) // 60} min",
                    f"{summary}\nDe firewall of het netwerk is veranderd. Werkt SSH naar homelab nog? Bevestig dan. "
                    f"Zonder bevestiging gaat alles vanzelf terug.\nVia SSH: sudo homelab-admin confirm {cid}",

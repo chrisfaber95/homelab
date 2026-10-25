@@ -66,8 +66,9 @@ Tailscale-instellingen (`tailscale set ...`) staan niet in die bestanden: zet de
 
 ## Meldingen (ntfy)
 
-Een eigen ntfy-server op `http://homelab:8102`, alleen via het tailnet, iedereen moet inloggen. Op je telefoon:
-de ntfy-app → server `http://homelab:8102` toevoegen met je gebruiker (het wachtwoord koos je in `19-admin.sh`) →
+Een eigen ntfy-server op `http://homelab.tail4eb878.ts.net:8102`, alleen via het tailnet, iedereen moet inloggen. Op
+je telefoon: de ntfy-app → server `http://homelab.tail4eb878.ts.net:8102` toevoegen (precies zo: op een iPhone moet
+hij gelijk zijn aan `base-url` van de server) met je gebruiker (het wachtwoord koos je in `19-admin.sh`) →
 abonneren op `homelab`. Tailscale moet op je telefoon aan staan. Je krijgt:
 
 - een nieuwe PR op homelab (met een knop naar de PR);

@@ -46,7 +46,9 @@ Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
 
 ## Volgende werk
 
-1. F-017: de gebruiker draait `scripts/17-llm.sh` en test `llm` vanaf Windows; op de desktop het ~8B-model kiezen.
+1. F-017: de gebruiker draait `scripts/17-llm.sh` opnieuw (model `llama3.1:8b`) en test `llm` vanaf Windows.
+   Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker); de brief eist 100% GPU
+   voor de desktop.
 2. Daarna de ROADMAP-volgorde: F-018, F-019, ...
 
 Open vragen die je niet zelf beslist:

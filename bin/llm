@@ -115,7 +115,7 @@ def main():
         print(f"Laatste {r['days']} dagen: {r['total']['count']} calls, gemiddeld {r['total']['avg_seconds']} s, "
               f"{r['total']['failures']} mislukt.")
         if r["min_gpu_pct"]:
-            print("Laagste deel op de GPU (100% hoort): " +
+            print("Laagste deel op de GPU (op de desktop hoort 100%): " +
                   ", ".join(f"{m} {pct}%" for m, pct in r["min_gpu_pct"].items()))
         for group, title in (("caller", "Per caller"), ("job", "Per job")):
             print(f"\n{title}:")

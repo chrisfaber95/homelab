@@ -119,21 +119,35 @@ Getest met `openai` 3.37 voor Python.
 
 Elke call, ook een mislukte, staat in `/var/lib/llm-helper/usage.db` (SQLite, tabel `calls`): tijd (UTC), caller,
 apparaat, job, model, duur, gelukt of niet, foutmelding, tokens en het deel van het model dat op de GPU zat.
-`llm usage --days N` toont de totalen per caller en per job, en per model het laagste GPU-aandeel: dat hoort 100% te
-zijn. Is het lager, dan past het model met zijn context niet in het VRAM: kies een kleiner model of een kleinere
-`LLM_NUM_CTX`.
+`llm usage --days N` toont de totalen per caller en per job, en per model het laagste GPU-aandeel. Op de desktop hoort
+dat 100% te zijn; is het lager, dan past het model met zijn context niet in het VRAM: kies een kleiner model of een
+kleinere `LLM_NUM_CTX`. Op de laptop draait het model bewust grotendeels op de CPU (zie hieronder).
 
 ## Model wisselen
 
 1. Kies een model uit [ollama.com/library](https://ollama.com/library) dat met zijn context in het VRAM past.
 2. Zet `LLM_MODEL` (en eventueel `LLM_NUM_CTX`) in `config/llm.conf`; commit en push.
 3. `sudo bash /home/claude/homelab/scripts/17-llm.sh`: haalt het model op en herstart de helper.
-4. `ollama ps` na een call: in de kolom PROCESSOR hoort `100% GPU`.
+4. `ollama ps` na een call: in de kolom PROCESSOR staat hoeveel op de GPU draait (op de desktop: `100% GPU`).
+5. Oude modellen opruimen: `ollama list`, `ollama rm <model>`.
 
-Laptop (GTX 1050, 2 GB): `gemma3:1b` met 4096. Op 2026-10-25 vergeleken met `qwen3:1.7b`, `llama3.2:1b` en
-`qwen2.5:1.5b`: alleen `gemma3:1b` past helemaal op de GPU, en het haalde de juiste velden uit een systemd-foutlog.
-Het is zwak: een Nederlandse mail vat het in het Engels samen. Op de desktop (GTX 1080, 8 GB) wordt dat een ~8B-model
-op Q4 met 8192, gekozen op dezelfde voorbeelden.
+### Keuze (2026-10-25, op de laptop)
+
+Vergeleken op een apt-log, een systemd-foutlog en een Nederlandse mail, met 4096 context:
+
+| Model | Op de GPU | Per job | Uitkomst |
+| --- | --- | --- | --- |
+| `llama3.1:8b` | 16% | 11-40 s | alle velden en labels goed; mail in het Nederlands samengevat |
+| `llama3.2:3b` | 34% | 4-23 s | mail goed, foutlog-extract fout |
+| `gemma3:4b` | 10% | 9-31 s | vatte een log in het Spaans samen |
+| `qwen2.5:3b` | 42% | 5-22 s | verkeerde labels |
+| `qwen3:4b` | 51% | timeout | negeert `think: false` en blijft doorpraten |
+| `gemma3:1b` | 100% | 2-4 s | foutlog goed, mail in het Engels, labels soms fout |
+| `qwen3:1.7b`, `llama3.2:1b`, `qwen2.5:1.5b` | 48-86% | 1-60 s | kopieerden de tekst of gaven lege velden |
+
+Gekozen: `llama3.1:8b`. Op de laptop draait het grotendeels op de CPU: een job bezet dan de vier cores en ~5 GB RAM,
+en de langste toegestane tekst duurt ~40 s (binnen de standaard-timeout van 60 s; wachten in de rij telt mee).
+Op de desktop past het met 8192 context helemaal in de 8 GB van de GTX 1080 (controleren met `ollama ps`).
 
 ## Beheer
 

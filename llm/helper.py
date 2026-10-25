@@ -28,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JOBS = ("summarize", "extract")
 MAX_TIMEOUT = 600
+# Hoeveel tokens het model mag schrijven: een model dat niet ophoudt, bezet anders de GPU tot de timeout.
+MAX_OUTPUT_TOKENS = {"summarize": 512, "extract": 1024}
 CHARS_PER_TOKEN = 3  # voorzichtig: tekst die mogelijk niet in de context past, weigeren we liever dan afkappen
 
 # Alleen loopback en het tailnet; ufw houdt het LAN al tegen, dit is de tweede laag.
@@ -223,7 +225,7 @@ def run_job(job, body, timeout):
                        "too_long")
 
     request = {"model": CONF["model"], "stream": False, "think": False, "keep_alive": "10m",
-               "options": {"num_ctx": CONF["num_ctx"], "temperature": 0.2}}
+               "options": {"num_ctx": CONF["num_ctx"], "temperature": 0.2, "num_predict": MAX_OUTPUT_TOKENS[job]}}
     schema = None
     if job == "summarize":
         system = SUMMARIZE_PROMPT
@@ -250,6 +252,8 @@ def run_job(job, body, timeout):
                 raise JobError(504, f"De job duurde langer dan {timeout:.0f} s (timeout).", "timeout")
             raise
         content = resp.get("message", {}).get("content", "").strip()
+        if resp.get("done_reason") == "length":  # opnieuw proberen loopt net zo vast
+            raise JobError(502, f"Het model hield na {MAX_OUTPUT_TOKENS[job]} tokens niet op.", "invalid_output")
         if schema is None:
             if content:
                 return content, resp

@@ -38,6 +38,14 @@ minuut gaat de taak terug in de rij; Claude gaat verder in dezelfde sessie en we
 PR, en je krijgt een melding. Alleen commentaar van `OWNER_GITHUB` (`chrisfaber95`) telt; andere accounts worden
 genegeerd. Elke ronde krijgt een nieuwe limiet.
 
+## Jobs en skills (F-022)
+
+Op dezelfde pagina staan de tabs **Jobs** (geplande jobs, op het lokale model of op Claude) en **Skills** (vaste
+manieren van werken die Claude hergebruikt). Een Claude-job loopt als een gewone taak door deze rij, met "job <naam>"
+in de lijst; hij meldt alleen wat jou nodig heeft (geen melding bij een gewoon antwoord). Na een gelukte taak kan
+Claude een skill voorstellen: dat wordt een PR in de homelab-repo die jij merget of sluit. Alles hierover:
+`docs/jobs.md`.
+
 ## Wat Claude in de inbox wel en niet kan
 
 - **Niet**: pushen, een PR openen of mergen, naar `main` pushen. `inbox` heeft geen GitHub-token en geen `gh`-login;

@@ -63,6 +63,9 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.
 - F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105) en
   `bin/homelab-inbox-task` (draait als `inbox`, via één sudo-regel); uitleg in `docs/inbox.md`.
+- F-022: jobs en skills in dezelfde dienst (`homelab-inbox`, tabs Jobs en Skills; `homelab-inbox jobs`). Jobs in
+  `jobs/<naam>.md` op de branch `jobs` (nooit gemerged; alleen de pagina schrijft erop, de pre-push-hook houdt jou
+  tegen); skills in `skills/<naam>/SKILL.md` op `main`, alleen via een PR. Uitleg in `docs/jobs.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`; geïnstalleerd met `scripts/17-llm.sh`. Testen zonder root kan met een eigen `ollama serve` op een
   andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -78,7 +81,12 @@ Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020;
    `REMOTE_<NAAM>`, `INBOX_ALLOW_ALL=1` (zie de docstring).
 2. Backups naar de externe 2 TB USB-HDD (F-020; de gebruiker heeft hem op 2026-10-26 aan de laptop gehangen).
    Mounten is root-werk buiten F-019: een script dat de gebruiker draait, mount op UUID met `nofail`.
-3. Daarna de ROADMAP-volgorde: F-022, F-023, F-024. F-022 en F-023 bouwen op de inbox; begin pas na de merge van F-021.
+3. F-022 (branch `f-022-jobs`, gestapeld op `f-021-inbox`): na de merge van beide `scripts/21-inbox.sh` opnieuw en
+   als `claude` `scripts/18-claude.sh` (hook). Testen zonder root: als bij F-021, plus `OVERVIEW_CMD`, `LLM_URL` (een
+   nep-LLM) en `INBOX_SKILLS_DIR` (anders slaat prepare de skills over; nooit naar je eigen `~/.claude/skills`); de
+   functies laad je in Python met `SourceFileLoader`. Jobs-tijden in `JOB_TIMEZONE` (de box draait op UTC).
+4. Daarna de ROADMAP-volgorde: F-023, F-024. F-023 kan dezelfde aanpak als de jobs gebruiken (een eigen branch die
+   alleen de dienst schrijft).
 
 Nog door de gebruiker te testen (staat ook in `CHECKLIST.md`):
 - F-016: SSH vanaf een ander netwerk; de klep dicht.

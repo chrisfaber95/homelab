@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # homelab: F-018, het deel voor het account claude (zonder sudo). Na scripts/18-projects.sh.
 # - Rootless Docker voor claude: Claude bouwt, draait en stopt containers zonder de groep docker of sudo.
-# - Een globale pre-push-hook: Claude pusht niet naar main of master, alleen naar branches (en opent een PR).
+# - Een globale pre-push-hook: Claude pusht niet naar main of master, alleen naar branches (en opent een PR), en
+#   niet naar jobs: een job wordt alleen actief door jouw bevestiging op de pagina (F-022).
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
@@ -35,6 +36,9 @@ while read -r _ _ remote_ref _; do
   case $remote_ref in
     refs/heads/main|refs/heads/master)
       echo "pre-push: Claude pusht niet naar ${remote_ref#refs/heads/}; push een branch en open een PR." >&2
+      exit 1 ;;
+    refs/heads/jobs)
+      echo "pre-push: alleen de pagina van de inbox (jouw bevestiging) zet jobs op de branch jobs (F-022)." >&2
       exit 1 ;;
   esac
 done

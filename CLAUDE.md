@@ -66,6 +66,10 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-022: jobs en skills in dezelfde dienst (`homelab-inbox`, tabs Jobs en Skills; `homelab-inbox jobs`). Jobs in
   `jobs/<naam>.md` op de branch `jobs` (nooit gemerged; alleen de pagina schrijft erop, de pre-push-hook houdt jou
   tegen); skills in `skills/<naam>/SKILL.md` op `main`, alleen via een PR. Uitleg in `docs/jobs.md`.
+- F-023: geheugen in dezelfde dienst (tab Geheugen; `homelab-inbox memory`). Voorkeuren, feiten en geschiedenis als
+  bestanden op de branch `memory` (nooit gemerged; alleen de inbox schrijft erop, de pre-push-hook houdt jou tegen).
+  Claude bewaart met `GEHEUGEN:`-blokken onder zijn laatste bericht; auto memory van Claude Code staat uit voor `inbox`.
+  Uitleg in `docs/memory.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`; geïnstalleerd met `scripts/17-llm.sh`. Testen zonder root kan met een eigen `ollama serve` op een
   andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
@@ -86,8 +90,8 @@ Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020;
    `github:`-bronnen met het echte token.
 2. Backups naar de externe 2 TB USB-HDD (PR #11, open): de laptop zag de schijf nog niet (geen USB-opslag in `lsusb`).
    De gebruiker pakt dat later op.
-3. Daarna de ROADMAP-volgorde: F-023, F-024 (de gebruiker zegt wanneer). F-023 kan dezelfde aanpak als de jobs gebruiken
-   (een eigen branch die alleen de dienst schrijft).
+3. F-023 (geheugen) is gebouwd en getest zonder root (2026-10-26, PR `f-023-memory`); na de merge `21-inbox.sh` en
+   `18-claude.sh` en de tests in `CHECKLIST.md`. Daarna F-024: eerst de visuele richting met de gebruiker afspreken.
 
 Nog door de gebruiker te testen (staat ook in `CHECKLIST.md`):
 - F-016: SSH vanaf een ander netwerk; de klep dicht.

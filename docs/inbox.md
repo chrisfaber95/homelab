@@ -46,6 +46,12 @@ in de lijst; hij meldt alleen wat jou nodig heeft (geen melding bij een gewoon a
 Claude een skill voorstellen: dat wordt een PR in de homelab-repo die jij merget of sluit. Alles hierover:
 `docs/jobs.md`.
 
+## Geheugen (F-023)
+
+Elke taak en Claude-job begint met wat Claude over jou, de box en de repo weet, en kan eerdere taken doorzoeken. Corrigeer
+je Claude in review-commentaar of een antwoord, dan bewaart hij dat als voorkeur. Alles staat op de tab **Geheugen**,
+waar je het bewerkt of wist, en op de branch `memory`. Alles hierover: `docs/memory.md`.
+
 ## Wat Claude in de inbox wel en niet kan
 
 - **Niet**: pushen, een PR openen of mergen, naar `main` pushen. `inbox` heeft geen GitHub-token en geen `gh`-login;

@@ -17,6 +17,9 @@ Jobs (F-022): bestanden in jobs/ op de branch JOBS_BRANCH van de homelab-repo, g
 verzamelt tekst en laat het lokale model (F-017) samenvatten; een Claude-job wordt een inbox-taak met dezelfde rij en
 regels, plus een daglimiet (JOB_CLAUDE_CAP). Skills staan in skills/<naam>/SKILL.md op main en komen er alleen via een
 PR die de gebruiker merget; homelab-inbox-task zet ze voor elke taak in ~/.claude/skills van inbox.
+Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van de homelab-repo; alleen
+deze dienst schrijft erop (voor Claude via GEHEUGEN:-blokken onder zijn laatste bericht, voor de gebruiker via de pagina).
+Elke taak krijgt de voorkeuren en feiten in zijn systeemprompt en de geschiedenis als map om te doorzoeken.
 Instellingen: config/inbox.conf (en deploy.conf, admin.conf). Voor tests: INBOX_FAKE_GITHUB=1 (PR's alleen
 loggen, antwoorden uit RUNNER_HOME/fake_github.json, pushen naar REMOTE_<NAAM>-paden), TASK_CMD (in plaats van sudo -u inbox homelab-inbox-task), NTFY_FAKE=1,
 INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_URL.
@@ -30,6 +33,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -127,7 +131,9 @@ def db():
         pending_input TEXT, question TEXT, answer TEXT, summary TEXT, pr_number INTEGER, pr_url TEXT,
         last_comment_at TEXT, turns INTEGER DEFAULT 0, note TEXT)""")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-    for col, kind in (("job", "TEXT"), ("run_id", "INTEGER")):  # F-022: een taak die een job-run is
+    # F-022: een taak die een job-run is; F-023: bron van wat Claude deze ronde leert, geschiedenis geschreven
+    for col, kind in (("job", "TEXT"), ("run_id", "INTEGER"), ("mem_source", "TEXT"), ("mem_link", "TEXT"),
+                      ("remembered", "INTEGER DEFAULT 0")):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
     conn.executescript("""
@@ -261,7 +267,7 @@ def write_prompt(t, text):
     share.mkdir(parents=True, exist_ok=True)
     os.chmod(share, 0o2750)
     (share / "prompt.txt").write_text(text)
-    (share / "system.txt").write_text(SYSTEM_PROMPT.format(repo=t["repo"], id=t["id"]))
+    (share / "system.txt").write_text(SYSTEM_PROMPT.format(repo=t["repo"], id=t["id"]) + memory_for(t))
     for f in ("prompt.txt", "system.txt"):
         os.chmod(share / f, 0o640)
 
@@ -275,6 +281,7 @@ def run_round(task_id):
         cache = refresh_cache(t["repo"], repos[t["repo"]])
         if t["repo"] != "homelab":
             refresh_cache("homelab", repos["homelab"])  # de skills komen uit main van homelab
+        load_memory()  # wat de gebruiker net wiste of veranderde, geldt al voor deze ronde
         first = t["rounds"] == 0
         if first:
             code, out = task_cmd("prepare", task_id, t["repo"])
@@ -292,8 +299,12 @@ def run_round(task_id):
         if not t["pr_number"]:
             task_cmd("cleanup", task_id)
         notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
-        return
-    finish_round(task_id, cache, result, turns, capped)
+        return after_round(task_id, [])
+    text, blocks = split_memory((result or {}).get("result") or "")
+    try:
+        finish_round(task_id, cache, text, result, capped)
+    finally:
+        after_round(task_id, blocks if capped is None else [])
 
 
 def stream_claude(task_id, mode):
@@ -374,9 +385,9 @@ def label(t):
     return f"Job {t['job']}" if t["job"] else f"Inbox {t['id']}"
 
 
-def finish_round(task_id, cache, result, turns, capped):
+def finish_round(task_id, cache, text, result, capped):
     t = get(task_id)
-    text, proposal = split_skill((result or {}).get("result") or "")
+    text, proposal = split_skill(text)
     if proposal and kind_of(text) in ("KLAAR", "ANTWOORD") and not capped:
         threading.Thread(target=propose_skill, args=(t, proposal), daemon=True).start()
     kind, _, body = text.strip().partition(":")
@@ -493,7 +504,7 @@ def check_pr(t):
     if isinstance(pr, dict) and pr.get("state") == "closed":
         update(t["id"], status="merged" if pr.get("merged") else "closed", ended=now())
         task_cmd("cleanup", t["id"])
-        return
+        return remember_task(t["id"])
     since = t["last_comment_at"] or t["ended"] or t["created"]
     owner = os.environ.get("OWNER_LOGIN", CONF["OWNER_GITHUB"])
     comments = []
@@ -506,13 +517,18 @@ def check_pr(t):
             if (c.get("user") or {}).get("login") == owner and when > since and body \
                     and "<!-- homelab-inbox" not in body:
                 where = f" (bij {c['path']}:{c.get('line') or c.get('original_line')})" if c.get("path") else ""
-                comments.append((when, f"{body}{where}"))
+                comments.append((when, f"{body}{where}", c.get("html_url") or t["pr_url"]))
     if comments:
         comments.sort()
-        text = "Review-commentaar op de PR:\n\n" + "\n\n".join(f"- {b}" for _, b in comments) + \
-               "\n\nVerwerk dit op dezelfde branch en eindig weer met KLAAR: (of VRAAG:/GEWEIGERD:)."
-        update(t["id"], status="queued", pending_input=text, last_comment_at=comments[-1][0], ended=None)
+        text = "Review-commentaar op de PR:\n\n" + "\n\n".join(f"- {b}" for _, b, _ in comments) + \
+               "\n\nVerwerk dit op dezelfde branch en eindig weer met KLAAR: (of VRAAG:/GEWEIGERD:). " + LEARN_HINT
+        update(t["id"], status="queued", pending_input=text, last_comment_at=comments[-1][0], ended=None,
+               mem_source=f"jouw PR-commentaar op PR #{t['pr_number']} ({label(t).lower()})", mem_link=comments[0][2])
         log(f"taak {t['id']}: {len(comments)} review-commentaar, terug in de rij")
+
+
+LEARN_HINT = ("Is iets hiervan een correctie die ook voor latere taken geldt, bewaar het dan als voorkeur "
+              "(GEHEUGEN: voorkeur ...).")
 
 
 def recover():
@@ -669,10 +685,8 @@ def parse_job(name, text, repos=None, skills=None):
     return job
 
 
-def jobs_sync():
-    """De clone met de job-branch, gelijk aan GitHub (of leeg, als de branch er nog niet is)."""
-    branch = CONF.get("JOBS_BRANCH", "jobs")
-    d = JOBS_DIR
+def sync_branch(d, branch):
+    """Een clone van één branch van de homelab-repo, gelijk aan GitHub (of leeg, als de branch er (nog) niet is)."""
     if not (d / ".git").is_dir():
         d.mkdir(parents=True, exist_ok=True)
         git(d, "init", "--quiet")
@@ -684,8 +698,17 @@ def jobs_sync():
         git(d, "checkout", "--quiet", "--force", "-B", branch, "FETCH_HEAD")
         git(d, "clean", "-fdq")
     else:
+        # Weg op GitHub (nog nooit opgeslagen, of gewist): hier ook leeg, zodat er niets ouds blijft hangen.
         git(d, "symbolic-ref", "HEAD", f"refs/heads/{branch}")
+        git(d, "update-ref", "-d", f"refs/heads/{branch}")
+        git(d, "read-tree", "--empty")
+        git(d, "clean", "-fdxq")
     return d
+
+
+def jobs_sync():
+    """De clone met de job-branch."""
+    return sync_branch(JOBS_DIR, CONF.get("JOBS_BRANCH", "jobs"))
 
 
 def load_jobs(fetch=True):
@@ -775,6 +798,7 @@ def job_scheduler():
         try:
             if time.monotonic() - last_load > 60:
                 load_jobs()
+                load_memory()
                 last_load = time.monotonic()
             tick(datetime.now(timezone.utc))
         except Exception as e:
@@ -1049,6 +1073,212 @@ def propose_skill(t, proposal):
         notify(f"Skill-voorstel {name} mislukt", str(e)[:300], page_url(t["id"]))
 
 
+# --- Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van de homelab-repo
+
+MEMORY_DIR = HOME / "memory-repo"
+MEM_KINDS = {"voorkeuren": "voorkeur", "feiten": "feit", "geschiedenis": "geschiedenis"}
+MEM_ID_RE = re.compile(r"^((voorkeuren|feiten)/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]{0,40}"
+                       r"|geschiedenis/\d{4}-\d{2}/[a-z0-9][a-z0-9-]{0,40})$")
+MEM_BLOCK_RE = re.compile(r"^GEHEUGEN:[ \t]*(voorkeur|feit)[ \t]+([a-z0-9][a-z0-9-]*)[ \t]+([a-z0-9][a-z0-9-]{0,40})"
+                          r"[ \t]*\n(.*?)(?=^GEHEUGEN:|^SKILL-VOORSTEL:|\Z)", re.S | re.M)
+# Wat op een token, wachtwoord of sleutel lijkt; zoiets komt nooit in het geheugen.
+SECRET_RE = re.compile(
+    r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-ant-[\w-]{10,}|sk-[A-Za-z0-9]{20,}|xox[abprs]-[\w-]{10,}"
+    r"|AKIA[0-9A-Z]{16}|tskey-[\w-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{5,}"
+    r"|(?i:bearer)\s+[\w.~+/-]{16,}=*|(?i:token|password|passwd|secret|api[_-]?key|wachtwoord)\s*[:=]\s*\S{8,}")
+MEM_MAX = 1500        # tekens per voorkeur of feit van Claude
+MEM_FINAL = ("answered", "pr_open", "capped", "cancelled", "failed", "refused", "merged", "closed")
+CLAUDE_AUTHOR = ("Claude (homelab-inbox)", "noreply@anthropic.com")
+_mem_lock = threading.RLock()
+MEMORY = []  # alle items, zoals op de branch
+
+MEMORY_PROMPT = """
+Geheugen (F-023). De gebruiker ziet, bewerkt en wist alles hiervan op de pagina (tab Geheugen).
+Voorkeuren van de gebruiker (volg ze):
+{prefs}
+Feiten over de box en {repo}:
+{facts}
+Geschiedenis: één bestand per eerdere taak of Claude-job in {hist} (kop met datum, status en link). Vraagt de taak naar
+iets van eerder ("wanneer faalde ... het laatst?"), zoek daar dan met grep en noem in je antwoord de datum en de link
+van de taak die je vond. Recent voor {repo}:
+{recent}
+- Bewaren: leerde je iets blijvends, zet dan onder je laatste bericht (vóór een eventueel SKILL-VOORSTEL) één blok per
+  item, precies zo:
+  GEHEUGEN: voorkeur <algemeen|repo> <naam-met-streepjes>
+  de voorkeur in één tot drie zinnen
+  GEHEUGEN: feit <box|repo> <naam-met-streepjes>
+  het feit in één tot drie zinnen
+  Een voorkeur als de gebruiker je corrigeert of zegt hoe het anders moet (in PR-commentaar of een antwoord) en dat ook
+  voor latere taken geldt. Een feit als je iets blijvends over de box of een repo ontdekt (een dienst, een build- of
+  deploystap) of een bekend feit niet meer klopt. Gaat het over iets wat er al staat, gebruik dan precies die naam:
+  dan wordt het bijgewerkt in plaats van verdubbeld. Niets nieuws: geen blok.
+  Nooit tokens, wachtwoorden, sleutels of andere geheimen, en niets over andere mensen dan de gebruiker."""
+
+
+def memory_sync():
+    return sync_branch(MEMORY_DIR, CONF.get("MEMORY_BRANCH", "memory"))
+
+
+def parse_entry(mid, text):
+    meta, body = {}, text
+    if text.startswith("---\n"):
+        head, sep, rest = text[4:].partition("\n---")
+        if sep:
+            try:
+                meta = yaml.safe_load(head) or {}
+            except yaml.YAMLError:
+                meta = {}
+            body = rest.partition("\n")[2]
+    if not isinstance(meta, dict):
+        meta = {}
+    kind = mid.split("/")[0]
+    about = str(meta.get("over") or (mid.split("/")[1] if kind != "geschiedenis" else "algemeen"))
+    return {"id": mid, "kind": kind, "about": about, "name": mid.rsplit("/", 1)[1], "body": body.strip(),
+            "added": str(meta.get("toegevoegd") or ""), "changed": str(meta.get("gewijzigd") or meta.get("toegevoegd") or ""),
+            "source": str(meta.get("bron") or ""), "link": str(meta.get("link") or ""),
+            "status": str(meta.get("status") or ""), "pr": str(meta.get("pr") or "")}
+
+
+def load_memory(fetch=True):
+    with _mem_lock:
+        if fetch:
+            try:
+                memory_sync()
+            except Exception as e:
+                log(f"geheugen ophalen: {e}")  # dan het laatst opgehaalde
+        found = []
+        for f in sorted(MEMORY_DIR.glob("*/*/*.md")):
+            mid = f.relative_to(MEMORY_DIR).with_suffix("").as_posix()
+            if MEM_ID_RE.match(mid):
+                found.append(parse_entry(mid, f.read_text()))
+        MEMORY[:] = found
+
+
+def mem_get(mid):
+    return next((m for m in MEMORY if m["id"] == mid), None)
+
+
+def entry_text(about, source, link, body, added, **extra):
+    head = {"over": about, "toegevoegd": added, "gewijzigd": now(), "bron": source}
+    head.update({k: v for k, v in {"link": link, **extra}.items() if v})
+    return ("---\n" + "".join(f"{k}: {json.dumps(v, ensure_ascii=False)}\n" for k, v in head.items())
+            + f"---\n{body.strip()}\n")
+
+
+def save_memory(changes, message, author=("homelab-inbox", "homelab-inbox@homelab")):
+    """Eén commit op de geheugen-branch: {id: tekst, of None om te wissen}, gepusht met het token van de dienst."""
+    branch = CONF.get("MEMORY_BRANCH", "memory")
+    with _mem_lock:
+        d = memory_sync()
+        for mid, text in changes.items():
+            f = d / f"{mid}.md"
+            if text is None:
+                f.unlink(missing_ok=True)
+            else:
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(text)
+        readme = d / "README.md"
+        if not readme.exists():
+            readme.write_text("# memory\n\nHet geheugen van Claude in de homelab-inbox (F-023): `voorkeuren/`, `feiten/` en "
+                              "`geschiedenis/`, één bestand per item. Uitleg: `docs/memory.md` op `main`.\nDeze branch "
+                              "wordt nooit gemerged; alleen de homelab-inbox schrijft erop (voor Claude en voor jou).\n")
+        git(d, "add", "-A")
+        if not git(d, "status", "--porcelain").strip():
+            return
+        git(d, "-c", f"user.name={author[0]}", "-c", f"user.email={author[1]}", "commit", "--quiet", "-m", message)
+        # Alleen naar de geheugen-branch: de bestemming staat hier vast.
+        git(d, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+        load_memory(fetch=False)
+
+
+def split_memory(text):
+    """Het antwoord van Claude zonder GEHEUGEN:-blokken, en die blokken als (soort, over, naam, tekst)."""
+    blocks = [(k, a, n, b.strip()) for k, a, n, b in MEM_BLOCK_RE.findall(text)]
+    return MEM_BLOCK_RE.sub("", text).strip(), blocks
+
+
+def memory_for(t):
+    """Het stuk geheugen voor de systeemprompt van een taak; de geschiedenis gaat als map naast de taak."""
+    repo = t["repo"]
+    share = HOME / "share" / str(t["id"])
+    hist = share / "geschiedenis"
+    shutil.rmtree(hist, ignore_errors=True)
+    hist.mkdir(parents=True)
+    entries = sorted((m for m in MEMORY if m["kind"] == "geschiedenis"), key=lambda m: m["changed"], reverse=True)
+    for m in entries:
+        shutil.copyfile(MEMORY_DIR / f"{m['id']}.md", hist / f"{m['id'].split('/', 1)[1].replace('/', '-')}.md")
+
+    def lines(items):
+        return "\n".join(f"- [{m['about']}/{m['name']}] {m['body']}" for m in items) or "- (nog niets)"
+    prefs = [m for m in MEMORY if m["kind"] == "voorkeuren" and m["about"] in ("algemeen", repo)]
+    facts = [m for m in MEMORY if m["kind"] == "feiten" and m["about"] in ("box", repo)]
+    recent = [f"- {m['added'][:10]} {m['status']}: {first_line(m['body']).lstrip('# ')} ({m['link']})"
+              for m in entries if m["about"] == repo][:int(CONF.get("MEMORY_RECENT", 10))]
+    return MEMORY_PROMPT.format(prefs=lines(prefs), facts=lines(facts), repo=repo, hist=hist,
+                                recent="\n".join(recent) or "- (nog niets)")
+
+
+def save_learned(t, blocks):
+    """Wat Claude onder zijn laatste bericht bewaarde (GEHEUGEN:): voorkeuren en feiten, nooit geheimen."""
+    repos, changes, notes = repo_list(), {}, []
+    source = t["mem_source"] or label(t)
+    link = t["mem_link"] or page_url(t["id"])
+    for kind, about, name, body in blocks:
+        folder = "voorkeuren" if kind == "voorkeur" else "feiten"
+        if about not in repos and about != ("algemeen" if kind == "voorkeur" else "box"):
+            notes.append(f"{name}: onbekend onderwerp {about}")
+        elif not body or len(body) > MEM_MAX:
+            notes.append(f"{name}: leeg of langer dan {MEM_MAX} tekens")
+        elif SECRET_RE.search(body):
+            notes.append(f"{name}: niet bewaard, het lijkt een geheim te bevatten")
+        else:
+            old = mem_get(f"{folder}/{about}/{name}")
+            changes[f"{folder}/{about}/{name}"] = entry_text(about, source, link, body, old["added"] if old else now())
+    if changes:
+        save_memory(changes, f"geheugen: {', '.join(changes)} (Claude, {label(t).lower()}; bron: {source})",
+                    CLAUDE_AUTHOR)
+        notes.insert(0, f"{len(changes)} item(s) in het geheugen bewaard")
+    return notes
+
+
+def remember_task(task_id):
+    """De geschiedenis van een afgeronde taak (of Claude-job) bijwerken; na een wis door de gebruiker niet opnieuw."""
+    t = get(task_id)
+    if not t or t["status"] not in MEM_FINAL:
+        return
+    mid = f"geschiedenis/{t['created'][:7]}/taak-{t['id']}"
+    old = mem_get(mid)
+    if t["remembered"] and not old:
+        return
+    asked = (JOBS.get(t["job"], {}).get("instruction") or f"job {t['job']}") if t["job"] else t["text"]
+    result = t["answer"] or t["summary"] or t["question"] or t["note"] or ""
+    body = f"# {title_of(t)}\n\nGevraagd:\n{asked[:1000]}\n\nResultaat:\n{result[:2000]}"
+    text = entry_text(t["repo"], label(t), page_url(t["id"]), SECRET_RE.sub("[verborgen]", body),
+                      old["added"] if old else t["created"], status=STATUS_NL[t["status"]], pr=t["pr_url"],
+                      job=t["job"])
+    save_memory({mid: text}, f"geheugen: geschiedenis {label(t).lower()} ({STATUS_NL[t['status']]})")
+    update(task_id, remembered=1)
+
+
+def after_round(task_id, blocks):
+    """Na elke ronde: geleerde items bewaren, de geschiedenis bijwerken, de kopie voor Claude opruimen. Faalt nooit."""
+    notes = []
+    try:
+        if blocks:
+            notes = save_learned(get(task_id), blocks)
+    except Exception as e:
+        log(f"taak {task_id}: geheugen bewaren: {e}")
+        notes = [f"geheugen bewaren mislukt: {e}"[:200]]
+    try:
+        remember_task(task_id)
+    except Exception as e:
+        log(f"taak {task_id}: geschiedenis: {e}")
+    shutil.rmtree(HOME / "share" / str(task_id) / "geschiedenis", ignore_errors=True)
+    if notes:
+        note = get(task_id)["note"]
+        update(task_id, note="; ".join(([note] if note else []) + notes)[:1000])
+
+
 # --- Jobs: een job opstellen uit gewone woorden (Claude, zonder tools)
 
 DRAFT_SYSTEM = """Je stelt een job-bestand op voor de homelab-inbox (F-022). Je hebt geen tools; je antwoordt alleen met
@@ -1188,7 +1418,7 @@ CSS = """:root{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent
 --bad:#f87171;--ok:#4ade80}}
 body{background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:16px}
 h1{font-size:1.35em;margin:0 0 .6em}h2{font-size:1.05em;margin:1.4em 0 .4em}a{color:var(--accent)}
-textarea,select,button{font:inherit;width:100%;box-sizing:border-box;margin:.25em 0;padding:.55em;border-radius:8px;
+textarea,select,button,input{font:inherit;width:100%;box-sizing:border-box;margin:.25em 0;padding:.55em;border-radius:8px;
 border:1px solid var(--line);background:var(--bg);color:var(--fg)}textarea{min-height:7em}
 button{background:var(--accent);color:var(--bg);border:0;font-weight:600}button.ghost{background:none;color:var(--bad);
 border:1px solid var(--bad)}.task{border-top:1px solid var(--line);padding:.6em 0}.muted{color:var(--muted);font-size:.9em}
@@ -1196,11 +1426,16 @@ border:1px solid var(--bad)}.task{border-top:1px solid var(--line);padding:.6em 
 .st.merged{color:var(--ok)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:none;margin:.3em 0}
 .st.run-failed,.st.run-held,.st.run-capped,.st.run-question{color:var(--bad)}.st.run-ok,.st.run-pr{color:var(--ok)}
 nav{margin-bottom:.6em}dl{display:grid;grid-template-columns:max-content 1fr;gap:.2em .8em;margin:.4em 0}dt{color:var(--muted)}
-dd{margin:0;overflow-wrap:anywhere}form{margin:.5em 0}code{overflow-wrap:anywhere}"""
+dd{margin:0;overflow-wrap:anywhere}form{margin:.5em 0}code{overflow-wrap:anywhere}
+h3{font-size:.95em;margin:1em 0 .2em;color:var(--muted)}.kind{font-size:.8em;border:1px solid var(--line);
+border-radius:6px;padding:0 .35em;color:var(--muted)}"""
 
 
 def local(iso):
-    return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    except ValueError:
+        return iso  # een met de hand bewerkte datum in het geheugen
 
 
 def page(title, body, refresh=False):
@@ -1260,7 +1495,8 @@ def task_page(t):
 
 
 def nav():
-    return '<nav class="muted"><a href="/">Taken</a> · <a href="/jobs">Jobs</a> · <a href="/skills">Skills</a></nav>'
+    return ('<nav class="muted"><a href="/">Taken</a> · <a href="/jobs">Jobs</a> · <a href="/skills">Skills</a> · '
+            '<a href="/memory">Geheugen</a></nav>')
 
 
 def form(action, inner, button, ghost=False):
@@ -1419,6 +1655,77 @@ def skills_page():
                 f'{props or "<p class=muted>Nog geen voorstellen.</p>"}')
 
 
+def mem_matches(m, words):
+    hay = " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
+    return all(w in hay for w in words)
+
+
+def mem_row(m):
+    e = html.escape
+    title = first_line(m["body"]).lstrip("# ") if m["kind"] == "geschiedenis" else m["name"]
+    status = f' · <span class="st">{e(m["status"])}</span>' if m["status"] else ""
+    return (f'<div class="task"><a href="/memory/e/{e(m["id"])}">{e(title)}</a> <span class="kind">{e(m["about"])}</span>'
+            f'{status}<div class="muted">{e(first_line(m["body"]) if m["kind"] != "geschiedenis" else "")}</div>'
+            f'<div class="muted">{local(m["changed"])} · {e(m["source"] or "-")}</div></div>')
+
+
+def memory_page(q="", error=None):
+    e = html.escape
+    words = q.lower().split()
+    hits = [m for m in MEMORY if mem_matches(m, words)]
+    abouts = ["algemeen", "box", *sorted(repo_list())]
+    parts = [f'{nav()}<h1>Geheugen</h1><p class="muted">Wat Claude in de inbox over jou, de box en eerdere taken weet. '
+             f'Elke taak en Claude-job begint met de voorkeuren en de feiten; de geschiedenis kan hij doorzoeken. Wat je '
+             f'hier wist of verandert, geldt vanaf de volgende taak.</p>'
+             f'<form method="get" action="/memory"><input type="search" name="q" value="{e(q)}" '
+             f'placeholder="Zoeken, bijvoorbeeld: deploy mislukt"><button>Zoeken</button></form>']
+    if error:
+        parts.append(f'<p class="st failed">{e(error)}</p>')
+    for kind, title in (("voorkeuren", "Voorkeuren"), ("feiten", "Feiten"), ("geschiedenis", "Geschiedenis")):
+        items = [m for m in hits if m["kind"] == kind]
+        parts.append(f'<h2>{title} <span class="muted">({len(items)})</span></h2>')
+        if kind == "geschiedenis":
+            items.sort(key=lambda m: m["added"], reverse=True)
+            shown = items if q else items[:30]
+            parts.append("".join(mem_row(m) for m in shown) or '<p class="muted">Niets.</p>')
+            if len(shown) < len(items):
+                parts.append(f'<p class="muted">De nieuwste 30; zoek om de rest te vinden.</p>')
+            continue
+        for about in sorted({m["about"] for m in items}, key=lambda a: (a not in ("algemeen", "box"), a)):
+            parts.append(f'<h3>{e(about)}</h3>' + "".join(mem_row(m) for m in items if m["about"] == about))
+        if not items:
+            parts.append('<p class="muted">Niets.</p>')
+    opts = "".join(f'<option value="{e(a)}">{e(a)}</option>' for a in abouts)
+    parts.append('<h2>Zelf toevoegen</h2>' + form(
+        "/memory/add", '<select name="kind"><option value="voorkeuren">voorkeur</option><option value="feiten">feit'
+        f'</option></select><select name="about">{opts}</select><input name="name" required placeholder="naam-met-'
+        'streepjes" pattern="[a-z0-9][a-z0-9-]{0,40}"><textarea name="text" required placeholder="Bijvoorbeeld: '
+        'houd PR\'s klein, één onderwerp per PR"></textarea>', "Toevoegen"))
+    return page("geheugen", "".join(parts))
+
+
+def entry_page(m, error=None, text=None):
+    e = html.escape
+    src = e(m["source"] or "-")
+    if m["link"]:
+        src = f'<a href="{e(m["link"])}">{src}</a>'
+    rows = [("Soort", MEM_KINDS[m["kind"]]), ("Over", e(m["about"])), ("Toegevoegd", local(m["added"])),
+            ("Gewijzigd", local(m["changed"])), ("Bron", src)]
+    if m["status"]:
+        rows.append(("Status", e(m["status"])))
+    if m["pr"]:
+        rows.append(("PR", f'<a href="{e(m["pr"])}">{e(m["pr"])}</a>'))
+    parts = [f'{nav()}<h1>{e(m["name"])}</h1>', f'<p class="muted"><code>{e(m["id"])}.md</code> op de branch '
+             f'{e(CONF.get("MEMORY_BRANCH", "memory"))}</p>']
+    if error:
+        parts.append(f'<p class="st failed">{e(error)}</p>')
+    parts.append('<dl>' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows) + '</dl>')
+    parts.append(form(f"/memory/e/{e(m['id'])}/save", f'<textarea name="text" rows="10">{e(text or m["body"])}'
+                      '</textarea>', "Opslaan"))
+    parts.append(form(f"/memory/e/{e(m['id'])}/delete", "", "Wissen", ghost=True))
+    return page(f"geheugen {m['name']}", "".join(parts))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "homelab-inbox/1"
 
@@ -1448,6 +1755,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.guard():
             return
+        url = urllib.parse.urlsplit(self.path)
+        if url.path == "/memory":
+            return self.send(200, memory_page(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
+        if (m := re.fullmatch(r"/memory/e/(.+)", self.path)) and (entry := mem_get(m.group(1))):
+            return self.send(200, entry_page(entry))
         m = re.fullmatch(r"/task/(\d+)", self.path)
         if self.path == "/":
             return self.send(200, index_page())
@@ -1490,6 +1802,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(303, "", location=f"/task/{tid}")
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
+        if self.path.startswith("/memory/"):
+            return self.post_memory(form)
         m = re.fullmatch(r"/task/(\d+)/(answer|cancel)", self.path)
         t = get(int(m.group(1))) if m else None
         if not t:
@@ -1497,7 +1811,8 @@ class Handler(BaseHTTPRequestHandler):
         if m.group(2) == "answer" and t["status"] == "waiting" and form.get("answer", "").strip():
             update(t["id"], status="queued", answer=None, pending_input=(
                 f"Antwoord van de gebruiker op je vraag:\n\n{form['answer'].strip()[:8000]}\n\n"
-                "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die."))
+                "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die. "
+                + LEARN_HINT), mem_source=f"jouw antwoord in {label(t).lower()}", mem_link=page_url(t["id"]))
         elif m.group(2) == "cancel" and t["status"] in ACTIVE + ("waiting",):
             with _lock:
                 if t["status"] == "running":
@@ -1507,6 +1822,7 @@ class Handler(BaseHTTPRequestHandler):
                     update(t["id"], status="cancelled", ended=now())
                     if t["status"] == "waiting" and not t["pr_number"]:
                         threading.Thread(target=task_cmd, args=("cleanup", t["id"]), daemon=True).start()
+                    threading.Thread(target=after_round, args=(t["id"], []), daemon=True).start()
         return self.send(303, "", location=f"/task/{t['id']}")
 
 
@@ -1556,6 +1872,55 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(303, "", location=f"/job/{name}")
 
 
+    def post_memory(self, form):
+        """Geheugen (F-023): toevoegen, bewerken, wissen; elke wijziging een commit op naam van de gebruiker."""
+        text = form.get("text", "").replace("\r\n", "\n").strip()
+        who = f"door jou op de pagina vanaf {self.who}"
+        author = (f"{CONF['OWNER_GITHUB']} (via de pagina)", "homelab-inbox@homelab")
+        if self.path == "/memory/add":
+            kind, about, name = form.get("kind", ""), form.get("about", ""), form.get("name", "").strip()
+            mid = f"{kind}/{about}/{name}"
+            try:
+                if kind not in ("voorkeuren", "feiten") or about not in {"algemeen", "box", *repo_list()} \
+                        or not MEM_ID_RE.match(mid):
+                    raise ValueError("kies voorkeur of feit, een onderwerp uit de lijst en een naam met kleine "
+                                     "letters, cijfers en streepjes")
+                if mem_get(mid):
+                    raise ValueError(f"{mid} bestaat al; bewerk dat item")
+                check_mem_text(text)
+                save_memory({mid: entry_text(about, "door jou toegevoegd", "", text, now())},
+                            f"geheugen: {mid} nieuw ({who})", author)
+            except Exception as ex:
+                return self.send(400, memory_page(error=str(ex)))
+            return self.send(303, "", location=f"/memory/e/{mid}")
+        m = re.fullmatch(r"/memory/e/(.+)/(save|delete)", self.path)
+        entry = mem_get(m.group(1)) if m else None
+        if not entry:
+            return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        try:
+            if m.group(2) == "delete":
+                save_memory({entry["id"]: None}, f"geheugen: {entry['id']} gewist ({who})", author)
+                return self.send(303, "", location="/memory")
+            check_mem_text(text)
+            source = entry["source"] if entry["source"].endswith("bewerkt door jou") or \
+                entry["source"] == "door jou toegevoegd" else f"{entry['source'] or '-'}, bewerkt door jou"
+            extra = {k: entry[k] for k in ("status", "pr")}
+            save_memory({entry["id"]: entry_text(entry["about"], source, entry["link"], text, entry["added"] or now(),
+                                                 **extra)}, f"geheugen: {entry['id']} bewerkt ({who})", author)
+        except Exception as ex:
+            return self.send(400, entry_page(entry, error=str(ex), text=text))
+        return self.send(303, "", location=f"/memory/e/{entry['id']}")
+
+
+def check_mem_text(text):
+    if not text:
+        raise ValueError("de tekst is leeg")
+    if len(text) > 4000:
+        raise ValueError("hooguit 4000 tekens")
+    if SECRET_RE.search(text):
+        raise ValueError("dit lijkt een token, wachtwoord of sleutel te bevatten; dat komt nooit in het geheugen")
+
+
 class Server(ThreadingHTTPServer):
     import socket as _s
     address_family = _s.AF_INET6
@@ -1570,6 +1935,7 @@ def serve():
     HOME.mkdir(parents=True, exist_ok=True)
     db().close()
     recover()
+    load_memory()
     Access.init()
     for target in (scheduler, poll_github, job_scheduler):
         threading.Thread(target=target, daemon=True).start()
@@ -1584,9 +1950,14 @@ def main():
     sub.add_parser("serve")
     sub.add_parser("list")
     sub.add_parser("jobs")
+    sub.add_parser("memory", help="het geheugen (F-023), eventueel gefilterd").add_argument("zoek", nargs="*")
     a = p.parse_args()
     if a.cmd == "serve":
         serve()
+    elif a.cmd == "memory":
+        load_memory(fetch=False)
+        for m in [m for m in MEMORY if mem_matches(m, [w.lower() for w in a.zoek])]:
+            print(f"{m['id']:44} {local(m['changed']):12} {first_line(m['body']).lstrip('# ')}")
     elif a.cmd == "jobs":
         load_jobs(fetch=False)
         for name, job in sorted(JOBS.items()):

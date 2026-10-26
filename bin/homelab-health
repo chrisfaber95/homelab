@@ -166,6 +166,16 @@ if [[ -d $STATE_DIR ]] && command -v homelab-deploy >/dev/null; then
   done
 fi
 
+# --- Task inbox (F-021)
+if [[ -f /etc/systemd/system/homelab-inbox.service ]]; then
+  inbox_port=$(sed -n 's/^INBOX_PORT=//p' "$CONFDIR/inbox.conf" 2>/dev/null)
+  if systemctl is-active --quiet homelab-inbox.service && ss -Htln "sport = :${inbox_port:-8105}" | grep -q .; then
+    report OK inbox "homelab-inbox luistert op poort ${inbox_port:-8105}"
+  else
+    report FAIL inbox "homelab-inbox draait niet ($(systemctl is-active homelab-inbox.service))"
+  fi
+fi
+
 # --- Backup (F-020): de laatste geslaagde backup, en ruimte op de backupschijf
 if [[ -r "$CONFDIR/backup.conf" ]]; then
   # shellcheck source=../config/backup.conf

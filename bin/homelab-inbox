@@ -1,0 +1,1606 @@
+#!/usr/bin/env python3
+"""homelab-inbox: taken voor Claude op de box, vanaf de telefoon (F-021).
+
+  homelab-inbox serve     de pagina (poort INBOX_PORT, alleen jouw Tailscale-login) en de wachtrij; dienst homelab-inbox
+  homelab-inbox list      de taken, nieuwste eerst
+  homelab-inbox jobs      de jobs (F-022): schema, volgende run, laatste resultaat
+
+Een taak is een repo uit de F-018-lijst plus vrije tekst. Hij draait als het account `inbox` (homelab-inbox-task, via
+één sudo-regel): Claude in auto mode, in een eigen werkkopie op branch inbox/<id>, zonder GitHub-toegang. Na afloop
+haalt de dienst de commits op als git-bundle (alleen data) en pusht hij ze zelf naar inbox/<id> met zijn eigen
+token, en opent hij de PR. Claude kan via de inbox dus niet mergen en niet naar main pushen.
+
+Laatste bericht van Claude: KLAAR: / ANTWOORD: / VRAAG: / GEWEIGERD: (zie SYSTEM_PROMPT), eventueel gevolgd door
+een SKILL-VOORSTEL: (F-022), waar de dienst een PR in de homelab-repo van maakt.
+
+Jobs (F-022): bestanden in jobs/ op de branch JOBS_BRANCH van de homelab-repo, gepland in JOB_TIMEZONE. Een lokale job
+verzamelt tekst en laat het lokale model (F-017) samenvatten; een Claude-job wordt een inbox-taak met dezelfde rij en
+regels, plus een daglimiet (JOB_CLAUDE_CAP). Skills staan in skills/<naam>/SKILL.md op main en komen er alleen via een
+PR die de gebruiker merget; homelab-inbox-task zet ze voor elke taak in ~/.claude/skills van inbox.
+Instellingen: config/inbox.conf (en deploy.conf, admin.conf). Voor tests: INBOX_FAKE_GITHUB=1 (PR's alleen
+loggen, antwoorden uit RUNNER_HOME/fake_github.json, pushen naar REMOTE_<NAAM>-paden), TASK_CMD (in plaats van sudo -u inbox homelab-inbox-task), NTFY_FAKE=1,
+INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_URL.
+"""
+import argparse
+import hashlib
+import hmac
+import html
+import json
+import os
+import re
+import secrets
+import shlex
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from datetime import datetime, time as dt_time, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_config():
+    conf = {}
+    for name in ("deploy.conf", "admin.conf", "llm.conf", "inbox.conf"):
+        f = ROOT / "config" / name
+        if f.exists():
+            for line in f.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    conf[key.strip()] = os.environ.get(key.strip(), value.strip().strip('"'))
+    return conf
+
+
+CONF = load_config()
+HOME = Path(os.environ.get("INBOX_RUNNER_HOME", CONF["RUNNER_HOME"]))
+DB = HOME / "inbox.db"
+FAKE_GH = os.environ.get("INBOX_FAKE_GITHUB") == "1"
+TASK_CMD = shlex.split(os.environ.get("TASK_CMD", "sudo -n -u inbox /usr/local/lib/homelab/bin/homelab-inbox-task"))
+REPOS_CONF = Path(os.environ.get("REPOS_CONF", "/srv/homelab/repos/homelab/config/repos.conf"))
+GH_TOKEN_FILE = Path("/etc/homelab/inbox-github-token")
+NTFY_TOKEN_FILE = Path("/etc/homelab/inbox-ntfy-token")
+SECRET_FILE = HOME / "csrf-secret"
+
+STATUS_NL = {"queued": "in de rij", "running": "bezig", "waiting": "wacht op jou", "pr_open": "PR open",
+             "answered": "beantwoord", "capped": "gestopt bij limiet", "cancelled": "geannuleerd",
+             "failed": "mislukt", "refused": "geweigerd", "merged": "gemerged", "closed": "PR gesloten"}
+ACTIVE = ("queued", "running")
+
+SYSTEM_PROMPT = """Je werkt voor de homelab-inbox: de gebruiker heeft vanaf zijn telefoon een taak gestuurd. Je zit in een
+eigen werkkopie van de repo {repo} op branch inbox/{id}; de gebruiker kijkt niet mee.
+- Je kunt niet pushen en geen PR openen of mergen; de inbox pusht na afloop jouw commits op deze branch en opent de
+  PR. Commit dus je werk op deze branch (kleine, duidelijke commits). Push niet en probeer het niet.
+- Werk alleen in deze werkkopie. Raak geen andere repo's, dev-clones (~/dev) of deploy-clones (/srv/homelab) aan.
+- Is de taak een vraag (opzoeken, uitleggen, "waarom ..."), dan commit je niets.
+- Machinewijzigingen (alleen in de homelab-repo) volgen F-019 (docs/admin.md): wat op de vaste lijst staat doe je met
+  `homelab-admin <actie> --reason "inbox-taak {id}: ..."`; al het andere als changes/NNNN-naam/apply.sh in een commit.
+  Verbiedt F-019 iets (kernel, driver, schijven, reboot, SSH/LAN-regels), doe het dan niet en zoek geen omweg.
+- Volg de CLAUDE.md van de repo, behalve waar die zegt dat je zelf pusht of een PR opent: dat doet de inbox.
+- Je laatste bericht begint met precies één van deze woorden, gevolgd door een dubbele punt:
+  KLAAR: wat je veranderd hebt, in 1 tot 3 zinnen (je hebt commits gemaakt)
+  ANTWOORD: het antwoord op een vraag (geen commits)
+  VRAAG: één vraag, als de taak te onduidelijk is om zonder te raden te beginnen (doe dan verder nog niets)
+  GEWEIGERD: waarom dit niet mag of niet kan
+- Stel hooguit één vraag per ronde. Heb je al een antwoord gekregen, neem dan een redelijke aanname en noem die.
+- Skills: de gemergde skills van de gebruiker staan in je skills; gebruik ze waar ze passen.
+- Ging de taak goed (KLAAR of ANTWOORD) en is jouw manier van werken herbruikbaar voor latere taken, en is er nog geen
+  skill voor, dan mag je onder je laatste bericht één skill voorstellen. Meestal doe je dat niet. Precies zo:
+  SKILL-VOORSTEL: naam-met-streepjes
+  beschrijving: één regel: waarvoor en wanneer je hem gebruikt
+  de instructies in markdown (stappen, valkuilen, commando's)
+  De inbox maakt er een PR van; de gebruiker beslist. Een bestaande skill verander je nooit zelf: een verbetering
+  stel je op dezelfde manier voor, onder dezelfde naam."""
+
+_lock = threading.RLock()
+_procs = {}      # taak-id -> Popen
+_cancel = set()  # taken die gestopt moeten worden
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+# --- Opslag
+
+def db():
+    conn = sqlite3.connect(DB, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY, repo TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL,
+        created TEXT NOT NULL, started TEXT, ended TEXT, session TEXT NOT NULL, rounds INTEGER DEFAULT 0,
+        pending_input TEXT, question TEXT, answer TEXT, summary TEXT, pr_number INTEGER, pr_url TEXT,
+        last_comment_at TEXT, turns INTEGER DEFAULT 0, note TEXT)""")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+    for col, kind in (("job", "TEXT"), ("run_id", "INTEGER")):  # F-022: een taak die een job-run is
+        if col not in cols:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS job_runs (id INTEGER PRIMARY KEY, job TEXT NOT NULL, kind TEXT, model TEXT,
+            due TEXT, created TEXT NOT NULL, started TEXT, ended TEXT, dispatched TEXT, status TEXT NOT NULL,
+            summary TEXT, note TEXT, task_id INTEGER, manual INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS job_state (name TEXT PRIMARY KEY, last_due TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS drafts (id INTEGER PRIMARY KEY, created TEXT NOT NULL, request TEXT NOT NULL,
+            base TEXT, status TEXT NOT NULL, text TEXT, error TEXT);
+        CREATE TABLE IF NOT EXISTS skill_prs (id INTEGER PRIMARY KEY, name TEXT NOT NULL, task_id INTEGER,
+            pr_url TEXT, created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);""")
+    return conn
+
+
+def get(task_id):
+    with db() as c:
+        return c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+
+
+def update(task_id, **fields):
+    with _lock, db() as c:
+        c.execute(f"UPDATE tasks SET {', '.join(k + '=?' for k in fields)} WHERE id=?", [*fields.values(), task_id])
+
+
+def tasks(limit=200):
+    with db() as c:
+        return c.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+# --- Repo's: precies de F-018-lijst plus homelab
+
+def repo_list():
+    repos = {"homelab": CONF["HOMELAB_REPO"]}
+    try:
+        for line in REPOS_CONF.read_text().splitlines():
+            parts = line.split("#", 1)[0].split()
+            if len(parts) == 3 and re.match(r"^[a-z0-9][a-z0-9-]*$", parts[0]):
+                repos[parts[0]] = parts[1]
+    except OSError:
+        pass
+    return repos
+
+
+# --- Meldingen en GitHub
+
+def notify(title, message, click=None):
+    if os.environ.get("NTFY_FAKE") == "1":
+        log(f"MELDING: {title} | {message} | {click or ''}")
+        return
+    try:
+        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message, "priority": 4,
+                "tags": ["robot"]}
+        if click:
+            body["click"] = click
+            body["actions"] = [{"action": "view", "label": "Openen", "url": click}]
+        req = urllib.request.Request(f"http://127.0.0.1:{CONF.get('NTFY_PORT', '8102')}/", method="POST",
+                                     data=json.dumps(body).encode(), headers={
+                                         "Authorization": f"Bearer {NTFY_TOKEN_FILE.read_text().strip()}",
+                                         "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).close()
+    except (OSError, urllib.error.URLError) as e:
+        log(f"melding niet verstuurd ({e}): {title}")
+
+
+def page_url(task_id=None):
+    base = f"http://{CONF.get('TAILNET_NAME', 'homelab')}:{CONF['INBOX_PORT']}"
+    return f"{base}/task/{task_id}" if task_id else base
+
+
+def gh(method, path, body=None):
+    if FAKE_GH:
+        log(f"FAKE GITHUB: {method} {path} {json.dumps(body) if body else ''}")
+        if method == "POST" and path.endswith("/pulls"):
+            return {"number": 1, "html_url": f"https://github.com/{path.split('/')[2]}/{path.split('/')[3]}/pull/1"}
+        if method != "GET":
+            return {}
+        fake = HOME / "fake_github.json"  # tests: {"<pad zonder query>": antwoord}
+        answers = json.loads(fake.read_text()) if fake.exists() else {}
+        return answers.get(path.split("?")[0], [] if path.split("?")[0].endswith(("comments", "reviews")) else {})
+    req = urllib.request.Request(f"https://api.github.com{path}", method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Authorization": f"Bearer {GH_TOKEN_FILE.read_text().strip()}",
+                                          "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def git(repo_dir, *args, timeout=600):
+    """git in een clone van de dienst zelf (nooit in een map van Claude), met het token via een helper."""
+    helper = ('!f() { test "$1" = get && echo username=x-access-token && '
+              f'echo "password=$(cat {GH_TOKEN_FILE})"; }}; f')
+    p = subprocess.run(["git", "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-C", str(repo_dir),
+                        *args], capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    if p.returncode != 0:
+        raise RuntimeError(f"git {args[0]}: {(p.stderr or p.stdout).strip()[-300:]}")
+    return p.stdout
+
+
+def remote_url(name, slug):
+    fake = os.environ.get(f"REMOTE_{name.upper().replace('-', '_')}")
+    return fake or f"https://github.com/{slug}.git"
+
+
+def refresh_cache(name, slug):
+    """De kopie van de dienst (waar de werkkopie van inbox uit clonet), op origin/main."""
+    d = HOME / "repos" / name
+    if not (d / ".git").is_dir():
+        d.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "--quiet", remote_url(name, slug), str(d)], check=True, capture_output=True,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                            "GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "credential.helper", "GIT_CONFIG_VALUE_0": "",
+                            "GIT_CONFIG_KEY_1": "credential.helper",
+                            "GIT_CONFIG_VALUE_1": ('!f() { test "$1" = get && echo username=x-access-token && '
+                                                   f'echo "password=$(cat {GH_TOKEN_FILE})"; }}; f')})
+    git(d, "fetch", "--quiet", "origin", "main")
+    git(d, "checkout", "--quiet", "-B", "main", "origin/main")
+    return d
+
+
+def task_cmd(*args, timeout=600):
+    p = subprocess.run([*TASK_CMD, *map(str, args)], capture_output=True, text=True, timeout=timeout)
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
+# --- Een ronde van een taak
+
+def write_prompt(t, text):
+    share = HOME / "share" / str(t["id"])
+    share.mkdir(parents=True, exist_ok=True)
+    os.chmod(share, 0o2750)
+    (share / "prompt.txt").write_text(text)
+    (share / "system.txt").write_text(SYSTEM_PROMPT.format(repo=t["repo"], id=t["id"]))
+    for f in ("prompt.txt", "system.txt"):
+        os.chmod(share / f, 0o640)
+
+
+def run_round(task_id):
+    t = get(task_id)
+    repos = repo_list()
+    if t["repo"] not in repos:
+        return update(task_id, status="failed", ended=now(), note="repo staat niet (meer) in de lijst")
+    try:
+        cache = refresh_cache(t["repo"], repos[t["repo"]])
+        if t["repo"] != "homelab":
+            refresh_cache("homelab", repos["homelab"])  # de skills komen uit main van homelab
+        first = t["rounds"] == 0
+        if first:
+            code, out = task_cmd("prepare", task_id, t["repo"])
+            if code != 0:
+                raise RuntimeError(f"werkkopie maken mislukt: {out[-300:]}")
+            prompt = f"Taak voor de repo {t['repo']}:\n\n{t['text']}"
+        else:
+            prompt = t["pending_input"]
+        write_prompt(t, prompt)
+        update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
+        result, turns, capped = stream_claude(task_id, "new" if first else "resume")
+    except Exception as e:
+        log(f"taak {task_id}: {e}")
+        update(task_id, status="failed", ended=now(), note=str(e)[:500])
+        if not t["pr_number"]:
+            task_cmd("cleanup", task_id)
+        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+        return
+    finish_round(task_id, cache, result, turns, capped)
+
+
+def stream_claude(task_id, mode):
+    """Claude laten lopen en bewaken: beurten tellen, tijd, annuleren. Geeft (resultaat-json, beurten, gestopt?)."""
+    t = get(task_id)
+    errfile = tempfile.TemporaryFile(mode="w+")  # niet als pipe: een volle stderr-pipe zou Claude laten hangen
+    p = subprocess.Popen([*TASK_CMD, "run", str(task_id), t["session"], mode], stdout=subprocess.PIPE,
+                         stderr=errfile, text=True)
+    with _lock:
+        _procs[task_id] = p
+    max_turns, deadline = int(CONF["MAX_TURNS"]), time.monotonic() + 60 * int(CONF["MAX_MINUTES"])
+    turns, result, capped = t["turns"] or 0, None, None
+    watchdog = threading.Thread(target=watch, args=(task_id, p, deadline), daemon=True)
+    watchdog.start()
+    for line in p.stdout:
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "assistant":
+            turns += 1
+            if turns % 5 == 0:
+                update(task_id, turns=turns)
+            if turns - (t["turns"] or 0) >= max_turns and capped is None:
+                capped = f"{max_turns} beurten"
+                stop(task_id)
+        elif ev.get("type") == "result":
+            result = ev
+    p.wait()
+    with _lock:
+        _procs.pop(task_id, None)
+        if task_id in _cancel:
+            capped = "geannuleerd"
+        elif getattr(p, "timed_out", False):
+            capped = f"{CONF['MAX_MINUTES']} minuten"
+    update(task_id, turns=turns)
+    errfile.seek(0)
+    err = errfile.read()[-300:]
+    errfile.close()
+    if result is None and capped is None:
+        raise RuntimeError(f"Claude stopte zonder resultaat: {err}")
+    return result, turns, capped
+
+
+def watch(task_id, p, deadline):
+    while p.poll() is None:
+        if time.monotonic() > deadline or task_id in _cancel:
+            p.timed_out = task_id not in _cancel
+            stop(task_id)
+            return
+        time.sleep(2)
+
+
+def stop(task_id):
+    task_cmd("kill", task_id, timeout=30)
+
+
+def push_branch(task_id, cache):
+    """De commits van de taak (als bundle, alleen data) in de kopie van de dienst halen en naar inbox/<id> pushen."""
+    code, out = task_cmd("bundle", task_id)
+    if code == 3:
+        return []
+    if code != 0:
+        raise RuntimeError(f"bundle mislukt: {out[-300:]}")
+    bundle = Path(os.environ.get("INBOX_TASK_HOME", CONF["TASK_HOME"])) / "out" / f"{task_id}.bundle"
+    git(cache, "bundle", "verify", str(bundle))
+    ref = f"refs/heads/inbox/{task_id}"
+    heads = git(cache, "bundle", "list-heads", str(bundle)).split()
+    if heads[1::2] != [ref]:
+        raise RuntimeError(f"de bundle bevat iets anders dan {ref}: {heads[1::2]}")
+    git(cache, "fetch", "--quiet", "--force", str(bundle), f"{ref}:refs/inbox/{task_id}")
+    # Alleen naar inbox/<id>, nooit naar main: de bestemming staat hier vast.
+    git(cache, "push", "--quiet", "--force", "origin", f"refs/inbox/{task_id}:{ref}")
+    return [l for l in out.splitlines() if re.match(r"^[0-9a-f]{7,} ", l)]
+
+
+def label(t):
+    return f"Job {t['job']}" if t["job"] else f"Inbox {t['id']}"
+
+
+def finish_round(task_id, cache, result, turns, capped):
+    t = get(task_id)
+    text, proposal = split_skill((result or {}).get("result") or "")
+    if proposal and kind_of(text) in ("KLAAR", "ANTWOORD") and not capped:
+        threading.Thread(target=propose_skill, args=(t, proposal), daemon=True).start()
+    kind, _, body = text.strip().partition(":")
+    kind, body = kind.strip().upper(), body.strip()
+    denials = len((result or {}).get("permission_denials") or [])
+    note = f"{denials} actie(s) geweigerd door auto mode" if denials else None
+    try:
+        if capped == "geannuleerd":
+            update(task_id, status="cancelled", ended=now(), note=note)
+            if not t["pr_number"]:
+                task_cmd("cleanup", task_id)
+            return
+        if kind == "ANTWOORD" and not capped:
+            # Een vraag maakt geen commit, branch of PR; eventuele commits blijven lokaal en worden weggegooid.
+            update(task_id, status="answered", answer=body, ended=now(), note=note)
+            task_cmd("cleanup", task_id)
+            if t["job"]:
+                return  # een job meldt alleen wat de gebruiker nodig heeft; het resultaat staat op de pagina
+            return notify(f"Inbox {task_id}: antwoord", body[:300], page_url(task_id))
+        if kind == "VRAAG" and not capped:
+            update(task_id, status="waiting", question=body, note=note)
+            return notify(f"{label(t)}: vraag", body[:300], page_url(task_id))
+        if kind == "GEWEIGERD" and not capped:
+            update(task_id, status="refused", summary=body, ended=now(), note=note)
+            task_cmd("cleanup", task_id)
+            return notify(f"{label(t)}: geweigerd", body[:300], page_url(task_id))
+        commits = push_branch(task_id, cache)
+        if capped:
+            if not t["pr_number"]:
+                task_cmd("cleanup", task_id)  # de commits staan (als die er zijn) op GitHub in inbox/<id>
+            update(task_id, status="capped", ended=now(),
+                   note=f"gestopt bij {capped}" + (f"; branch inbox/{task_id} gepusht" if commits else "")
+                   + (f"; {note}" if note else ""))
+            return notify(f"{label(t)}: gestopt bij {capped}",
+                          f"{len(commits)} commit(s) op inbox/{task_id}" if commits else "geen commits",
+                          page_url(task_id))
+        if not commits:
+            if not t["pr_number"]:
+                task_cmd("cleanup", task_id)
+            update(task_id, status="failed", ended=now(), summary=body or text[:500],
+                   note="Claude gaf geen KLAAR/ANTWOORD/VRAAG en maakte geen commits" + (f"; {note}" if note else ""))
+            return notify(f"{label(t)} mislukt", (body or text)[:300], page_url(task_id))
+        slug = repo_list()[t["repo"]]
+        summary = body or text[:500]
+        if t["pr_number"]:
+            update(task_id, status="pr_open", summary=summary, ended=now(), note=note)
+            return notify(f"{label(t)}: PR #{t['pr_number']} bijgewerkt", summary[:300], t["pr_url"])
+        pr = gh("POST", f"/repos/{slug}/pulls", {
+            "title": f"{title_of(t)}"[:100], "head": f"inbox/{task_id}", "base": "main",
+            "body": f"{summary}\n\n**Taak** (via de homelab-inbox, #{task_id}):\n> " + t["text"].replace("\n", "\n> ")
+                    + "\n\nCommits:\n" + "\n".join(f"- {c}" for c in commits)
+                    + "\n\nReview-commentaar van jou stuurt de taak terug naar de inbox."
+                    + f"\n\n<!-- homelab-inbox task={task_id} -->"})
+        update(task_id, status="pr_open", summary=summary, pr_number=pr["number"], pr_url=pr["html_url"],
+               ended=now(), last_comment_at=now(), note=note)
+        notify(f"{label(t)}: PR #{pr['number']}", summary[:300], pr["html_url"])
+    except Exception as e:
+        log(f"taak {task_id} afronden: {e}")
+        update(task_id, status="failed", ended=now(), note=f"afronden mislukt: {e}"[:500])
+        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+
+
+def title_of(t):
+    if t["job"]:
+        return f"job {t['job']}: {first_line(JOBS.get(t['job'], {}).get('instruction', ''))}"
+    return f"inbox {t['id']}: {first_line(t['text'])}"
+
+
+def kind_of(text):
+    return text.strip().partition(":")[0].strip().upper()
+
+
+def first_line(text):
+    return text.strip().splitlines()[0][:70] if text.strip() else "taak"
+
+
+# --- Wachtrij en GitHub-commentaar
+
+def scheduler():
+    while True:
+        try:
+            with _lock:
+                running = [t for t in tasks() if t["status"] == "running"]
+                busy = {t["repo"] for t in running}
+                for t in reversed([t for t in tasks() if t["status"] == "queued"]):
+                    if len(running) >= int(CONF["MAX_RUNNING"]):
+                        break
+                    if t["repo"] in busy:
+                        continue  # nooit twee taken op dezelfde repo
+                    update(t["id"], status="running")
+                    running.append(t)
+                    busy.add(t["repo"])
+                    threading.Thread(target=run_round, args=(t["id"],), daemon=True).start()
+        except Exception as e:
+            log(f"wachtrij: {e}")
+        time.sleep(3)
+
+
+def poll_github():
+    while True:
+        time.sleep(int(CONF["GITHUB_POLL_SECONDS"]))
+        for t in [t for t in tasks() if t["status"] == "pr_open" and t["pr_number"]]:
+            try:
+                check_pr(t)
+            except Exception as e:
+                log(f"PR van taak {t['id']}: {e}")
+
+
+def check_pr(t):
+    slug = repo_list().get(t["repo"])
+    if not slug:
+        return
+    pr = gh("GET", f"/repos/{slug}/pulls/{t['pr_number']}")
+    if isinstance(pr, dict) and pr.get("state") == "closed":
+        update(t["id"], status="merged" if pr.get("merged") else "closed", ended=now())
+        task_cmd("cleanup", t["id"])
+        return
+    since = t["last_comment_at"] or t["ended"] or t["created"]
+    owner = os.environ.get("OWNER_LOGIN", CONF["OWNER_GITHUB"])
+    comments = []
+    for path in (f"/repos/{slug}/issues/{t['pr_number']}/comments", f"/repos/{slug}/pulls/{t['pr_number']}/comments",
+                 f"/repos/{slug}/pulls/{t['pr_number']}/reviews"):
+        for c in gh("GET", path + "?per_page=100") or []:
+            when = (c.get("created_at") or c.get("submitted_at") or "").replace("Z", "+00:00")
+            body = (c.get("body") or "").strip()
+            # Alleen jouw commentaar telt; andere accounts worden genegeerd.
+            if (c.get("user") or {}).get("login") == owner and when > since and body \
+                    and "<!-- homelab-inbox" not in body:
+                where = f" (bij {c['path']}:{c.get('line') or c.get('original_line')})" if c.get("path") else ""
+                comments.append((when, f"{body}{where}"))
+    if comments:
+        comments.sort()
+        text = "Review-commentaar op de PR:\n\n" + "\n\n".join(f"- {b}" for _, b in comments) + \
+               "\n\nVerwerk dit op dezelfde branch en eindig weer met KLAAR: (of VRAAG:/GEWEIGERD:)."
+        update(t["id"], status="queued", pending_input=text, last_comment_at=comments[-1][0], ended=None)
+        log(f"taak {t['id']}: {len(comments)} review-commentaar, terug in de rij")
+
+
+def recover():
+    """Na een herstart: wat liep is onderbroken (en een Claude die nog loopt, wordt gestopt)."""
+    for t in [t for t in tasks() if t["status"] == "running"]:
+        stop(t["id"])
+    with db() as c:
+        c.execute("UPDATE tasks SET status='failed', ended=?, note='onderbroken door een herstart' "
+                  "WHERE status='running'", (now(),))
+
+
+# --- Jobs (F-022): geplande jobs als bestanden in jobs/ op de branch JOBS_BRANCH van de homelab-repo
+
+JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "digest", "script": "script"}
+JOB_FIELDS = {"name", "when", "schedule", "kind", "model", "repo", "skills", "script", "args", "sources", "minutes",
+              "paused"}
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+TZ = ZoneInfo(CONF.get("JOB_TIMEZONE", "Europe/Amsterdam"))
+JOBS_DIR = HOME / "jobs-repo"
+OVERVIEW_CMD = shlex.split(os.environ.get("OVERVIEW_CMD", "/usr/local/bin/homelab-overview"))
+LLM_URL = os.environ.get("LLM_URL", f"http://127.0.0.1:{CONF.get('LLM_PORT', '8017')}")
+LOCAL_MAX_CHARS = 9000  # past met de instructie in de context van het lokale model (F-017: 4096 tokens)
+RUN_NL = {"queued": "in de rij", "running": "bezig", "ok": "ok", "failed": "mislukt", "held": "wacht op limiet",
+          "question": "vraag", "pr": "PR", "capped": "gestopt bij limiet", "cancelled": "geannuleerd"}
+# Hoe een Claude-run er in de job-geschiedenis uitziet, afgeleid van zijn inbox-taak.
+TASK_TO_RUN = {"queued": "queued", "running": "running", "waiting": "question", "pr_open": "pr", "merged": "pr",
+               "closed": "pr", "answered": "ok", "capped": "capped", "cancelled": "cancelled", "failed": "failed",
+               "refused": "failed"}
+_jobs_lock = threading.RLock()
+JOBS = {}  # naam -> job, of {"name", "error", "text"} voor een bestand met een fout
+
+
+class Cron:
+    """Een cron-schema (minuut uur dag maand weekdag) in TZ: *, a-b, lijsten en /stap."""
+    RANGES = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)]
+
+    def __init__(self, expr):
+        parts = str(expr).split()
+        if len(parts) != 5:
+            raise ValueError("een schema heeft 5 velden: minuut uur dag maand weekdag")
+        self.sets = [self.field(p, lo, hi) for p, (lo, hi) in zip(parts, self.RANGES)]
+        if 7 in self.sets[4]:
+            self.sets[4] = (self.sets[4] - {7}) | {0}
+        self.any_dom, self.any_dow = parts[2] == "*", parts[4] == "*"
+
+    @staticmethod
+    def field(text, lo, hi):
+        out = set()
+        for item in text.split(","):
+            rng, _, step = item.partition("/")
+            try:
+                step = int(step) if step else 1
+                if rng == "*":
+                    a, b = lo, hi
+                elif "-" in rng:
+                    a, b = map(int, rng.split("-", 1))
+                else:
+                    a = b = int(rng)
+                    b = hi if step != 1 else b
+            except ValueError:
+                raise ValueError(f"'{item}' is geen geldig schemaveld") from None
+            if not lo <= a <= b <= hi or step < 1:
+                raise ValueError(f"'{item}' valt buiten {lo}-{hi}")
+            out.update(range(a, b + 1, step))
+        return out
+
+    def day_ok(self, d):
+        if d.month not in self.sets[3]:
+            return False
+        dom, dow = d.day in self.sets[2], d.isoweekday() % 7 in self.sets[4]
+        # Zoals cron: zijn dag en weekdag allebei beperkt, dan is één van de twee genoeg.
+        return dom and dow if self.any_dom or self.any_dow else dom or dow
+
+    def next_after(self, after):
+        start = after.astimezone(TZ).replace(tzinfo=None, second=0, microsecond=0) + timedelta(minutes=1)
+        hours, minutes = sorted(self.sets[1]), sorted(self.sets[0])
+        day = start.date()
+        for _ in range(366 * 5):
+            if self.day_ok(day):
+                for h in hours:
+                    for m in minutes:
+                        moment = datetime.combine(day, dt_time(h, m))
+                        if moment >= start:
+                            return moment.replace(tzinfo=TZ)
+            day += timedelta(days=1)
+        raise ValueError("dit schema valt nooit")
+
+    def next_times(self, after, n=3):
+        out = []
+        for _ in range(n):
+            after = self.next_after(after)
+            out.append(after)
+        return out
+
+
+def as_list(value):
+    if value is None or value == "":
+        return []
+    return [str(v).strip() for v in (value if isinstance(value, list) else str(value).split(",")) if str(v).strip()]
+
+
+def parse_job(name, text, repos=None, skills=None):
+    """Een job-bestand lezen en controleren; ValueError met een leesbare reden als er iets niet klopt."""
+    if not NAME_RE.match(name):
+        raise ValueError("de naam mag alleen kleine letters, cijfers en streepjes hebben")
+    if not text.startswith("---\n"):
+        raise ValueError("het bestand begint niet met een kop tussen --- en ---")
+    head, sep, rest = text[4:].partition("\n---")
+    if not sep:
+        raise ValueError("de kop sluit niet af met ---")
+    try:
+        meta = yaml.safe_load(head) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"de kop is geen geldige YAML: {e}") from None
+    if not isinstance(meta, dict):
+        raise ValueError("de kop is geen lijst van velden")
+    if unknown := set(meta) - JOB_FIELDS:
+        raise ValueError(f"onbekende velden: {', '.join(sorted(map(str, unknown)))}")
+    if meta.get("name") not in (None, name):
+        raise ValueError(f"name ({meta['name']}) is niet gelijk aan de bestandsnaam ({name})")
+    job = {"name": name, "when": str(meta.get("when") or "").strip(), "schedule": str(meta.get("schedule") or ""),
+           "kind": meta.get("kind"), "model": meta.get("model"), "repo": meta.get("repo") or None,
+           "skills": as_list(meta.get("skills")), "script": meta.get("script"), "args": as_list(meta.get("args")),
+           "sources": as_list(meta.get("sources")), "minutes": meta.get("minutes"),
+           "paused": meta.get("paused") is True, "instruction": rest.partition("\n")[2].strip(), "text": text}
+    job["cron"] = Cron(job["schedule"])
+    if job["kind"] not in JOB_KINDS:
+        raise ValueError(f"kind moet een van {', '.join(JOB_KINDS)} zijn")
+    if job["model"] not in ("local", "claude"):
+        raise ValueError("model moet local of claude zijn")
+    if not job["instruction"]:
+        raise ValueError("de instructie onder de kop ontbreekt")
+    repos = repo_list() if repos is None else repos
+    if job["repo"] and job["repo"] not in repos:
+        raise ValueError(f"repo {job['repo']} staat niet in de lijst (F-018) en is niet homelab")
+    if job["kind"] == "repo-chore" and (job["model"] != "claude" or not job["repo"]):
+        raise ValueError("een repo-klus draait op Claude en heeft een repo nodig")
+    if job["kind"] == "script":
+        job["repo"] = job["repo"] or "homelab"
+        if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9._/-]*$", str(job["script"] or "")) or ".." in str(job["script"]):
+            raise ValueError("script moet een pad in de repo zijn, bijvoorbeeld scripts/iets.sh")
+    if job["kind"] == "digest" and not job["sources"]:
+        raise ValueError("een digest heeft sources nodig (URL's of github:eigenaar/repo)")
+    for s in job["sources"]:
+        if not re.match(r"^(https?://\S+|github:[\w.-]+/[\w.-]+)$", s):
+            raise ValueError(f"bron {s} is geen http(s)-URL of github:eigenaar/repo")
+    if job["skills"] and job["model"] != "claude":
+        raise ValueError("skills gelden alleen voor Claude-jobs (model: claude)")
+    known = skill_list() if skills is None else skills
+    if missing := [s for s in job["skills"] if s not in known]:
+        raise ValueError(f"skill(s) {', '.join(missing)} staan (nog) niet op main")
+    if job["minutes"] is not None and (not isinstance(job["minutes"], int) or job["minutes"] < 0):
+        raise ValueError("minutes is een heel aantal minuten (0 of meer)")
+    return job
+
+
+def jobs_sync():
+    """De clone met de job-branch, gelijk aan GitHub (of leeg, als de branch er nog niet is)."""
+    branch = CONF.get("JOBS_BRANCH", "jobs")
+    d = JOBS_DIR
+    if not (d / ".git").is_dir():
+        d.mkdir(parents=True, exist_ok=True)
+        git(d, "init", "--quiet")
+        git(d, "remote", "add", "origin", remote_url("homelab", CONF["HOMELAB_REPO"]))
+        git(d, "config", "user.name", "homelab-inbox")
+        git(d, "config", "user.email", "homelab-inbox@homelab")
+    if git(d, "ls-remote", "--heads", "origin", branch).strip():
+        git(d, "fetch", "--quiet", "origin", branch)
+        git(d, "checkout", "--quiet", "--force", "-B", branch, "FETCH_HEAD")
+        git(d, "clean", "-fdq")
+    else:
+        git(d, "symbolic-ref", "HEAD", f"refs/heads/{branch}")
+    return d
+
+
+def load_jobs(fetch=True):
+    with _jobs_lock:
+        if fetch:
+            try:
+                refresh_cache("homelab", CONF["HOMELAB_REPO"])  # voor de lijst met skills
+                jobs_sync()
+            except Exception as e:
+                log(f"jobs ophalen: {e}")  # dan de laatst opgehaalde
+        repos, skills, found = repo_list(), skill_list(), {}
+        for f in sorted((JOBS_DIR / "jobs").glob("*.md")):
+            text = f.read_text()
+            try:
+                found[f.stem] = parse_job(f.stem, text, repos, skills)
+            except ValueError as e:
+                found[f.stem] = {"name": f.stem, "error": str(e), "text": text}
+        JOBS.clear()
+        JOBS.update(found)
+
+
+def save_job(name, text, message):
+    """Een job opslaan (text) of weghalen (None): één commit op de job-branch, gepusht met het token van de dienst."""
+    branch = CONF.get("JOBS_BRANCH", "jobs")
+    with _jobs_lock:
+        d = jobs_sync()
+        f = d / "jobs" / f"{name}.md"
+        if text is None:
+            f.unlink(missing_ok=True)
+        else:
+            f.parent.mkdir(exist_ok=True)
+            f.write_text(text.strip() + "\n")
+        readme = d / "README.md"
+        if not readme.exists():
+            readme.write_text("# jobs\n\nDe geplande jobs van de homelab (F-022), één bestand per job in `jobs/`. "
+                              "Uitleg: `docs/jobs.md` op `main`.\nDeze branch wordt nooit gemerged; de homelab-inbox "
+                              "leest hem en slaat hier op wat je op de pagina bevestigt.\n")
+        git(d, "add", "-A")
+        if not git(d, "status", "--porcelain").strip():
+            return
+        git(d, "commit", "--quiet", "-m", message)
+        # Alleen naar de job-branch: de bestemming staat hier vast.
+        git(d, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+        load_jobs(fetch=False)
+
+
+def set_paused(text, paused):
+    head, sep, rest = text[4:].partition("\n---")
+    lines = [l for l in head.splitlines() if not l.startswith("paused:")]
+    if paused:
+        lines.append("paused: true")
+    return "---\n" + "\n".join(lines) + sep + rest
+
+
+# --- Jobs: plannen en draaien
+
+def today_start():
+    return datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc) \
+        .isoformat(timespec="seconds")
+
+
+def kv_get(key):
+    with db() as c:
+        row = c.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def kv_set(key, value):
+    with _lock, db() as c:
+        c.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?,?)", (key, value))
+
+
+def update_run(run_id, **fields):
+    with _lock, db() as c:
+        c.execute(f"UPDATE job_runs SET {', '.join(k + '=?' for k in fields)} WHERE id=?", [*fields.values(), run_id])
+
+
+def claude_runs_today():
+    with db() as c:
+        return c.execute("SELECT COUNT(*) FROM job_runs WHERE task_id IS NOT NULL AND dispatched >= ?",
+                         (today_start(),)).fetchone()[0]
+
+
+def job_scheduler():
+    last_load = 0
+    while True:
+        try:
+            if time.monotonic() - last_load > 60:
+                load_jobs()
+                last_load = time.monotonic()
+            tick(datetime.now(timezone.utc))
+        except Exception as e:
+            log(f"jobs: {e}")
+        time.sleep(20)
+
+
+def tick(now_dt):
+    """Elke job die sinds zijn vorige run aan de beurt was, draait één keer (ook na een tijd uit: niet per gemist moment)."""
+    for name, job in list(JOBS.items()):
+        if "error" in job:
+            continue
+        with db() as c:
+            row = c.execute("SELECT last_due FROM job_state WHERE name=?", (name,)).fetchone()
+        if row is None or job["paused"]:
+            # Nieuw of gepauzeerd: vanaf nu tellen, dus geen inhaalrun voor de tijd daarvoor.
+            with _lock, db() as c:
+                c.execute("INSERT OR REPLACE INTO job_state (name, last_due) VALUES (?,?)",
+                          (name, now_dt.isoformat(timespec="seconds")))
+            continue
+        due, nxt = None, job["cron"].next_after(datetime.fromisoformat(row["last_due"]))
+        for _ in range(5000):
+            if nxt > now_dt:
+                break
+            due, nxt = nxt, job["cron"].next_after(nxt)
+        if due:
+            with _lock, db() as c:
+                c.execute("UPDATE job_state SET last_due=? WHERE name=?", (due.isoformat(timespec="seconds"), name))
+            dispatch(job, due.astimezone(timezone.utc).isoformat(timespec="seconds"))
+    release_held()
+
+
+def dispatch(job, due, manual=False):
+    with _lock, db() as c:
+        run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual) VALUES (?,?,?,?,?,?,?)",
+                           (job["name"], job["kind"], job["model"], due, now(), "queued", int(manual))).lastrowid
+    threading.Thread(target=run_job, args=(run_id, job), daemon=True).start()
+    return run_id
+
+
+def run_job(run_id, job):
+    try:
+        if job["model"] == "local":
+            return run_local(run_id, job)
+        start_claude(run_id, job)
+    except Exception as e:
+        log(f"job {job['name']}: {e}")
+        update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
+        notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+
+
+def gather(job, run_id):
+    """De tekst waar een lokale job (of een Claude-boxrapport of -digest) mee werkt."""
+    if job["kind"] == "box-report":
+        p = subprocess.run(OVERVIEW_CMD, capture_output=True, text=True, timeout=60)
+        if p.returncode != 0:
+            raise RuntimeError(f"homelab-overview: {(p.stderr or p.stdout).strip()[-300:]}")
+        return p.stdout
+    if job["kind"] == "digest":
+        per = LOCAL_MAX_CHARS // len(job["sources"])
+        parts = [fetch_source(s)[:per] for s in job["sources"]]
+        if all("(ophalen mislukt" in p for p in parts):
+            raise RuntimeError("geen enkele bron kon worden opgehaald")
+        return "\n\n".join(parts)
+    if job["kind"] == "script":
+        refresh_cache(job["repo"], repo_list()[job["repo"]])
+        code, out = task_cmd("script", f"j{run_id}", job["repo"], job["script"], *job["args"],
+                             timeout=60 * int(CONF.get("JOB_SCRIPT_MINUTES", 10)) + 60)
+        if code == 65:  # homelab-inbox-task: repo of pad ongeldig, het script draaide niet
+            raise RuntimeError(out[-300:])
+        return f"$ {job['script']} {' '.join(job['args'])}\n(exitcode {code})\n\n{out}"
+    raise RuntimeError(f"een {job['kind']} draait niet lokaal")
+
+
+def fetch_source(src):
+    try:
+        if src.startswith("github:"):
+            slug = src.removeprefix("github:")
+            since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds").replace("+00:00", "Z")
+            commits = gh("GET", f"/repos/{slug}/commits?since={since}&per_page=30") or []
+            pulls = [p for p in gh("GET", f"/repos/{slug}/pulls?state=all&sort=updated&direction=desc&per_page=20") or []
+                     if (p.get("updated_at") or "") >= since]
+            lines = [f"commit {c['sha'][:7]} {c['commit']['message'].splitlines()[0]}" for c in commits]
+            lines += [f"PR #{p['number']} ({'gemerged' if p.get('merged_at') else p['state']}): {p['title']}"
+                      for p in pulls]
+            return f"## GitHub {slug}, laatste 24 uur\n" + ("\n".join(lines) or "geen activiteit")
+        req = urllib.request.Request(src, headers={"User-Agent": "homelab-jobs/1"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read(2_000_000).decode(r.headers.get_content_charset() or "utf-8", "replace")
+        return f"## {src}\n" + (feed_text(raw) if re.search(r"<(rss|feed)[\s>]", raw[:2000]) else html_text(raw))
+    except Exception as e:
+        return f"## {src}\n(ophalen mislukt: {e})"
+
+
+def feed_text(raw):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(raw)
+    items = []
+    for it in root.iter():
+        tag = it.tag.rsplit("}", 1)[-1]
+        if tag in ("item", "entry"):
+            get_ = lambda name: next((c.text or "" for c in it if c.tag.rsplit("}", 1)[-1] == name), "").strip()
+            link = get_("link") or next((c.get("href", "") for c in it if c.tag.rsplit("}", 1)[-1] == "link"), "")
+            items.append(f"- {get_('title')} ({get_('pubDate') or get_('updated') or get_('published')}) {link}")
+    return "\n".join(items[:20]) or "geen items"
+
+
+def html_text(raw):
+    raw = re.sub(r"(?is)<(script|style|nav|footer|header)\b.*?</\1>", " ", raw)
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", raw))).strip()
+
+
+def call_llm(job, text):
+    body = {"model": "summarize", "user": f"job:{job['name']}", "timeout": 120,
+            "messages": [{"role": "system", "content": job["instruction"]}, {"role": "user", "content": text}]}
+    req = urllib.request.Request(f"{LLM_URL}/v1/chat/completions", data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "X-LLM-Caller": f"job:{job['name']}"})
+    try:
+        with urllib.request.urlopen(req, timeout=130) as r:
+            return json.load(r)["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"LLM-helper: {e.read().decode(errors='replace')[:300]}") from None
+
+
+def run_local(run_id, job):
+    """Een lokale job: tekst verzamelen en door het lokale model laten samenvatten. Geen Claude."""
+    update_run(run_id, status="running", started=now())
+    try:
+        text = gather(job, run_id)
+        if len(text) > LOCAL_MAX_CHARS:
+            text = text[:LOCAL_MAX_CHARS] + "\n[afgekapt]"
+        update_run(run_id, status="ok", ended=now(), summary=call_llm(job, text))
+    except Exception as e:
+        update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
+        notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+
+
+def job_prompt(job, run_id):
+    parts = [f"Dit is de geplande job '{job['name']}' ({JOB_KINDS[job['kind']]}), niet door de gebruiker getypt; hij "
+             f"kijkt niet mee.\n\n{job['instruction']}"]
+    if job["kind"] in ("box-report", "digest"):
+        parts.append("Hieronder de verzamelde gegevens. Eindig met ANTWOORD: (je rapport of digest); commit niets.\n\n"
+                     + gather(job, run_id)[:30000])
+    elif job["kind"] == "script":
+        cmd = " ".join([job["script"], *job["args"]])
+        parts.append(f"Draai `{cmd}` in deze werkkopie (als dit account, zonder root) en vat de uitvoer samen zoals "
+                     "hierboven gevraagd. Eindig met ANTWOORD:; commit niets.")
+    else:
+        parts.append("Maak de wijziging op deze branch en eindig met KLAAR:. Is er niets te doen, eindig dan met "
+                     "ANTWOORD: en waarom (dan komt er geen PR).")
+    if job["skills"]:
+        parts.append(f"Gebruik hiervoor de skill(s): {', '.join(job['skills'])}.")
+    return "\n\n".join(parts)
+
+
+def start_claude(run_id, job):
+    """Een Claude-job wordt een inbox-taak: zelfde rij, zelfde regels, plus een daglimiet voor jobs."""
+    cap = int(CONF.get("JOB_CLAUDE_CAP", 10))
+    with _lock:
+        if claude_runs_today() >= cap:
+            with db() as c:
+                older = c.execute("SELECT id FROM job_runs WHERE job=? AND status='held' AND id<>?",
+                                  (job["name"], run_id)).fetchone()
+                if older:  # hooguit één wachtende run per job
+                    c.execute("DELETE FROM job_runs WHERE id=?", (run_id,))
+                else:
+                    c.execute("UPDATE job_runs SET status='held', note=? WHERE id=?",
+                              (f"daglimiet van {cap} Claude-runs bereikt; draait morgen", run_id))
+            if kv_get("cap_notified") != today_start():
+                kv_set("cap_notified", today_start())
+                notify("Jobs: daglimiet Claude bereikt", f"{cap} Claude-runs vandaag; verdere Claude-jobs wachten tot "
+                       "morgen. Lokale jobs en je eigen taken lopen gewoon.", page_url() + "/jobs")
+            return
+        text = job_prompt(job, run_id)
+        with db() as c:
+            task_id = c.execute("INSERT INTO tasks (repo, text, status, created, session, job, run_id) "
+                                "VALUES (?,?,?,?,?,?,?)", (job["repo"] or "homelab", text, "queued", now(),
+                                                           str(uuid.uuid4()), job["name"], run_id)).lastrowid
+            c.execute("UPDATE job_runs SET status='claude', task_id=?, dispatched=?, note=NULL WHERE id=?",
+                      (task_id, now(), run_id))
+
+
+def release_held():
+    """Wat gisteren (of eerder) op de daglimiet wachtte, gaat vandaag als eerste."""
+    with db() as c:
+        held = c.execute("SELECT * FROM job_runs WHERE status='held' AND created < ? ORDER BY id",
+                         (today_start(),)).fetchall()
+    for r in held:
+        if claude_runs_today() >= int(CONF.get("JOB_CLAUDE_CAP", 10)):
+            break
+        job = JOBS.get(r["job"])
+        if not job or "error" in job or job["paused"]:
+            update_run(r["id"], status="cancelled", ended=now(), note="job weg, gepauzeerd of met een fout")
+            continue
+        run_job(r["id"], job)
+
+
+def run_view(r):
+    """Status, samenvatting en link van een run; voor een Claude-run uit zijn taak."""
+    if r["task_id"] and (t := get(r["task_id"])):
+        summary = t["answer"] or t["summary"] or t["question"] or t["note"] or ""
+        return TASK_TO_RUN[t["status"]], summary, f"/task/{t['id']}", t["pr_url"]
+    return r["status"], r["summary"] or r["note"] or "", f"/run/{r['id']}", None
+
+
+def job_runs(name=None, limit=30):
+    with db() as c:
+        if name:
+            return c.execute("SELECT * FROM job_runs WHERE job=? ORDER BY id DESC LIMIT ?", (name, limit)).fetchall()
+        return c.execute("SELECT * FROM job_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def job_url(name):
+    return f"{page_url()}/job/{name}"
+
+
+# --- Skills (F-022): in skills/<naam>/SKILL.md op main; alleen via een PR die de gebruiker merget
+
+SKILL_RE = re.compile(r"^SKILL-VOORSTEL:\s*([a-z0-9][a-z0-9-]{0,40})\s*\n\s*beschrijving:\s*(.+?)\n(.+)$", re.S | re.M)
+
+
+def skill_list():
+    """De gemergde skills (uit de kopie van main van de dienst): naam -> beschrijving."""
+    out = {}
+    for f in sorted((HOME / "repos" / "homelab" / "skills").glob("*/SKILL.md")):
+        text = f.read_text()
+        m = re.search(r"^description:\s*(.+)$", text.partition("\n---")[0], re.M)
+        out[f.parent.name] = (m.group(1).strip().strip('"') if m else "")
+    return out
+
+
+def split_skill(text):
+    """Het antwoord van Claude zonder een eventueel skill-voorstel, en dat voorstel (of None)."""
+    i = text.find("SKILL-VOORSTEL:")
+    if i < 0:
+        return text, None
+    m = SKILL_RE.match(text[i:].strip())
+    return text[:i].strip(), (m.groups() if m else None)
+
+
+def propose_skill(t, proposal):
+    name, desc, body = proposal
+    slug = CONF["HOMELAB_REPO"]
+    try:
+        cache = refresh_cache("homelab", slug)
+        exists = (cache / "skills" / name / "SKILL.md").exists()
+        branch = f"skill/{name}-{t['id']}"
+        with tempfile.TemporaryDirectory(dir=HOME) as tmp:
+            repo = Path(tmp) / "r"
+            git(HOME, "clone", "--quiet", str(cache), str(repo))
+            git(repo, "checkout", "--quiet", "-b", branch)
+            f = repo / "skills" / name / "SKILL.md"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(f"---\nname: {name}\ndescription: {json.dumps(desc.strip(), ensure_ascii=False)}\n---\n\n"
+                         f"{body.strip()}\n")
+            git(repo, "add", "-A")
+            git(repo, "-c", "user.name=Claude (homelab-inbox)", "-c", "user.email=noreply@anthropic.com", "commit",
+                "--quiet", "-m", f"Skill {name}: {'verbetering' if exists else 'nieuw'} (voorstel uit {label(t)})")
+            # Alleen naar skill/<naam>-<id>, nooit naar main.
+            git(repo, "push", "--quiet", remote_url("homelab", slug), f"HEAD:refs/heads/{branch}")
+        pr = gh("POST", f"/repos/{slug}/pulls", {
+            "title": f"skill: {name}" + (" (verbetering)" if exists else ""), "head": branch, "base": "main",
+            "body": f"{desc.strip()}\n\nVoorgesteld door Claude na {label(t)} ({page_url(t['id'])}). Na de merge "
+                    "gebruiken taken en jobs deze skill; zonder merge niet. Claude kan hem niet zelf mergen."
+                    "\n\n<!-- homelab-inbox skill -->"})
+        with _lock, db() as c:
+            c.execute("INSERT INTO skill_prs (name, task_id, pr_url, created) VALUES (?,?,?,?)",
+                      (name, t["id"], pr["html_url"], now()))
+        notify(f"Skill-voorstel: {name}", desc.strip()[:300], pr["html_url"])
+    except Exception as e:
+        log(f"skill-voorstel {name}: {e}")
+        notify(f"Skill-voorstel {name} mislukt", str(e)[:300], page_url(t["id"]))
+
+
+# --- Jobs: een job opstellen uit gewone woorden (Claude, zonder tools)
+
+DRAFT_SYSTEM = """Je stelt een job-bestand op voor de homelab-inbox (F-022). Je hebt geen tools; je antwoordt alleen met
+het bestand, in één ```job-blok, zonder verdere tekst. Formaat:
+
+```job
+---
+name: korte-naam-met-streepjes
+when: het schema in gewone woorden, in het Nederlands
+schedule: "0 7 * * 1-5"   (alleen de vijf cron-velden: minuut uur dag maand weekdag; tijdzone {tz}; 0 = zondag)
+kind: box-report | repo-chore | digest | script
+model: local | claude
+repo: alleen bij repo-chore (verplicht) en script (standaard homelab); een van: {repos}
+skills: [alleen bij model claude, en alleen uit: {skills}]
+script: alleen bij script: pad in de repo
+args: [alleen bij script, optioneel]
+sources: [alleen bij digest: https-URL's (RSS of webpagina) of github:eigenaar/repo]
+minutes: hoeveel minuten handwerk een run de gebruiker bespaart (schatting, geheel getal)
+---
+De instructie: wat de job doet en hoe het resultaat eruit moet zien, kort en concreet.
+```
+
+Soorten: box-report (rapport uit de staat van de box: health checks, deploys, LLM-gebruik, wijzigingen, backup),
+repo-chore (een klus in een repo die eindigt in een PR, bijvoorbeeld afhankelijkheden bijwerken of oude branches),
+digest (bronnen ophalen en samenvatten), script (een script uit een repo draaien en de uitvoer samenvatten).
+Model: local (het lokale model, gratis) als de job alleen tekst samenvat of eruit haalt die de job zelf verzamelt
+(box-report, digest, script); claude als er tools, code of een repo nodig zijn (repo-chore altijd claude).
+Laat velden die niet gelden weg. De instructie voor een lokale job is een opdracht aan een klein model: kort, één
+taak, met de gewenste vorm (bijvoorbeeld "alleen wat faalde, in hooguit vijf regels; niets mis: zeg dat in één zin")."""
+
+
+def start_draft(request, base=None):
+    with _lock, db() as c:
+        draft_id = c.execute("INSERT INTO drafts (created, request, base, status) VALUES (?,?,?,?)",
+                             (now(), request, base, "drafting")).lastrowid
+    threading.Thread(target=make_draft, args=(draft_id,), daemon=True).start()
+    return draft_id
+
+
+def make_draft(draft_id):
+    with db() as c:
+        d = c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+    share = HOME / "share" / f"d{draft_id}"
+    share.mkdir(parents=True, exist_ok=True)
+    os.chmod(share, 0o2750)
+    prompt = f"Maak een job uit deze beschrijving van de gebruiker:\n\n{d['request']}"
+    if d["base"] and d["base"] in JOBS:
+        prompt = (f"Pas deze bestaande job aan (houd de naam {d['base']}):\n\n{JOBS[d['base']]['text']}\n\n"
+                  f"Gevraagde wijziging:\n\n{d['request']}")
+    (share / "prompt.txt").write_text(prompt)
+    (share / "system.txt").write_text(DRAFT_SYSTEM.format(tz=TZ.key, repos=", ".join(sorted(repo_list())),
+                                                          skills=", ".join(skill_list()) or "(nog geen)"))
+    for f in ("prompt.txt", "system.txt"):
+        os.chmod(share / f, 0o640)
+    try:
+        code, out = task_cmd("draft", f"d{draft_id}", timeout=300)
+        result = json.loads(out[out.find("{"):]) if "{" in out else {}
+        if code != 0 or result.get("is_error"):
+            raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
+        m = re.search(r"```job\n(.*?)```", result.get("result") or "", re.S)
+        if not m:
+            raise RuntimeError("Claude gaf geen job-bestand terug")
+        update_draft(draft_id, status="ready", text=m.group(1).strip() + "\n")
+    except Exception as e:
+        update_draft(draft_id, status="failed", error=str(e)[:500])
+    finally:
+        for f in share.iterdir():
+            f.unlink()
+        share.rmdir()
+
+
+def update_draft(draft_id, **fields):
+    with _lock, db() as c:
+        c.execute(f"UPDATE drafts SET {', '.join(k + '=?' for k in fields)} WHERE id=?", [*fields.values(), draft_id])
+
+
+def get_draft(draft_id):
+    with db() as c:
+        return c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+
+
+def draft_name(text):
+    m = re.search(r"^name:\s*([a-z0-9][a-z0-9-]*)\s*$", text.partition("\n---")[0], re.M)
+    return m.group(1) if m else ""
+
+
+# --- Pagina
+
+def secret():
+    if not SECRET_FILE.exists():
+        SECRET_FILE.write_text(secrets.token_hex(32))
+        SECRET_FILE.chmod(0o600)
+    return SECRET_FILE.read_text().strip().encode()
+
+
+def csrf_token():
+    return hmac.new(secret(), b"inbox-form", hashlib.sha256).hexdigest()
+
+
+class Access:
+    """Wie mag de pagina zien: alleen de eigenaar van de box op Tailscale, niet de box zelf, niet het LAN."""
+    own, owner, cache = set(), None, {}
+
+    @classmethod
+    def init(cls):
+        try:
+            st = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True,
+                                           timeout=10).stdout)
+            cls.owner = st["User"][str(st["Self"]["UserID"])]["LoginName"]
+            cls.own = set(st["Self"]["TailscaleIPs"]) | {"127.0.0.1", "::1"}
+        except Exception as e:
+            log(f"tailscale status: {e}")
+
+    @classmethod
+    def allowed(cls, ip):
+        if os.environ.get("INBOX_ALLOW_ALL") == "1":  # alleen voor tests
+            return True, "test"
+        if ip in cls.own or not cls.owner:
+            return False, "niet vanaf de box zelf"
+        hit = cls.cache.get(ip)
+        if not hit or hit[1] < time.monotonic():
+            try:
+                w = json.loads(subprocess.run(["tailscale", "whois", "--json", ip], capture_output=True, text=True,
+                                              timeout=5).stdout)
+                login = w["UserProfile"]["LoginName"]
+                device = w["Node"]["ComputedName"]
+            except Exception:
+                login, device = None, None
+            hit = ((login, device), time.monotonic() + 300)
+            cls.cache[ip] = hit
+        login, device = hit[0]
+        return login == cls.owner, device or ip
+
+
+CSS = """:root{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#1d4ed8;--bad:#b91c1c;--ok:#15803d}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--line:#44403c;--accent:#93c5fd;
+--bad:#f87171;--ok:#4ade80}}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:1.35em;margin:0 0 .6em}h2{font-size:1.05em;margin:1.4em 0 .4em}a{color:var(--accent)}
+textarea,select,button{font:inherit;width:100%;box-sizing:border-box;margin:.25em 0;padding:.55em;border-radius:8px;
+border:1px solid var(--line);background:var(--bg);color:var(--fg)}textarea{min-height:7em}
+button{background:var(--accent);color:var(--bg);border:0;font-weight:600}button.ghost{background:none;color:var(--bad);
+border:1px solid var(--bad)}.task{border-top:1px solid var(--line);padding:.6em 0}.muted{color:var(--muted);font-size:.9em}
+.st{font-weight:600}.st.waiting,.st.failed,.st.capped,.st.refused{color:var(--bad)}.st.pr_open,.st.answered,
+.st.merged{color:var(--ok)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:none;margin:.3em 0}
+.st.run-failed,.st.run-held,.st.run-capped,.st.run-question{color:var(--bad)}.st.run-ok,.st.run-pr{color:var(--ok)}
+nav{margin-bottom:.6em}dl{display:grid;grid-template-columns:max-content 1fr;gap:.2em .8em;margin:.4em 0}dt{color:var(--muted)}
+dd{margin:0;overflow-wrap:anywhere}form{margin:.5em 0}code{overflow-wrap:anywhere}"""
+
+
+def local(iso):
+    return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+
+
+def page(title, body, refresh=False):
+    meta = '<meta http-equiv="refresh" content="20">' if refresh else ""
+    return (f'<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" '
+            f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)}</title>'
+            f'<style>{CSS}</style></head><body>{body}</body></html>')
+
+
+def task_row(t, link=True):
+    e = html.escape
+    head = f'<a href="/task/{t["id"]}">#{t["id"]}</a>' if link else f'#{t["id"]}'
+    pr = f' · <a href="{e(t["pr_url"])}">PR #{t["pr_number"]}</a>' if t["pr_url"] else ""
+    times = f'gestart {local(t["started"])}' + (f', klaar {local(t["ended"])}' if t["ended"] else "")
+    return (f'<div class="task">{head} <span class="st {t["status"]}">{e(STATUS_NL[t["status"]])}</span> · '
+            f'{e(t["repo"])}{pr}<br>{e(f"job {t['job']}" if t["job"] else first_line(t["text"]))}'
+            f'<div class="muted">aangemaakt {local(t["created"])}; '
+            f'{times}</div></div>')
+
+
+def index_page():
+    e = html.escape
+    opts = "".join(f'<option value="{e(n)}">{e(n)}</option>' for n in sorted(repo_list()))
+    all_tasks = tasks()
+    queue = [t for t in all_tasks if t["status"] in ACTIVE + ("waiting",)][::-1]
+    body = (f'{nav()}<h1>homelab-inbox</h1><form method="post" action="/tasks">'
+            f'<input type="hidden" name="csrf" value="{csrf_token()}"><select name="repo">{opts}</select>'
+            f'<textarea name="text" required placeholder="Wat moet Claude doen of uitzoeken?"></textarea>'
+            f'<button>Versturen</button></form>'
+            f'<h2>Nu</h2>{"".join(task_row(t) for t in queue) or "<p class=muted>Niets in de rij.</p>"}'
+            f'<h2>Geschiedenis</h2>{"".join(task_row(t) for t in all_tasks if t not in queue) or "<p class=muted>Nog geen taken.</p>"}')
+    return page("homelab-inbox", body, refresh=bool(queue))
+
+
+def task_page(t):
+    e = html.escape
+    parts = [f'{nav()}<h1>Taak #{t["id"]}</h1>', task_row(t, link=False),
+             f'<h2>Taak</h2><pre>{e(t["text"])}</pre>']
+    if t["question"]:
+        parts.append(f'<h2>Vraag van Claude</h2><pre>{e(t["question"])}</pre>')
+        if t["status"] == "waiting":
+            parts.append(f'<form method="post" action="/task/{t["id"]}/answer"><input type="hidden" name="csrf" '
+                         f'value="{csrf_token()}"><textarea name="answer" required></textarea>'
+                         f'<button>Antwoorden</button></form>')
+    if t["answer"]:
+        parts.append(f'<h2>Antwoord</h2><pre>{e(t["answer"])}</pre>')
+    if t["summary"]:
+        parts.append(f'<h2>{"Reden" if t["status"] == "refused" else "Samenvatting"}</h2><pre>{e(t["summary"])}</pre>')
+    if t["note"]:
+        parts.append(f'<p class="muted">{e(t["note"])}</p>')
+    parts.append(f'<p class="muted">{t["turns"]} beurten in {t["rounds"]} ronde(s); grens per ronde '
+                 f'{CONF["MAX_TURNS"]} beurten of {CONF["MAX_MINUTES"]} minuten.</p>')
+    if t["status"] in ACTIVE + ("waiting",):
+        parts.append(f'<form method="post" action="/task/{t["id"]}/cancel"><input type="hidden" name="csrf" '
+                     f'value="{csrf_token()}"><button class="ghost">Annuleren</button></form>')
+    return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] in ACTIVE)
+
+
+def nav():
+    return '<nav class="muted"><a href="/">Taken</a> · <a href="/jobs">Jobs</a> · <a href="/skills">Skills</a></nav>'
+
+
+def form(action, inner, button, ghost=False):
+    cls = ' class="ghost"' if ghost else ""
+    return (f'<form method="post" action="{action}"><input type="hidden" name="csrf" value="{csrf_token()}">'
+            f'{inner}<button{cls}>{button}</button></form>')
+
+
+def when(dt):
+    return f'{("ma", "di", "wo", "do", "vr", "za", "zo")[dt.weekday()]} {dt.astimezone(TZ):%d-%m %H:%M}'
+
+
+def next_run(job):
+    if "error" in job:
+        return "-"
+    if job["paused"]:
+        return "gepauzeerd"
+    return when(job["cron"].next_after(datetime.now(timezone.utc)))
+
+
+def run_row(r, show_job=False):
+    e = html.escape
+    status, summary, link, pr = run_view(r)
+    head = f'<a href="/job/{e(r["job"])}">{e(r["job"])}</a> · ' if show_job else ""
+    extra = f' · <a href="{e(pr)}">PR</a>' if pr else ""
+    return (f'<div class="task">{head}<a href="{link}">{local(r["due"])}</a> '
+            f'<span class="st run-{status}">{e(RUN_NL.get(status, status))}</span> · {e(r["model"] or "")}'
+            f'{" · nu gedraaid" if r["manual"] else ""}{extra}'
+            f'<div class="muted">{e(first_line(summary) if summary else "")}</div></div>')
+
+
+def job_facts(job):
+    e = html.escape
+    times = ", ".join(when(t) for t in job["cron"].next_times(datetime.now(timezone.utc)))
+    rows = [("Wanneer", f'{e(job["when"] or "-")} <span class="muted">({e(job["schedule"])}, {TZ.key})</span>'),
+            ("Volgende keren", "gepauzeerd" if job["paused"] else e(times)),
+            ("Soort", e(JOB_KINDS[job["kind"]])),
+            ("Model", "lokaal (gratis)" if job["model"] == "local" else "Claude (telt mee voor de daglimiet)")]
+    if job["repo"]:
+        rows.append(("Repo", e(job["repo"])))
+    if job["script"]:
+        rows.append(("Script", f'<code>{e(" ".join([job["script"], *job["args"]]))}</code>'))
+    if job["sources"]:
+        rows.append(("Bronnen", "<br>".join(e(s) for s in job["sources"])))
+    rows.append(("Skills", ", ".join(f'<a href="/skills">{e(s)}</a>' for s in job["skills"]) or "-"))
+    if job["minutes"] is not None:
+        rows.append(("Bespaart", f'{job["minutes"]} min per run'))
+    return ('<dl>' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows) + '</dl>'
+            f'<h2>Instructie</h2><pre>{e(job["instruction"])}</pre>')
+
+
+def jobs_page():
+    e = html.escape
+    cap = int(CONF.get("JOB_CLAUDE_CAP", 10))
+    rows = []
+    for name, job in sorted(JOBS.items()):
+        if "error" in job:
+            rows.append(f'<div class="task"><a href="/job/{e(name)}">{e(name)}</a> <span class="st failed">fout in '
+                        f'het bestand</span><div class="muted">{e(job["error"])}</div></div>')
+            continue
+        last = job_runs(name, 1)
+        last_txt = f' · laatste: {e(RUN_NL.get(run_view(last[0])[0], ""))}' if last else ""
+        rows.append(f'<div class="task"><a href="/job/{e(name)}">{e(name)}</a> · {e(JOB_KINDS[job["kind"]])} · '
+                    f'{"lokaal" if job["model"] == "local" else "Claude"}<div class="muted">{e(job["when"] or job["schedule"])}'
+                    f'; volgende: {e(next_run(job))}{last_txt}</div></div>')
+    with db() as c:
+        drafts = c.execute("SELECT * FROM drafts WHERE status IN ('drafting','ready','failed') ORDER BY id DESC "
+                           "LIMIT 10").fetchall()
+    open_drafts = "".join(f'<div class="task"><a href="/draft/{d["id"]}">concept #{d["id"]}</a> '
+                          f'<span class="muted">{e(first_line(d["request"]))}</span></div>' for d in drafts)
+    body = (f'{nav()}<h1>Jobs</h1><p class="muted">Claude-runs door jobs vandaag: {claude_runs_today()} van {cap}. '
+            f'Tijden in {TZ.key}.</p>'
+            + form("/jobs/draft", '<textarea name="text" required placeholder="Bijvoorbeeld: elke werkdag om 7:00, '
+                   'vertel me wat er vannacht misging"></textarea>', "Job opstellen")
+            + (f'<h2>Concepten</h2>{open_drafts}' if open_drafts else "")
+            + f'<h2>Alle jobs</h2>{"".join(rows) or "<p class=muted>Nog geen jobs.</p>"}'
+            + f'<h2>Laatste runs</h2>{"".join(run_row(r, True) for r in job_runs(limit=20)) or "<p class=muted>Nog geen runs.</p>"}')
+    return page("jobs", body, refresh=any(d["status"] == "drafting" for d in drafts))
+
+
+def job_page(name, error=None, text=None):
+    e = html.escape
+    job = JOBS[name]
+    parts = [f'{nav()}<h1>Job {e(name)}</h1>']
+    if error:
+        parts.append(f'<p class="st failed">{e(error)}</p>')
+    if "error" in job:
+        parts.append(f'<p class="st failed">Fout in het bestand: {e(job["error"])}</p>')
+    else:
+        parts.append(job_facts(job))
+        parts.append(form(f"/job/{e(name)}/run", "", "Nu draaien"))
+        parts.append(form(f"/job/{e(name)}/{'resume' if job['paused'] else 'pause'}", "",
+                          "Hervatten" if job["paused"] else "Pauzeren", ghost=not job["paused"]))
+        parts.append('<h2>Wijzigen</h2>' + form(f"/job/{e(name)}/change", '<textarea name="text" required '
+                     'placeholder="Bijvoorbeeld: om 8:00 in plaats van 7:00"></textarea>', "Wijziging opstellen"))
+    runs = job_runs(name)
+    parts.append(f'<h2>Geschiedenis</h2>{"".join(run_row(r) for r in runs) or "<p class=muted>Nog geen runs.</p>"}')
+    parts.append('<h2>Bestand</h2>' + form(f"/job/{e(name)}/save", f'<textarea name="text" rows="14">'
+                 f'{e(text or job["text"])}</textarea>', "Opslaan"))
+    parts.append(form(f"/job/{e(name)}/delete", "", "Job verwijderen", ghost=True))
+    return page(f"job {name}", "".join(parts), refresh=any(run_view(r)[0] in ("queued", "running") for r in runs))
+
+
+def draft_page(d, error=None, text=None):
+    e = html.escape
+    parts = [f'{nav()}<h1>Concept #{d["id"]}{" voor " + e(d["base"]) if d["base"] else ""}</h1>',
+             f'<pre>{e(d["request"])}</pre>']
+    if d["status"] == "drafting":
+        parts.append('<p class="muted">Claude stelt de job op&hellip;</p>')
+    elif d["status"] == "failed":
+        parts.append(f'<p class="st failed">Mislukt: {e(d["error"] or "")}</p>')
+    elif d["status"] in ("confirmed", "cancelled"):
+        parts.append(f'<p class="muted">{"Bevestigd" if d["status"] == "confirmed" else "Geannuleerd"}.</p>')
+    else:
+        text = text or d["text"]
+        name = d["base"] or draft_name(text)
+        try:
+            parts.append(job_facts(parse_job(name, text)))
+        except ValueError as ex:
+            error = error or str(ex)
+        if error:
+            parts.append(f'<p class="st failed">{e(error)}</p>')
+        parts.append(form(f"/draft/{d['id']}/confirm", f'<h2>Bestand</h2><textarea name="text" rows="14">{e(text)}'
+                          f'</textarea>', "Bevestigen"))
+        parts.append(form(f"/draft/{d['id']}/cancel", "", "Annuleren", ghost=True))
+    return page(f"concept #{d['id']}", "".join(parts), refresh=d["status"] == "drafting")
+
+
+def run_page(r):
+    e = html.escape
+    status, summary, _, _ = run_view(r)
+    return page(f"run {r['id']}", f'{nav()}<h1>Job <a href="/job/{e(r["job"])}">{e(r["job"])}</a></h1>'
+                f'<p>{local(r["due"])} · <span class="st run-{status}">{e(RUN_NL.get(status, status))}</span> · '
+                f'{e(r["model"] or "")}</p><pre>{e(r["summary"] or "")}</pre>'
+                + (f'<p class="muted">{e(r["note"])}</p>' if r["note"] else ""),
+                refresh=status in ("queued", "running"))
+
+
+def skills_page():
+    e = html.escape
+    used = {}
+    for job in JOBS.values():
+        for s in job.get("skills", []):
+            used.setdefault(s, []).append(job["name"])
+    rows = "".join(f'<div class="task"><b>{e(n)}</b> · {e(d)}<div class="muted">jobs: '
+                   f'{", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in used.get(n, [])) or "geen"}</div></div>'
+                   for n, d in skill_list().items())
+    with db() as c:
+        prs = c.execute("SELECT * FROM skill_prs ORDER BY id DESC LIMIT 20").fetchall()
+    props = "".join(f'<div class="task">{e(p["name"])} · <a href="{e(p["pr_url"])}">PR</a> · uit '
+                    f'<a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a> <span class="muted">{local(p["created"])}'
+                    f'</span></div>' for p in prs)
+    return page("skills", f'{nav()}<h1>Skills</h1><p class="muted">Gemergde skills op main; elke taak en Claude-job kan '
+                f'ze gebruiken. Nieuwe en betere komen alleen via een PR die jij merget.</p>'
+                f'{rows or "<p class=muted>Nog geen skills.</p>"}<h2>Voorstellen</h2>'
+                f'{props or "<p class=muted>Nog geen voorstellen.</p>"}')
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "homelab-inbox/1"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def send(self, code, body, ctype="text/html; charset=utf-8", location=None):
+        data = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
+        if location:
+            self.send_header("Location", location)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def guard(self):
+        ok, who = Access.allowed(self.client_address[0].removeprefix("::ffff:"))
+        self.who = who
+        if not ok:
+            self.send(403, page("geweigerd", "<p>Alleen vanaf je eigen apparaten op het tailnet.</p>"))
+        return ok
+
+    def do_GET(self):
+        if not self.guard():
+            return
+        m = re.fullmatch(r"/task/(\d+)", self.path)
+        if self.path == "/":
+            return self.send(200, index_page())
+        if m and (t := get(int(m.group(1)))):
+            return self.send(200, task_page(t))
+        if self.path == "/jobs":
+            return self.send(200, jobs_page())
+        if self.path == "/skills":
+            return self.send(200, skills_page())
+        if (m := re.fullmatch(r"/job/([a-z0-9-]+)", self.path)) and m.group(1) in JOBS:
+            return self.send(200, job_page(m.group(1)))
+        if (m := re.fullmatch(r"/draft/(\d+)", self.path)) and (d := get_draft(int(m.group(1)))):
+            return self.send(200, draft_page(d))
+        if m := re.fullmatch(r"/run/(\d+)", self.path):
+            with db() as c:
+                r = c.execute("SELECT * FROM job_runs WHERE id=?", (int(m.group(1)),)).fetchone()
+            if r:
+                return self.send(200, run_page(r))
+        self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+
+    def do_POST(self):
+        if not self.guard():
+            return
+        # Tegen CSRF: het formulier moet van deze pagina komen (Origin) en het token bevatten.
+        origin = self.headers.get("Origin", "")
+        if urllib.parse.urlsplit(origin).netloc != self.headers.get("Host", ""):
+            return self.send(403, page("geweigerd", "<p>Verkeerde herkomst.</p>"))
+        length = min(int(self.headers.get("Content-Length") or 0), 64 * 1024)
+        form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
+        if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
+            return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
+        if self.path == "/tasks":
+            repo, text = form.get("repo", ""), form.get("text", "").strip()
+            if repo not in repo_list() or not text:
+                return self.send(400, page("fout", "<p>Kies een repo uit de lijst en beschrijf de taak.</p>"))
+            with _lock, db() as c:
+                cur = c.execute("INSERT INTO tasks (repo, text, status, created, session) VALUES (?,?,?,?,?)",
+                                (repo, text[:8000], "queued", now(), str(uuid.uuid4())))
+                tid = cur.lastrowid
+            return self.send(303, "", location=f"/task/{tid}")
+        if self.path.startswith(("/jobs/", "/job/", "/draft/")):
+            return self.post_jobs(form)
+        m = re.fullmatch(r"/task/(\d+)/(answer|cancel)", self.path)
+        t = get(int(m.group(1))) if m else None
+        if not t:
+            return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        if m.group(2) == "answer" and t["status"] == "waiting" and form.get("answer", "").strip():
+            update(t["id"], status="queued", answer=None, pending_input=(
+                f"Antwoord van de gebruiker op je vraag:\n\n{form['answer'].strip()[:8000]}\n\n"
+                "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die."))
+        elif m.group(2) == "cancel" and t["status"] in ACTIVE + ("waiting",):
+            with _lock:
+                if t["status"] == "running":
+                    _cancel.add(t["id"])
+                    threading.Thread(target=stop, args=(t["id"],), daemon=True).start()
+                else:
+                    update(t["id"], status="cancelled", ended=now())
+                    if t["status"] == "waiting" and not t["pr_number"]:
+                        threading.Thread(target=task_cmd, args=("cleanup", t["id"]), daemon=True).start()
+        return self.send(303, "", location=f"/task/{t['id']}")
+
+
+    def post_jobs(self, form):
+        """Jobs (F-022): opstellen, bevestigen, wijzigen, pauzeren, verwijderen, nu draaien."""
+        text = form.get("text", "").replace("\r\n", "\n").strip()
+        who = f"bevestigd op de pagina vanaf {self.who}"
+        if self.path == "/jobs/draft" and text:
+            return self.send(303, "", location=f"/draft/{start_draft(text[:4000])}")
+        m = re.fullmatch(r"/draft/(\d+)/(confirm|cancel)", self.path)
+        if m and (d := get_draft(int(m.group(1)))) and d["status"] == "ready":
+            if m.group(2) == "cancel":
+                update_draft(d["id"], status="cancelled")
+                return self.send(303, "", location="/jobs")
+            name = d["base"] or draft_name(text)
+            try:
+                if not d["base"] and name in JOBS:
+                    raise ValueError(f"er is al een job {name}; kies een andere name")
+                if d["base"] and draft_name(text) not in ("", d["base"]):
+                    raise ValueError(f"de naam blijft {d['base']}")
+                parse_job(name, text)
+                save_job(name, text, f"jobs: {name} {'gewijzigd' if d['base'] else 'nieuw'} ({who})")
+            except Exception as ex:
+                return self.send(400, draft_page(d, error=str(ex), text=text))
+            update_draft(d["id"], status="confirmed", text=text)
+            return self.send(303, "", location=f"/job/{name}")
+        m = re.fullmatch(r"/job/([a-z0-9-]+)/(run|pause|resume|delete|save|change)", self.path)
+        if not m or m.group(1) not in JOBS:
+            return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        name, action, job = m.group(1), m.group(2), JOBS[m.group(1)]
+        try:
+            if action == "change" and text:
+                return self.send(303, "", location=f"/draft/{start_draft(text[:4000], base=name)}")
+            if action == "run" and "error" not in job:
+                dispatch(job, now(), manual=True)
+            elif action in ("pause", "resume") and "error" not in job:
+                save_job(name, set_paused(job["text"], action == "pause"),
+                         f"jobs: {name} {'gepauzeerd' if action == 'pause' else 'hervat'} ({who})")
+            elif action == "save" and text:
+                parse_job(name, text)
+                save_job(name, text, f"jobs: {name} bewerkt ({who})")
+            elif action == "delete":
+                save_job(name, None, f"jobs: {name} verwijderd ({who})")
+                return self.send(303, "", location="/jobs")
+        except Exception as ex:
+            return self.send(400, job_page(name, error=str(ex), text=text or None))
+        return self.send(303, "", location=f"/job/{name}")
+
+
+class Server(ThreadingHTTPServer):
+    import socket as _s
+    address_family = _s.AF_INET6
+    daemon_threads = True
+
+    def server_bind(self):
+        self.socket.setsockopt(self._s.IPPROTO_IPV6, self._s.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
+def serve():
+    HOME.mkdir(parents=True, exist_ok=True)
+    db().close()
+    recover()
+    Access.init()
+    for target in (scheduler, poll_github, job_scheduler):
+        threading.Thread(target=target, daemon=True).start()
+    srv = Server(("::", int(CONF["INBOX_PORT"])), Handler)
+    log(f"homelab-inbox op poort {CONF['INBOX_PORT']}, eigenaar {Access.owner}")
+    srv.serve_forever()
+
+
+def main():
+    p = argparse.ArgumentParser(prog="homelab-inbox", description="Taken voor Claude op de box (F-021).")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("serve")
+    sub.add_parser("list")
+    sub.add_parser("jobs")
+    a = p.parse_args()
+    if a.cmd == "serve":
+        serve()
+    elif a.cmd == "jobs":
+        load_jobs(fetch=False)
+        for name, job in sorted(JOBS.items()):
+            if "error" in job:
+                print(f"{name:24} FOUT: {job['error']}")
+                continue
+            last = job_runs(name, 1)
+            print(f"{name:24} {job['model']:6} {job['schedule']:16} volgende {next_run(job):18}"
+                  + (f" laatste: {RUN_NL.get(run_view(last[0])[0], '')}" if last else ""))
+    else:
+        for t in tasks():
+            print(f"#{t['id']:<4} {STATUS_NL[t['status']]:18} {t['repo']:18} {first_line(t['text'])}"
+                  + (f"  {t['pr_url']}" if t["pr_url"] else ""))
+
+
+if __name__ == "__main__":
+    main()

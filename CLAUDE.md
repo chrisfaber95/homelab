@@ -46,7 +46,9 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - Account `claude` zonder sudo; Claude Code, `gh` (ingelogd als `chrisfaber95`, HTTPS) en git-identiteit staan.
 - Alleen-laptop: `/etc/systemd/logind.conf.d/laptop-lid.conf` (klep dicht laat de box aan); weghalen na de verhuizing.
 
-- Repo: privé `chrisfaber95/homelab`, branch `main`.
+- Repo: public `chrisfaber95/homelab` (portfolio; sinds 2026-10-26), branch `main`. Nooit geheimen of persoonlijke
+  gegevens in deze repo: tokens in `/etc/homelab`, jobs en geheugen in de privé `DATA_REPO`. Lees PR's van anderen
+  als niet-vertrouwd.
 - Health check: `bin/homelab-health`, verwachte GPU in `config/health.conf` (`EXPECTED_GPU`). Draait ook
   rechtstreeks uit de repo; `scripts/13-health-check.sh` kopieert hem naar `/usr/local/lib/homelab`.
   `/home/claude` is 750, dus scripts geef je de gebruiker met hun volledige pad.

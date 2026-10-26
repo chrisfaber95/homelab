@@ -187,7 +187,9 @@ if [[ -r "$CONFDIR/backup.conf" ]]; then
       fi
     fi
   fi
-  if [[ ! -d "$BACKUP_DIR" ]]; then
+  if [[ -n ${BACKUP_MOUNT:-} ]] && ! mountpoint -q "$BACKUP_MOUNT"; then
+    report FAIL backup-disk "backupschijf niet gemount op $BACKUP_MOUNT (USB-HDD niet aangesloten?)"
+  elif [[ ! -d "$BACKUP_DIR" ]]; then
     report FAIL backup-disk "$BACKUP_DIR bestaat niet (schijf niet aangesloten?)"
   else
     read -r bpct bfree < <(df -P "$BACKUP_DIR" | awk 'NR==2 {sub("%", "", $5); printf "%s %.0f\n", 100-$5, $4/1048576}')

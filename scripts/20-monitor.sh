@@ -17,6 +17,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 # shellcheck source=../config/backup.conf
 source "$REPO/config/backup.conf"
+if [[ -n ${BACKUP_MOUNT:-} ]] && ! mountpoint -q "$BACKUP_MOUNT"; then
+  echo "De backupschijf is niet gemount op $BACKUP_MOUNT. Eerst: sudo bash $REPO/scripts/20-usb-disk.sh" >&2
+  exit 1
+fi
 
 echo "== Programma's en instellingen naar $DEST"
 install -d -m 755 "$DEST/bin" "$DEST/config"

@@ -59,9 +59,17 @@ claude-dashboard (gekoppelde apparaten), het LLM-gebruikslog, het logboek van ma
 **Wat er niet in zit**: alles wat de repo herbouwt (programma's, configuratie, diensten), de Ollama-modellen (opnieuw
 downloaden), Docker-images en -volumes, en dev-clones (wat telt, is gepusht).
 
-**Waar**: voorlopig `/var/backups/homelab` op de SSD zelf (`BACKUP_DIR` in `config/backup.conf`). Dat beschermt
-tegen een vergissing of een kapotte installatie, **niet tegen een kapotte SSD**. Naar de USB-HDD: de schijf mounten
-(root, met `nofail`), `BACKUP_DIR` aanpassen via een PR, en `scripts/20-monitor.sh` opnieuw draaien.
+**Waar**: op de externe 2 TB USB-HDD, in `/mnt/hdd/homelab-backup` (`BACKUP_MOUNT` en `BACKUP_DIR` in
+`config/backup.conf`). Zo overleeft de backup een kapotte SSD. `scripts/20-usb-disk.sh` mount de schijf (root):
+zonder argument toont het de USB-schijven, met de UUID van een partitie zet het die in `/etc/fstab` (op UUID, met
+`nofail`: zonder de schijf start de box gewoon), mount hem, zet de oude backups van `/var/backups/homelab` over en
+draait `scripts/20-monitor.sh`. Het formatteert nooit; ext4 heeft de voorkeur, ntfs en exfat (een schijf met data
+van Windows) gaan ook, dan via de mount-opties alleen voor root leesbaar.
+
+Is de schijf niet gemount, dan weigert de backup (hij schrijft niet stilletjes naar de SSD) en faalt de check
+`backup-disk`, dus komt er een melding. Een andere schijf: script opnieuw draaien met de nieuwe UUID.
+
+Staat er ook andere data op de HDD, dan heeft die **geen** backup: de backups staan op dezelfde schijf.
 
 ```
 sudo homelab-backup list        # de backups en de laatste run
@@ -70,10 +78,9 @@ sudo homelab-backup run         # nu een backup
 
 ## Terugzetten na een herbouw
 
-1. Kopieer een backup van de oude schijf, of van de USB-HDD, naar de nieuwe box (bijvoorbeeld met `scp` via het
-   LAN naar je eigen map).
-2. Volg de checklist en de scripts tot en met `scripts/20-monitor.sh`. Inloggen bij Tailscale mag; de oude
-   identiteit vervangt de nieuwe.
+1. Volg de checklist en de scripts tot en met `scripts/20-usb-disk.sh <UUID>` (dat draait ook
+   `scripts/20-monitor.sh`). Inloggen bij Tailscale mag; de oude identiteit vervangt de nieuwe.
+2. `sudo homelab-backup list` toont de backups op de USB-HDD; kies de nieuwste van vóór de herbouw.
 3. `sudo homelab-backup restore <bestand>`: stopt Tailscale, ntfy, de LLM-helper, homelab-admin en de dashboard,
    zet de bestanden terug (met eigenaar en rechten), start ze weer en herstart `ssh` (voor de oude hostkeys).
 4. Controle: `tailscale status` toont de box als `homelab` met het oude adres (haal een dubbele `homelab-1` weg in

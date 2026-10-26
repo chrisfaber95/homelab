@@ -72,6 +72,10 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   bestanden op de branch `memory` van `DATA_REPO` (nooit gemerged; alleen de inbox schrijft erop, de pre-push-hook houdt jou tegen).
   Claude bewaart met `GEHEUGEN:`-blokken onder zijn laatste bericht; auto memory van Claude Code staat uit voor `inbox`.
   Uitleg in `docs/memory.md`.
+- Skills van `claude` (2026-10-26): frontend-design, web-artifacts-builder en webapp-testing uit `anthropics/skills`,
+  vastgepind in `config/claude.conf` en geïnstalleerd door `scripts/18-claude.sh` (met pnpm in `~/.local` en Playwright
+  in `~/.local/share/playwright-venv`; `python` is die venv, `python3` die van Ubuntu). Een nieuwe commit van de skills:
+  eerst alle bestanden lezen. Nog niet echt gedraaid: `init-artifact.sh` (auto mode hield het tegen; de gebruiker beslist).
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`; geïnstalleerd met `scripts/17-llm.sh`. Testen zonder root kan met een eigen `ollama serve` op een
   andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.

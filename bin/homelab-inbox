@@ -13,15 +13,16 @@ token, en opent hij de PR. Claude kan via de inbox dus niet mergen en niet naar 
 Laatste bericht van Claude: KLAAR: / ANTWOORD: / VRAAG: / GEWEIGERD: (zie SYSTEM_PROMPT), eventueel gevolgd door
 een SKILL-VOORSTEL: (F-022), waar de dienst een PR in de homelab-repo van maakt.
 
-Jobs (F-022): bestanden in jobs/ op de branch JOBS_BRANCH van de homelab-repo, gepland in JOB_TIMEZONE. Een lokale job
+Jobs (F-022): bestanden in jobs/ op de branch JOBS_BRANCH van de privé DATA_REPO, gepland in JOB_TIMEZONE. Een lokale job
 verzamelt tekst en laat het lokale model (F-017) samenvatten; een Claude-job wordt een inbox-taak met dezelfde rij en
 regels, plus een daglimiet (JOB_CLAUDE_CAP). Skills staan in skills/<naam>/SKILL.md op main en komen er alleen via een
 PR die de gebruiker merget; homelab-inbox-task zet ze voor elke taak in ~/.claude/skills van inbox.
-Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van de homelab-repo; alleen
+Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van DATA_REPO; alleen
 deze dienst schrijft erop (voor Claude via GEHEUGEN:-blokken onder zijn laatste bericht, voor de gebruiker via de pagina).
 Elke taak krijgt de voorkeuren en feiten in zijn systeemprompt en de geschiedenis als map om te doorzoeken.
 Instellingen: config/inbox.conf (en deploy.conf, admin.conf). Voor tests: INBOX_FAKE_GITHUB=1 (PR's alleen
-loggen, antwoorden uit RUNNER_HOME/fake_github.json, pushen naar REMOTE_<NAAM>-paden), TASK_CMD (in plaats van sudo -u inbox homelab-inbox-task), NTFY_FAKE=1,
+loggen, antwoorden uit RUNNER_HOME/fake_github.json, pushen naar REMOTE_<NAAM>-paden; jobs en geheugen:
+REMOTE_HOMELAB_DATA), TASK_CMD (in plaats van sudo -u inbox homelab-inbox-task), NTFY_FAKE=1,
 INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_URL.
 """
 import argparse
@@ -540,7 +541,7 @@ def recover():
                   "WHERE status='running'", (now(),))
 
 
-# --- Jobs (F-022): geplande jobs als bestanden in jobs/ op de branch JOBS_BRANCH van de homelab-repo
+# --- Jobs (F-022): geplande jobs als bestanden in jobs/ op de branch JOBS_BRANCH van DATA_REPO
 
 JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "digest", "script": "script"}
 JOB_FIELDS = {"name", "when", "schedule", "kind", "model", "repo", "skills", "script", "args", "sources", "minutes",
@@ -686,13 +687,16 @@ def parse_job(name, text, repos=None, skills=None):
 
 
 def sync_branch(d, branch):
-    """Een clone van één branch van de homelab-repo, gelijk aan GitHub (of leeg, als de branch er (nog) niet is)."""
+    """Een clone van één branch van DATA_REPO, gelijk aan GitHub (of leeg, als de branch er (nog) niet is)."""
+    url = remote_url("homelab-data", CONF["DATA_REPO"])
     if not (d / ".git").is_dir():
         d.mkdir(parents=True, exist_ok=True)
         git(d, "init", "--quiet")
-        git(d, "remote", "add", "origin", remote_url("homelab", CONF["HOMELAB_REPO"]))
+        git(d, "remote", "add", "origin", url)
         git(d, "config", "user.name", "homelab-inbox")
         git(d, "config", "user.email", "homelab-inbox@homelab")
+    else:
+        git(d, "remote", "set-url", "origin", url)  # een clone van voor DATA_REPO wees nog naar de homelab-repo
     if git(d, "ls-remote", "--heads", "origin", branch).strip():
         git(d, "fetch", "--quiet", "origin", branch)
         git(d, "checkout", "--quiet", "--force", "-B", branch, "FETCH_HEAD")
@@ -1073,7 +1077,7 @@ def propose_skill(t, proposal):
         notify(f"Skill-voorstel {name} mislukt", str(e)[:300], page_url(t["id"]))
 
 
-# --- Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van de homelab-repo
+# --- Geheugen (F-023): voorkeuren, feiten en geschiedenis als bestanden op de branch MEMORY_BRANCH van DATA_REPO
 
 MEMORY_DIR = HOME / "memory-repo"
 MEM_KINDS = {"voorkeuren": "voorkeur", "feiten": "feit", "geschiedenis": "geschiedenis"}
@@ -1716,7 +1720,7 @@ def entry_page(m, error=None, text=None):
     if m["pr"]:
         rows.append(("PR", f'<a href="{e(m["pr"])}">{e(m["pr"])}</a>'))
     parts = [f'{nav()}<h1>{e(m["name"])}</h1>', f'<p class="muted"><code>{e(m["id"])}.md</code> op de branch '
-             f'{e(CONF.get("MEMORY_BRANCH", "memory"))}</p>']
+             f'{e(CONF.get("MEMORY_BRANCH", "memory"))} van {e(CONF["DATA_REPO"])}</p>']
     if error:
         parts.append(f'<p class="st failed">{e(error)}</p>')
     parts.append('<dl>' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows) + '</dl>')

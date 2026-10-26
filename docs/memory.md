@@ -60,17 +60,18 @@ De deploy draait npm ci en dan docker compose up.
 item kun je de tekst bewerken of het wissen; onderaan voeg je zelf een voorkeur of feit toe. Ook daar wordt niets
 bewaard wat op een geheim lijkt.
 
-**In de repo**: clone de branch `memory` en bewerk of wis bestanden; push vanaf je eigen pc (niet via Claude). De inbox
+**In de repo**: het geheugen staat in een eigen privé repo (`DATA_REPO`, `chrisfaber95/homelab-data`), niet in de
+homelab-repo, die public mag. Clone daar de branch `memory` en bewerk of wis bestanden; push vanaf je eigen pc (niet via Claude). De inbox
 haalt de branch elke minuut op, en vlak voor elke taak. Op de box: `homelab-inbox memory [zoekwoorden]`.
 
 ## Opnieuw beginnen
 
 - Eén item: wissen op de pagina.
 - Een deel (bijvoorbeeld alle geschiedenis): wis de map in een clone van `memory` en push.
-- Alles: verwijder de branch `memory` op GitHub (Branches → memory → verwijderen). Binnen een minuut is het geheugen
+- Alles: verwijder de branch `memory` van `homelab-data` op GitHub (Branches → memory → verwijderen). Binnen een minuut is het geheugen
   van de inbox leeg; de volgende taak begint opnieuw.
 
 ## Instellingen
 
-In `config/inbox.conf`: `MEMORY_BRANCH` (standaard `memory`) en `MEMORY_RECENT` (standaard 10). Na een wijziging (PR):
+In `config/inbox.conf`: `DATA_REPO` (privé; `21-inbox.sh` weigert een public repo), `MEMORY_BRANCH` (standaard `memory`) en `MEMORY_RECENT` (standaard 10). Na een wijziging (PR):
 `scripts/21-inbox.sh`.

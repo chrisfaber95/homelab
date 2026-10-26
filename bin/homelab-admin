@@ -548,7 +548,12 @@ def notify_new_prs():
         seen["error"] = str(e)
         save_state("prs", seen)
         return
+    # Alleen PR's van de eigenaar van de repo (en de inbox, die met zijn token van de eigenaar opent): een public
+    # repo krijgt ook PR's van anderen, en die zouden met een zelfgekozen titel meldingen naar de telefoon sturen.
+    owner = CONF["HOMELAB_REPO"].split("/")[0].lower()
     for pr in prs:
+        if pr["user"]["login"].lower() != owner:
+            continue
         if pr["number"] not in seen["seen"]:
             notify(f"PR #{pr['number']}: {pr['title']}"[:120], "Klaar om te bekijken; mergen = goedkeuren.",
                    click=pr["html_url"], actions=[{"action": "view", "label": "Openen", "url": pr["html_url"]}])

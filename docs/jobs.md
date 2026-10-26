@@ -12,7 +12,8 @@ de skills. Pas het bestand zo nodig aan en kies **Bevestigen**: de job staat er 
 tijd. Wijzigen (in woorden of in het bestand), pauzeren, hervatten, verwijderen en **Nu draaien** gaan op de pagina van
 de job.
 
-**Als bestand**: de jobs staan in `jobs/<naam>.md` op de branch **`jobs`** van deze repo (niet op `main`). Die branch
+**Als bestand**: de jobs staan in `jobs/<naam>.md` op de branch **`jobs`** van de privé repo
+`homelab-data` (`DATA_REPO`; niet in deze repo, die public mag). Die branch
 wordt nooit gemerged; de inbox leest hem elke minuut en slaat er alles op wat je op de pagina bevestigt, als commit
 ("jobs: ... (bevestigd op de pagina vanaf <apparaat>)"). Een bestand met de hand bewerken kan op GitHub of in een clone,
 op die branch. Een bestand met een fout draait niet; de fout staat op de pagina. Na een herbouw haalt de inbox de branch
@@ -151,6 +152,6 @@ hun PR.
 ## Beheer
 
 - `homelab-inbox jobs`: de jobs met model, schema, volgende run en laatste resultaat.
-- Instellingen in `config/inbox.conf`: `JOBS_BRANCH`, `JOB_TIMEZONE`, `JOB_CLAUDE_CAP`, `JOB_SCRIPT_MINUTES` (PR, daarna
+- Instellingen in `config/inbox.conf`: `DATA_REPO`, `JOBS_BRANCH`, `JOB_TIMEZONE`, `JOB_CLAUDE_CAP`, `JOB_SCRIPT_MINUTES` (PR, daarna
   `scripts/21-inbox.sh`).
 - De geschiedenis van runs staat in `/var/lib/homelab-inbox/inbox.db` (naast de taken).

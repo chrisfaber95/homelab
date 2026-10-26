@@ -103,8 +103,8 @@ Klaar, voor de context:
   `homelab-backup` met `BACKUP_LIST`/`BACKUP_DIR`/`BACKUP_STATUS`/`RESTORE_ROOT`/`NO_SERVICES=1`.
 
 Open vragen die je niet zelf beslist:
-- De 250 GB SSD en de 2 TB HDD (vraag van de lead in F-016 en F-020): de HDD wordt de backupschijf. Nog open: mag er
-  ook andere data op de HDD staan? Die heeft dan geen backup.
+- Beantwoord (2026-10-26): de 2 TB USB-HDD is alleen de backupschijf (PR #11, `scripts/20-usb-disk.sh`); er staat
+  geen andere data op. Dat antwoordt ook de vraag van de lead in F-016 en F-020.
 - Beantwoord (2026-10-25): Claude pusht naar branches en opent PR's, niet naar `main` (afspraak + hook; geen
   technische afscherming, ook niet na F-019). De dashboard op de box toont sessies en mag Claude-sessies starten.
   Meldingen via een eigen ntfy op het tailnet. Kernel en NVIDIA niet via unattended-upgrades (`changes/0001`).

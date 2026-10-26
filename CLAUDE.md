@@ -74,19 +74,20 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 
 Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020; `homelab-health` is helemaal OK.
 
-1. F-021 (branch `f-021-inbox`, PR #10): na de merge draait de gebruiker `scripts/21-inbox.sh` (met twee tokens).
-   Taken draaien in auto mode, nooit `bypassPermissions` (keuze van de gebruiker, na een weigering door de
-   veiligheidscheck). `--max-turns` van `claude -p` werkt niet; de inbox telt de beurten zelf in de stream-json.
-   Testen zonder root: `INBOX_FAKE_GITHUB=1`, `TASK_CMD`, `INBOX_RUNNER_HOME`/`INBOX_TASK_HOME`, `REPOS_CONF`,
-   `REMOTE_<NAAM>`, `INBOX_ALLOW_ALL=1` (zie de docstring).
-2. Backups naar de externe 2 TB USB-HDD (F-020; de gebruiker heeft hem op 2026-10-26 aan de laptop gehangen).
-   Mounten is root-werk buiten F-019: een script dat de gebruiker draait, mount op UUID met `nofail`.
-3. F-022 (branch `f-022-jobs`, gestapeld op `f-021-inbox`): na de merge van beide `scripts/21-inbox.sh` opnieuw en
-   als `claude` `scripts/18-claude.sh` (hook). Testen zonder root: als bij F-021, plus `OVERVIEW_CMD`, `LLM_URL` (een
-   nep-LLM) en `INBOX_SKILLS_DIR` (anders slaat prepare de skills over; nooit naar je eigen `~/.claude/skills`); de
-   functies laad je in Python met `SourceFileLoader`. Jobs-tijden in `JOB_TIMEZONE` (de box draait op UTC).
-4. Daarna de ROADMAP-volgorde: F-023, F-024. F-023 kan dezelfde aanpak als de jobs gebruiken (een eigen branch die
-   alleen de dienst schrijft).
+1. F-021 en F-022 staan (2026-10-26): `homelab-inbox` draait (pagina 8105, tabs Taken, Jobs, Skills), de tokens werken,
+   de pre-push-hook houdt ook `jobs` tegen. De branch `jobs` bestaat pas na de eerste bevestigde job. Taken draaien in
+   auto mode, nooit `bypassPermissions` (keuze van de gebruiker). `--max-turns` van `claude -p` werkt niet; de inbox
+   telt de beurten zelf. Testen zonder root: `INBOX_FAKE_GITHUB=1`, `TASK_CMD`, `INBOX_RUNNER_HOME`/`INBOX_TASK_HOME`,
+   `REPOS_CONF`, `REMOTE_<NAAM>`, `INBOX_ALLOW_ALL=1`, en voor jobs `OVERVIEW_CMD`, `LLM_URL` (een nep-LLM) en
+   `INBOX_SKILLS_DIR` (nooit naar je eigen `~/.claude/skills`); functies laad je in Python met `SourceFileLoader`.
+   Jobs-tijden in `JOB_TIMEZONE` (de box draait op UTC). Let op: `pkill -f` met een patroon dat in je eigen opdracht
+   staat, stopt je eigen shell.
+   Nog niet echt gezien: een run als `inbox-runner` met `homelab-overview`, skills in `~inbox/.claude/skills`,
+   `github:`-bronnen met het echte token.
+2. Backups naar de externe 2 TB USB-HDD (PR #11, open): de laptop zag de schijf nog niet (geen USB-opslag in `lsusb`).
+   De gebruiker pakt dat later op.
+3. Daarna de ROADMAP-volgorde: F-023, F-024 (de gebruiker zegt wanneer). F-023 kan dezelfde aanpak als de jobs gebruiken
+   (een eigen branch die alleen de dienst schrijft).
 
 Nog door de gebruiker te testen (staat ook in `CHECKLIST.md`):
 - F-016: SSH vanaf een ander netwerk; de klep dicht.

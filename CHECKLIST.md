@@ -274,7 +274,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Een job "Nu draaien": hij staat binnen een paar seconden onder Nu bezig, het log loopt mee, en na afloop
         verdwijnt hij en staat hij als merkje op de tijdlijn. Een lopende run annuleren werkt.
   - [ ] Vanaf het LAN zonder Tailscale (`http://192.168.1.102:8105`) wordt de pagina geweigerd.
-  - [ ] De vormgeving goedkeuren (`user_check` van de brief).
+  - [x] De vormgeving goedkeuren (`user_check` van de brief): goedgekeurd op 2026-10-26, in een preview op de box.
 
 ## 14. Verhuizen naar de desktop **(desktop)**
 

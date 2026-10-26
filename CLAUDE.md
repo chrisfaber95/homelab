@@ -101,7 +101,7 @@ Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020;
 3. F-023 (geheugen) is gemerged; na `21-inbox.sh` en `18-claude.sh` de tests in `CHECKLIST.md`.
 4. F-024 (homelab-pagina, 2026-10-26, branch `f-024-dashboard`): gebouwd en getest zonder root, met screenshots via
    Playwright. Visuele richting van de gebruiker: futuristisch donker en blauw, naar de KITT-skin van de
-   claude-dashboard (een eerdere "papieren" versie wees de gebruiker af); alleen donker; details in `docs/dashboard.md`. Wacht op de goedkeuring van de look (`user_check`) en de merge.
+   claude-dashboard (een eerdere "papieren" versie wees de gebruiker af); alleen donker; details in `docs/dashboard.md`. Look goedgekeurd door de gebruiker (2026-10-26); wacht op de merge.
    Let op bij testen: zoek een testserver op via zijn poort of een pid-bestand, nooit met `pkill -f`/`ps | grep` op een
    patroon (dat raakt je eigen shell, of probeert de echte dienst te stoppen).
 

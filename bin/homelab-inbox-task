@@ -67,10 +67,15 @@ case $action in
       export CLAUDE_CODE_OAUTH_TOKEN
     fi
     if [[ $mode == new ]]; then session=(--session-id "$sid"); else session=(--resume "$sid"); fi
+    # Het geheugen (F-023) is alleen dat van de inbox, zichtbaar op de pagina: geen eigen auto memory van Claude Code.
+    # De geschiedenis van eerdere taken mag Claude lezen (de dienst zet hem per ronde klaar).
+    export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+    extra=()
+    [[ -d "$RUNNER_HOME/share/$id/geschiedenis" ]] && extra=(--add-dir "$RUNNER_HOME/share/$id/geschiedenis")
     echo $$ > "$work/pid"
     # auto mode: de veiligheidscheck van Claude Code beoordeelt elke actie; nooit bypassPermissions.
     exec claude -p "$(cat "$prompt")" --append-system-prompt "$(cat "$system")" "${session[@]}" \
-      --permission-mode auto --output-format stream-json --verbose
+      "${extra[@]}" --permission-mode auto --output-format stream-json --verbose
     ;;
   bundle)
     cd "$work/repo"

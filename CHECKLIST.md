@@ -250,6 +250,12 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `jobs` tegen).
   - [ ] Op de pagina, tab Jobs: een job in woorden opstellen, bevestigen; hij staat op de branch `jobs` en "Nu draaien"
         geeft een resultaat in de geschiedenis.
+- [ ] F-023 (geheugen): zie `docs/memory.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
+  - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `memory` tegen).
+  - [ ] Op de pagina, tab Geheugen: zelf een voorkeur toevoegen; hij staat op de branch `memory`, met jou als auteur.
+  - [ ] Een PR van de inbox corrigeren in een commentaar ("geen emoji in commit-berichten"): na de nieuwe ronde staat
+        er een voorkeur met een link naar dat commentaar, en een volgende taak hoeft die correctie niet meer.
+  - [ ] Een vraag-taak "wanneer faalde ... het laatst?" antwoordt met de datum en de link van de eerdere taak.
 
 ## 14. Verhuizen naar de desktop **(desktop)**
 

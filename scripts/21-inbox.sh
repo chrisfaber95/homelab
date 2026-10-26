@@ -65,8 +65,16 @@ ask_token() { # ask_token <bestand> <eigenaar> <uitleg> <testfunctie>
     (( attempt == 3 )) && { echo "Het token voor $file werkt na drie pogingen niet." >&2; exit 1; }
     [[ -s $file ]] && echo "Het token in $file werkt niet."
     echo "$help"
-    read -r -s -p "Plak het token (je ziet het niet) en druk op Enter: " t </dev/tty; echo
-    t=$(tr -d '[:space:]' <<<"$t")
+    # Een lang token valt in de terminal vaak over twee regels en komt dan met een regeleinde mee: lees regels tot een
+    # lege regel en plak ze aan elkaar.
+    echo "Plak het token (je ziet het niet) en druk daarna twee keer op Enter:"
+    t=""
+    while IFS= read -r -s line </dev/tty; do
+      line=$(tr -d '[:space:]' <<<"$line")
+      [[ -z $line && -n $t ]] && break
+      t+=$line
+    done
+    echo
     echo "Ontvangen: ${#t} tekens, begint met '${t:0:12}'."
     (umask 077 && printf '%s\n' "$t" > "$file")
     unset t
@@ -74,8 +82,14 @@ ask_token() { # ask_token <bestand> <eigenaar> <uitleg> <testfunctie>
 }
 claude_works() {
   # Het token komt binnen het proces van inbox uit het bestand, niet op de opdrachtregel (die ziet iedereen in ps).
-  (cd / && sudo -u inbox env HOME="$TASK_HOME" bash -c 'CLAUDE_CODE_OAUTH_TOKEN=$(cat /etc/homelab/inbox-claude-token) \
-    exec ~/.local/bin/claude -p "Antwoord met alleen het woord: ok" --permission-mode auto' 2>/dev/null | grep -qi ok)
+  local out err
+  err=$(mktemp)
+  out=$(cd / && sudo -u inbox env HOME="$TASK_HOME" bash -c 'CLAUDE_CODE_OAUTH_TOKEN=$(cat /etc/homelab/inbox-claude-token) \
+    exec ~/.local/bin/claude -p "Antwoord met alleen het woord: ok" --permission-mode auto' 2>"$err") || true
+  if grep -qiw ok <<<"$out"; then rm -f "$err"; return 0; fi
+  echo "Claude Code gaf: $(tail -n 5 "$err" | tr '\n' ' ')$(tail -n 3 <<<"$out" | tr '\n' ' ')"
+  rm -f "$err"
+  return 1
 }
 github_works() {
   [[ $(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat /etc/homelab/inbox-github-token)" \
@@ -84,7 +98,7 @@ github_works() {
 
 echo "== Tokens"
 ask_token /etc/homelab/inbox-claude-token inbox \
-  "Claude Code voor inbox: draai ergens (bijvoorbeeld op Windows, of als claude op de box) 'claude setup-token' en plak het token." \
+  "Claude Code voor inbox: draai ergens (bijvoorbeeld op Windows, of als claude op de box) 'claude setup-token' en plak het token (begint met sk-ant-oat01-, ruim 100 tekens)." \
   claude_works
 ask_token /etc/homelab/inbox-github-token inbox-runner \
   "GitHub voor de inbox: een fine-grained token, All repositories, Contents en Pull requests: Read and write." \

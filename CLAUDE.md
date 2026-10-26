@@ -72,8 +72,8 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   bestanden op de branch `memory` van `DATA_REPO` (nooit gemerged; alleen de inbox schrijft erop, de pre-push-hook houdt jou tegen).
   Claude bewaart met `GEHEUGEN:`-blokken onder zijn laatste bericht; auto memory van Claude Code staat uit voor `inbox`.
   Uitleg in `docs/memory.md`.
-- Skills van `claude` (2026-10-26): frontend-design, web-artifacts-builder en webapp-testing uit `anthropics/skills`,
-  vastgepind in `config/claude.conf` en geïnstalleerd door `scripts/18-claude.sh` (met pnpm in `~/.local` en Playwright
+- Skills van `claude` (2026-10-26): frontend-design, web-artifacts-builder en webapp-testing uit `anthropics/skills`, en
+  ui-ux-pro-max uit `davila7/claude-code-templates`; per bron vastgepind in `config/claude.conf` (`SKILL_SOURCES`) en geïnstalleerd door `scripts/18-claude.sh` (met pnpm in `~/.local` en Playwright
   in `~/.local/share/playwright-venv`; `python` is die venv, `python3` die van Ubuntu). Een nieuwe commit van de skills:
   eerst alle bestanden lezen. Nog niet echt gedraaid: `init-artifact.sh` (auto mode hield het tegen; de gebruiker beslist).
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in

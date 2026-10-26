@@ -6,8 +6,8 @@
 #   het geheugen schrijft alleen de inbox (F-023).
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
-# - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
-#   en een headless Chromium). Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
+# - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm), webapp-testing (met Playwright
+#   en een headless Chromium) en ui-ux-pro-max. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
 set -euo pipefail
 
@@ -57,17 +57,31 @@ mkdir -p ~/dev
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "$0")")/../config/claude.conf"
 
-echo "== Skills (${SKILLS_COMMIT:0:7})"
+echo "== Skills"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-git -C "$tmp" init --quiet
-git -C "$tmp" fetch --quiet --depth 1 "$SKILLS_REPO" "$SKILLS_COMMIT"
-git -C "$tmp" checkout --quiet FETCH_HEAD
 mkdir -p ~/.claude/skills
-for s in $SKILLS; do
-  [[ -f "$tmp/skills/$s/SKILL.md" ]] || { echo "Skill $s staat niet in $SKILLS_COMMIT." >&2; exit 1; }
-  rm -rf ~/.claude/skills/"$s"
-  cp -r "$tmp/skills/$s" ~/.claude/skills/"$s"
+SKILLS=""
+for source in "${SKILL_SOURCES[@]}"; do
+  # shellcheck disable=SC2086
+  set -- $source
+  repo=$1 commit=$2
+  shift 2
+  paths="$*"
+  # Alleen de skill-mappen ophalen (sparse, zonder de rest van de repo).
+  d="$tmp/${commit:0:12}"
+  git -C "$tmp" init --quiet "$d"
+  git -C "$d" sparse-checkout set --no-cone $(printf '/%s/ ' $paths)
+  git -C "$d" fetch --quiet --depth 1 --filter=blob:none "$repo" "$commit"
+  git -C "$d" checkout --quiet FETCH_HEAD
+  for p in $paths; do
+    s=$(basename "$p")
+    [[ -f "$d/$p/SKILL.md" ]] || { echo "Skill $p staat niet in $repo op ${commit:0:7}." >&2; exit 1; }
+    rm -rf ~/.claude/skills/"$s"
+    cp -r "$d/$p" ~/.claude/skills/"$s"
+    echo "$s (${commit:0:7})"
+    SKILLS+="${SKILLS:+ }$s"
+  done
 done
 
 echo "== Systeempakketten voor de skills"

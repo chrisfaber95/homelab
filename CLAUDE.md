@@ -34,7 +34,7 @@ Dat is een kopie; het origineel staat in `team-hq` op de Windows-pc en wordt daa
 - Een merge naar `main` van homelab betekent root-acties op de box. Dat Claude niet naar `main` pusht of merget is een
   afspraak (keuze van de gebruiker), geen technische grens: houd je eraan.
 
-## Stand (2026-10-25)
+## Stand (2026-10-26)
 
 Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - Ubuntu Server 24.04, UEFI met fallback-bootloader, LVM op de volle SSD, 8 GB swap, `vm.swappiness=10`.
@@ -64,39 +64,47 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105) en
   `bin/homelab-inbox-task` (draait als `inbox`, via één sudo-regel); uitleg in `docs/inbox.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
-  `docs/llm.md`. Installatie: `scripts/17-llm.sh` (nog door de gebruiker te draaien). Testen zonder root kan met een
-  eigen `ollama serve` op een andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
+  `docs/llm.md`; geïnstalleerd met `scripts/17-llm.sh`. Testen zonder root kan met een eigen `ollama serve` op een
+  andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.
 
-Nog door de gebruiker te testen: SSH vanaf een ander netwerk, en de klep dicht.
+## Volgende werk (stand 2026-10-26)
 
-## Volgende werk
+Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020; `homelab-health` is helemaal OK.
 
-1. F-017: de gebruiker draait `scripts/17-llm.sh` opnieuw (model `llama3.1:8b`) en test `llm` vanaf Windows.
-   Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker); de brief eist 100% GPU
-   voor de desktop.
-2. F-018 staat (2026-10-25): `homelab-deploy` synct `homelab` en `claude-dashboard`; de dashboard draait als
-   `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
-   `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker. Nog door de gebruiker: apparaat koppelen,
-   LAN-test van 8101, Remote-SSH, reboot en stroom eruit.
-3. F-019 staat (2026-10-25): `homelab-admin` en ntfy draaien; `changes/0001` is toegepast. Lockout-test geslaagd:
-   een gemergde wijziging die SSH via Tailscale blokkeerde, werd na 5 min 32 s vanzelf teruggedraaid (test-wijziging
-   daarna weggehaald). Testen zonder root: `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/
-   `SOCKET`/`SNAP_PATHS` en `NO_FETCH=1` (zie de docstring). Let op: `ufw` ziet een regel die alleen in
-   allow/deny verschilt als dezelfde en slaat hem over; controleer in `apply.sh` altijd of de wijziging er staat.
-4. F-020 staat (2026-10-25): monitor, overzicht (poort 8104) en backups draaien; test "dienst gestopt → melding,
-   weer aan → melding" geslaagd. Later (keuze van de gebruiker): de offline-melding (heartbeat) en de backups naar
-   de USB-HDD; geen herstel-oefening. Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/
-   `HEALTH_CMD`/`NTFY_FAKE=1`; `homelab-backup` met `BACKUP_LIST`/`BACKUP_DIR`/`BACKUP_STATUS`/`RESTORE_ROOT`/
-   `NO_SERVICES=1`.
-5. F-021 (branch `f-021-inbox`): na de merge draait de gebruiker `scripts/21-inbox.sh` (met twee tokens). Taken
-   draaien in auto mode, nooit `bypassPermissions` (keuze van de gebruiker, na een weigering door de veiligheidscheck).
-   `--max-turns` van `claude -p` werkt niet; de inbox telt de beurten zelf in de stream-json. Testen zonder root:
-   `INBOX_FAKE_GITHUB=1`, `TASK_CMD`, `INBOX_RUNNER_HOME`/`INBOX_TASK_HOME`, `REPOS_CONF`, `REMOTE_<NAAM>`,
-   `INBOX_ALLOW_ALL=1` (zie de docstring).
-6. Daarna de ROADMAP-volgorde: F-022, F-023, F-024.
+1. F-021 (branch `f-021-inbox`, PR #10): na de merge draait de gebruiker `scripts/21-inbox.sh` (met twee tokens).
+   Taken draaien in auto mode, nooit `bypassPermissions` (keuze van de gebruiker, na een weigering door de
+   veiligheidscheck). `--max-turns` van `claude -p` werkt niet; de inbox telt de beurten zelf in de stream-json.
+   Testen zonder root: `INBOX_FAKE_GITHUB=1`, `TASK_CMD`, `INBOX_RUNNER_HOME`/`INBOX_TASK_HOME`, `REPOS_CONF`,
+   `REMOTE_<NAAM>`, `INBOX_ALLOW_ALL=1` (zie de docstring).
+2. Backups naar de externe 2 TB USB-HDD (F-020; de gebruiker heeft hem op 2026-10-26 aan de laptop gehangen).
+   Mounten is root-werk buiten F-019: een script dat de gebruiker draait, mount op UUID met `nofail`.
+3. Daarna de ROADMAP-volgorde: F-022, F-023, F-024. F-022 en F-023 bouwen op de inbox; begin pas na de merge van F-021.
+
+Nog door de gebruiker te testen (staat ook in `CHECKLIST.md`):
+- F-016: SSH vanaf een ander netwerk; de klep dicht.
+- F-017: `llm` vanaf Windows. Op de laptop draait het model bewust grotendeels op de CPU (keuze van de gebruiker);
+  de brief eist 100% GPU, dat kan pas op de desktop.
+- F-018: apparaat koppelen op de dashboard, 8101 geweigerd vanaf het LAN, Remote-SSH, reboot en stroom eruit.
+- F-020: schijf vol en stroom eruit geven een melding (dienst gestopt is getest). De offline-melding (heartbeat)
+  later; geen herstel-oefening (keuze van de gebruiker).
+- Na de verhuizing naar de desktop: BIOS, `EXPECTED_GPU` naar de GTX 1080, reboot en stroomtest, de herbouw-oefening.
+
+Klaar, voor de context:
+- F-018: `homelab-deploy` synct `homelab` en `claude-dashboard`; de dashboard draait als
+  `homelab-app-claude-dashboard` op `https://homelab:8101` en ziet Claudes sessies. Rootless Docker voor `deploy` en
+  `claude`; de compose-deploy is getest met lokale repo's en Claudes Docker.
+- F-019: `homelab-admin` en ntfy draaien; `changes/0001` is toegepast. Lockout-test geslaagd: een gemergde wijziging
+  die SSH via Tailscale blokkeerde, werd na 5 min 32 s vanzelf teruggedraaid. Testen zonder root:
+  `HOMELAB_ADMIN_FAKE=1` met eigen `REPO_DIR`/`STATE_DIR`/`LOG_FILE`/`SOCKET`/`SNAP_PATHS` en `NO_FETCH=1` (zie de
+  docstring). Let op: `ufw` ziet een regel die alleen in allow/deny verschilt als dezelfde en slaat hem over;
+  controleer in `apply.sh` altijd of de wijziging er staat.
+- F-020: monitor, overzicht (poort 8104) en backups draaien; test "dienst gestopt → melding, weer aan → melding"
+  geslaagd. Testen zonder root: `homelab-monitor` met `MONITOR_DIR`/`OVERVIEW_DIR`/`HEALTH_CMD`/`NTFY_FAKE=1`;
+  `homelab-backup` met `BACKUP_LIST`/`BACKUP_DIR`/`BACKUP_STATUS`/`RESTORE_ROOT`/`NO_SERVICES=1`.
 
 Open vragen die je niet zelf beslist:
-- De externe 2 TB HDD en de 250 GB SSD: vraag van de lead in F-016, nog niet beantwoord.
+- De 250 GB SSD en de 2 TB HDD (vraag van de lead in F-016 en F-020): de HDD wordt de backupschijf. Nog open: mag er
+  ook andere data op de HDD staan? Die heeft dan geen backup.
 - Beantwoord (2026-10-25): Claude pusht naar branches en opent PR's, niet naar `main` (afspraak + hook; geen
   technische afscherming, ook niet na F-019). De dashboard op de box toont sessies en mag Claude-sessies starten.
   Meldingen via een eigen ntfy op het tailnet. Kernel en NVIDIA niet via unattended-upgrades (`changes/0001`).

@@ -25,9 +25,9 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 
 **Toevoegen**: een regel erbij, commit, PR, mergen naar `main`. Binnen een minuut staat de deploy-clone er.
 - `compose`: publiceer poorten in de reeks **8100-8199**. Die laat ufw alleen via `tailscale0` door, en rootless
-  Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8108:3000"`).
+  Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
-  8106-8107 visualshopping. Kijk bij twijfel met `ss -ltn`.
+  8106-8108 visualshopping. Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - `service`: zet ook een unit `deploy/<naam>.service` in deze repo (zie `deploy/claude-dashboard.service`) en draai
   `sudo bash /srv/homelab/repos/homelab/scripts/18-projects.sh`: een nieuwe systemd-unit heeft root nodig. Zonder unit
@@ -124,6 +124,9 @@ De webshop van Coop Lubbers: de klant-app op **`http://homelab:8107`** (`visuals
 8106, dus app en foto's staan op één adres. De database bouwt zich bij de eerste start op uit `db/` in de server-repo
 (ongeveer een minuut; de API verbindt pas bij een verzoek, zodat `compose up --wait` niet op de import wacht).
 Mollie en mail staan uit: afrekenen werkt niet.
+De werknemers-app staat op **`http://homelab:8108`** (`visualshopping-werk`, repo `Werknemers-portfolio`), met
+inloggen als `demo@example.com` / `demo1234` (rol Admin, uit `db/06_demo.sql` van de server; op de bestaande
+database gezet door `changes/0003-visualshopping-demo`).
 
 - **Productfoto's** (854 MB, 9.340 bestanden) staan niet in git. Ze staan in `/home/claude/data/coop-lubbers/public`
   (herkomst en kopiëren: README in `homelab-data/databases/coop-lubbers`). `changes/0002-visualshopping-fotos` kopieert

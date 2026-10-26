@@ -4,7 +4,8 @@
 # - Account inbox-runner: de pagina en de wachtrij (dienst homelab-inbox); pusht inbox/<id>-branches en opent PR's met
 #   een eigen token, en mag precies één opdracht als inbox draaien (homelab-inbox-task, via sudo).
 # - Drie tokens: Claude Code voor inbox (claude setup-token), GitHub voor inbox-runner, ntfy voor inbox-runner.
-# - Jobs en skills (F-022) zitten in dezelfde dienst; de jobs staan op de branch jobs van de homelab-repo.
+# - Jobs en skills (F-022) zitten in dezelfde dienst; jobs en geheugen (F-023) staan op de branches jobs en memory
+#   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
 set -euo pipefail
@@ -103,6 +104,25 @@ ask_token /etc/homelab/inbox-claude-token inbox \
 ask_token /etc/homelab/inbox-github-token inbox-runner \
   "GitHub voor de inbox: een fine-grained token, All repositories, Contents en Pull requests: Read and write." \
   github_works
+echo "== Privé repo voor jobs en geheugen ($DATA_REPO)"
+# Jobs en geheugen zijn persoonlijk: nooit in een public repo. Bestaat hij niet, maak hem dan (op Windows of als claude):
+#   gh repo create $DATA_REPO --private
+data=$(curl -s -H "Authorization: Bearer $(cat /etc/homelab/inbox-github-token)" "https://api.github.com/repos/$DATA_REPO")
+if ! grep -q '"full_name"' <<<"$data"; then
+  echo "Het token van de inbox ziet $DATA_REPO niet. Maak hem privé aan: gh repo create $DATA_REPO --private" >&2
+  exit 1
+fi
+if ! grep -q '"private": *true' <<<"$data"; then
+  echo "$DATA_REPO is public: jobs en geheugen horen in een privé repo. Zet hem op privé en draai dit opnieuw." >&2
+  exit 1
+fi
+if ! grep -q '"push": *true' <<<"$data"; then
+  echo "Het token van de inbox mag niet schrijven in $DATA_REPO (Contents: Read and write nodig)." >&2
+  exit 1
+fi
+unset data
+echo "$DATA_REPO is privé en het token kan erin schrijven."
+
 if [[ ! -s /etc/homelab/inbox-ntfy-token ]]; then
   t=$(runuser -u ntfy -- /usr/local/bin/ntfy token --config /etc/ntfy/server.yml add homelab-bot 2>&1 | grep -o 'tk_[a-z0-9]*')
   [[ -n $t ]] || { echo "Geen ntfy-token gekregen." >&2; exit 1; }

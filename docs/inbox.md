@@ -50,7 +50,7 @@ Claude een skill voorstellen: dat wordt een PR in de homelab-repo die jij merget
 
 Elke taak en Claude-job begint met wat Claude over jou, de box en de repo weet, en kan eerdere taken doorzoeken. Corrigeer
 je Claude in review-commentaar of een antwoord, dan bewaart hij dat als voorkeur. Alles staat op de tab **Geheugen**,
-waar je het bewerkt of wist, en op de branch `memory`. Alles hierover: `docs/memory.md`.
+waar je het bewerkt of wist, en op de branch `memory` van de privé repo `homelab-data`. Alles hierover: `docs/memory.md`.
 
 ## Wat Claude in de inbox wel en niet kan
 

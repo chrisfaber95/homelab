@@ -64,10 +64,10 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105) en
   `bin/homelab-inbox-task` (draait als `inbox`, via één sudo-regel); uitleg in `docs/inbox.md`.
 - F-022: jobs en skills in dezelfde dienst (`homelab-inbox`, tabs Jobs en Skills; `homelab-inbox jobs`). Jobs in
-  `jobs/<naam>.md` op de branch `jobs` (nooit gemerged; alleen de pagina schrijft erop, de pre-push-hook houdt jou
+  `jobs/<naam>.md` op de branch `jobs` van de privé repo `DATA_REPO` (nooit gemerged; alleen de pagina schrijft erop, de pre-push-hook houdt jou
   tegen); skills in `skills/<naam>/SKILL.md` op `main`, alleen via een PR. Uitleg in `docs/jobs.md`.
 - F-023: geheugen in dezelfde dienst (tab Geheugen; `homelab-inbox memory`). Voorkeuren, feiten en geschiedenis als
-  bestanden op de branch `memory` (nooit gemerged; alleen de inbox schrijft erop, de pre-push-hook houdt jou tegen).
+  bestanden op de branch `memory` van `DATA_REPO` (nooit gemerged; alleen de inbox schrijft erop, de pre-push-hook houdt jou tegen).
   Claude bewaart met `GEHEUGEN:`-blokken onder zijn laatste bericht; auto memory van Claude Code staat uit voor `inbox`.
   Uitleg in `docs/memory.md`.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in

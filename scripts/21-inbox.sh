@@ -4,6 +4,7 @@
 # - Account inbox-runner: de pagina en de wachtrij (dienst homelab-inbox); pusht inbox/<id>-branches en opent PR's met
 #   een eigen token, en mag precies één opdracht als inbox draaien (homelab-inbox-task, via sudo).
 # - Drie tokens: Claude Code voor inbox (claude setup-token), GitHub voor inbox-runner, ntfy voor inbox-runner.
+# - Jobs en skills (F-022) zitten in dezelfde dienst; de jobs staan op de branch jobs van de homelab-repo.
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
 set -euo pipefail
@@ -19,6 +20,9 @@ for f in deploy admin inbox; do
   # shellcheck disable=SC1090
   source "$REPO/config/$f.conf"
 done
+
+echo "== Pakketten (jobs, F-022: YAML-koppen en het kopiëren van skills)"
+dpkg -s python3-yaml rsync >/dev/null 2>&1 || apt-get install -y -qq python3-yaml rsync
 
 echo "== Accounts en mappen"
 getent group inbox-share >/dev/null || groupadd -r inbox-share
@@ -41,7 +45,7 @@ install -d -m 755 "$DEST/bin" "$DEST/config"
 for f in homelab-inbox homelab-inbox-task homelab-admin homelab-health; do
   install -m 755 "$REPO/bin/$f" "$DEST/bin/$f"
 done
-for f in inbox.conf admin.conf deploy.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
+for f in inbox.conf admin.conf deploy.conf llm.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
 ln -sfn "$DEST/bin/homelab-inbox" /usr/local/bin/homelab-inbox
 
 echo "== sudo: inbox-runner mag alleen homelab-inbox-task als inbox draaien"

@@ -246,6 +246,10 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Op GitHub een fine-grained token voor de inbox: All repositories, Contents en Pull requests: Read and write.
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (vraagt om beide tokens).
   - [ ] `http://homelab.tail4eb878.ts.net:8105` op de telefoon: een vraag-taak geeft een antwoord, een code-taak een PR.
+- [ ] F-022 (jobs en skills): zie `docs/jobs.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
+  - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `jobs` tegen).
+  - [ ] Op de pagina, tab Jobs: een job in woorden opstellen, bevestigen; hij staat op de branch `jobs` en "Nu draaien"
+        geeft een resultaat in de geschiedenis.
 
 ## 14. Verhuizen naar de desktop **(desktop)**
 

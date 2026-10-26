@@ -114,6 +114,20 @@ Op de box zijn dat ook de builds van gedeployde repo's (`npm ci` draait als `dep
 wel bij alles van het account `claude`. De gegevens van de dashboard (apparaten, certificaat, `commands.log`) staan in
 `/home/claude/.local/share/claude-dashboard`.
 
+## visualshopping-server
+
+De API van de webshop van Coop Lubbers (repo `Visualshopping-Server-portfolio`), met MySQL en de productcatalogus,
+op `http://homelab:8102/api/v1/`. De database bouwt zich bij de eerste start op uit `db/` in die repo (ongeveer 75 s).
+Mollie en mail staan uit. De klant-app volgt als `visualshopping-client`.
+
+- **Productfoto's** (854 MB, 9.340 bestanden) staan niet in git. Ze staan in `/home/claude/data/coop-lubbers/public`
+  (herkomst en kopiëren: README in `homelab-data/databases/coop-lubbers`). `changes/0002-visualshopping-fotos` kopieert
+  ze naar de volume `visualshopping-server_public`. Na een herbouw: eerst de map terugzetten, dan die change opnieuw
+  (`apply.sh` aanpassen, bijvoorbeeld de datum in een commentaarregel, want een change draait één keer).
+- **Database opnieuw opbouwen** (na een wijziging in `db/`), als `deploy` in `/srv/homelab/releases/visualshopping-server/current`:
+  `docker compose -p visualshopping-server down`, `docker volume rm visualshopping-server_db`, `docker compose -p
+  visualshopping-server up -d`. Geen `down -v`: dat wist ook de volume met foto's en uploads.
+
 ## Herbouwen op een lege box
 
 1. Checklist stap 0-12, dan de scripts van stap 13 (health check, LLM).

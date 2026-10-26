@@ -105,7 +105,8 @@ Getest met `openai` 3.37 voor Python.
 - **Fouten** hebben de OpenAI-vorm `{"error": {"message", "type", "code"}}`:
   400 `bad_request` / `too_long`, 403 `forbidden` (niet van het tailnet), 502 `invalid_output` / `ollama_error`,
   503 `ollama_unreachable`, 504 `timeout`.
-- Verder: `GET /v1/models` (de jobs), `GET /usage?days=7` (de totalen van `llm usage`, als JSON),
+- Verder: `GET /v1/models` (de jobs), `GET /usage?days=7` (de totalen van `llm usage`, als JSON), `GET /usage/hourly?days=8` (calls per uur in UTC,
+  voor de homelab-pagina),
   `GET /health` (200 als Ollama draait en het model er is, anders 503).
 
 ## Grenzen

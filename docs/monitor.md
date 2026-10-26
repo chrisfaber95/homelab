@@ -41,9 +41,9 @@ homelab-overview
 Per check de status en sinds wanneer; per repo de draaiende commit, de laatste sync en deploy; LLM-gebruik van de
 laatste 7 dagen per caller en job; de 5 laatste machinewijzigingen; de laatste backup en de vrije ruimte.
 
-Dezelfde gegevens staan als pagina op **`http://homelab.tail4eb878.ts.net:8104`**: alleen lezen (alleen GET),
-ververst elke minuut, bijgewerkt bij elke check (dus hooguit 2 minuten oud), zonder geheimen. Alleen via het tailnet
-(ufw); vanaf het LAN geweigerd.
+Dezelfde gegevens staan op de homelab-pagina, **`http://homelab.tail4eb878.ts.net:8105`** (F-024,
+`docs/dashboard.md`), onder Gezondheid: alleen lezen, hooguit 2 minuten oud, zonder geheimen. De oude pagina op 8104
+verwijst daarheen.
 
 ## Backups
 

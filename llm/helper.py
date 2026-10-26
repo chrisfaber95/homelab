@@ -5,6 +5,7 @@ Een OpenAI-compatibele API voor twee jobs op het lokale model via Ollama:
   POST /v1/chat/completions  met model "summarize" of "extract"
   GET  /v1/models            de jobs
   GET  /usage?days=7         totalen uit het usage-log per caller en per job
+  GET  /usage/hourly?days=8  aantal calls per uur (UTC), voor de dashboard (F-024)
   GET  /health               draait Ollama en is het model er
 
 Alleen stdlib. Instellingen: config/llm.conf naast llm/. Voor tests overschrijfbaar met
@@ -111,6 +112,16 @@ def usage_totals(days):
         out["min_gpu_pct"] = dict(conn.execute("""SELECT model, MIN(gpu_pct) FROM calls
                                                   WHERE ts >= ? AND gpu_pct IS NOT NULL GROUP BY model""", (since,)))
     return out
+
+
+def usage_hourly(days):
+    """Calls per uur in UTC ("2026-10-26T13"); de dashboard telt ze op per dag in zijn eigen tijdzone."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    with _db_lock, db() as conn:
+        rows = conn.execute("""SELECT substr(ts, 1, 13), COUNT(*), SUM(1 - ok) FROM calls WHERE ts >= ?
+                               GROUP BY substr(ts, 1, 13) ORDER BY 1""", (since,))
+        return {"days": days, "since": since,
+                "hours": [{"hour": h, "count": n, "failures": f} for h, n, f in rows]}
 
 
 # --- Wie belt er: het Tailscale-apparaat bij het IP-adres
@@ -305,13 +316,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/models":
             self.send_json(200, {"object": "list", "data": [
                 {"id": j, "object": "model", "created": 0, "owned_by": "homelab"} for j in JOBS]})
-        elif path == "/usage":
+        elif path in ("/usage", "/usage/hourly"):
             params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
             try:
-                days = max(1, int(params.get("days", 7)))
+                days = min(90, max(1, int(params.get("days", 7))))
             except ValueError:
                 return self.send_error_json(400, "days moet een getal zijn.", "bad_request")
-            self.send_json(200, usage_totals(days))
+            self.send_json(200, usage_totals(days) if path == "/usage" else usage_hourly(days))
         elif path == "/health":
             try:
                 names = {m["name"] for m in ollama("/api/tags", timeout=3).get("models", [])}

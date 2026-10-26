@@ -1,6 +1,7 @@
 # Task inbox (F-021)
 
-Vanaf je telefoon een taak voor Claude op de box: **`http://homelab.tail4eb878.ts.net:8105`** (Tailscale aan).
+Vanaf je telefoon een taak voor Claude op de box: **`http://homelab.tail4eb878.ts.net:8105/taken`** (Tailscale aan;
+de tab Taken van de homelab-pagina, `docs/dashboard.md`).
 Kies een repo, beschrijf wat er moet gebeuren of wat je wilt weten, en verstuur. Claude eindigt met een PR, een
 antwoord op de pagina, één vraag terug, of een weigering met reden; bij elk daarvan krijg je een melding.
 

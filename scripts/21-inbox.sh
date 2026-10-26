@@ -6,7 +6,7 @@
 # - Drie tokens: Claude Code voor inbox (claude setup-token), GitHub voor inbox-runner, ntfy voor inbox-runner.
 # - Jobs en skills (F-022) zitten in dezelfde dienst; jobs en geheugen (F-023) staan op de branches jobs en memory
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
-# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health of config/inbox.conf.
+# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
 set -euo pipefail
 
@@ -46,7 +46,11 @@ install -d -m 755 "$DEST/bin" "$DEST/config"
 for f in homelab-inbox homelab-inbox-task homelab-admin homelab-health; do
   install -m 755 "$REPO/bin/$f" "$DEST/bin/$f"
 done
-for f in inbox.conf admin.conf deploy.conf llm.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
+for f in inbox.conf admin.conf deploy.conf llm.conf backup.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
+# De pagina (F-024): stijl, script en lettertypen.
+install -d -m 755 "$DEST/web" "$DEST/web/fonts"
+install -m 644 "$REPO"/web/app.css "$REPO"/web/app.js "$DEST/web/"
+install -m 644 "$REPO"/web/fonts/* "$DEST/web/fonts/"
 ln -sfn "$DEST/bin/homelab-inbox" /usr/local/bin/homelab-inbox
 
 echo "== sudo: inbox-runner mag alleen homelab-inbox-task als inbox draaien"

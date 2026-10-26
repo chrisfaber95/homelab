@@ -60,10 +60,12 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-019: `bin/homelab-admin` (root-dienst; socket `/run/homelab-admin.sock`), wijzigingen in `changes/`, blijvende
   pakketten en poorten in `config/machine.conf`, uitleg in `docs/admin.md`. Logboek: `homelab-admin changes`.
   Meldingen: ntfy op `http://homelab.tail4eb878.ts.net:8102` (topic `homelab`, de telefoon is Android).
-- F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; pagina op poort 8104), `bin/homelab-backup`
+- F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; 8104 verwijst sinds F-024 naar 8105), `bin/homelab-backup`
   (timer 03:30), extra checks in `bin/homelab-health` (llm, deploy, `svc:<naam>`, backup); instellingen in
   `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.
-- F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105) en
+- F-024: de homelab-pagina in dezelfde dienst: `/` is het overzicht (statuszin, nu bezig met live logs, jobs-tijdlijn,
+  deze week, gezondheid); stijl, script en lettertypen in `web/`; uitleg in `docs/dashboard.md`.
+- F-021: `bin/homelab-inbox` (dienst `homelab-inbox` onder `inbox-runner`, pagina op poort 8105, tab Taken op `/taken`) en
   `bin/homelab-inbox-task` (draait als `inbox`, via één sudo-regel); uitleg in `docs/inbox.md`.
 - F-022: jobs en skills in dezelfde dienst (`homelab-inbox`, tabs Jobs en Skills; `homelab-inbox jobs`). Jobs in
   `jobs/<naam>.md` op de branch `jobs` van de privé repo `DATA_REPO` (nooit gemerged; alleen de pagina schrijft erop, de pre-push-hook houdt jou
@@ -96,8 +98,12 @@ Draait en is gecontroleerd: F-016, F-017 (`llama3.1:8b`), F-018, F-019 en F-020;
    `github:`-bronnen met het echte token.
 2. Backups naar de externe 2 TB USB-HDD (PR #11, open): de laptop zag de schijf nog niet (geen USB-opslag in `lsusb`).
    De gebruiker pakt dat later op.
-3. F-023 (geheugen) is gebouwd en getest zonder root (2026-10-26, PR `f-023-memory`); na de merge `21-inbox.sh` en
-   `18-claude.sh` en de tests in `CHECKLIST.md`. Daarna F-024: eerst de visuele richting met de gebruiker afspreken.
+3. F-023 (geheugen) is gemerged; na `21-inbox.sh` en `18-claude.sh` de tests in `CHECKLIST.md`.
+4. F-024 (homelab-pagina, 2026-10-26, branch `f-024-dashboard`): gebouwd en getest zonder root, met screenshots via
+   Playwright. Visuele richting gekozen door de gebruiker: professioneel en rustig (niet de isometrische look van de
+   claude-dashboard); details in `docs/dashboard.md`. Wacht op de goedkeuring van de look (`user_check`) en de merge.
+   Let op bij testen: zoek een testserver op via zijn poort of een pid-bestand, nooit met `pkill -f`/`ps | grep` op een
+   patroon (dat raakt je eigen shell, of probeert de echte dienst te stoppen).
 
 Nog door de gebruiker te testen (staat ook in `CHECKLIST.md`):
 - F-016: SSH vanaf een ander netwerk; de klep dicht.

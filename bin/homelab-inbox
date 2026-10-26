@@ -23,7 +23,11 @@ Elke taak krijgt de voorkeuren en feiten in zijn systeemprompt en de geschiedeni
 Instellingen: config/inbox.conf (en deploy.conf, admin.conf). Voor tests: INBOX_FAKE_GITHUB=1 (PR's alleen
 loggen, antwoorden uit RUNNER_HOME/fake_github.json, pushen naar REMOTE_<NAAM>-paden; jobs en geheugen:
 REMOTE_HOMELAB_DATA), TASK_CMD (in plaats van sudo -u inbox homelab-inbox-task), NTFY_FAKE=1,
-INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_URL.
+INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_URL; voor het overzicht (F-024)
+MONITOR_DIR, DEPLOY_STATE en BACKUP_STATUS.
+
+Overzicht (F-024): / is de homelab-pagina (statuszin, nu bezig met live logs, jobs-tijdlijn, deze week, gezondheid);
+stijl, script en lettertypen in web/. Live logs per taak of run in RUNNER_HOME/logs, via /api/live en /api/log.
 """
 import argparse
 import hashlib
@@ -57,7 +61,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def load_config():
     conf = {}
-    for name in ("deploy.conf", "admin.conf", "llm.conf", "inbox.conf"):
+    for name in ("deploy.conf", "admin.conf", "llm.conf", "backup.conf", "inbox.conf"):
         f = ROOT / "config" / name
         if f.exists():
             for line in f.read_text().splitlines():
@@ -111,6 +115,8 @@ eigen werkkopie van de repo {repo} op branch inbox/{id}; de gebruiker kijkt niet
 _lock = threading.RLock()
 _procs = {}      # taak-id -> Popen
 _cancel = set()  # taken die gestopt moeten worden
+_cancel_runs = set()  # lokale job-runs die gestopt moeten worden (F-024)
+_round_started = {}   # taak-id -> begin van de lopende ronde (voor "bezig sinds")
 
 
 def now():
@@ -133,8 +139,9 @@ def db():
         last_comment_at TEXT, turns INTEGER DEFAULT 0, note TEXT)""")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
     # F-022: een taak die een job-run is; F-023: bron van wat Claude deze ronde leert, geschiedenis geschreven
+    # F-024: het model van de laatste ronde
     for col, kind in (("job", "TEXT"), ("run_id", "INTEGER"), ("mem_source", "TEXT"), ("mem_link", "TEXT"),
-                      ("remembered", "INTEGER DEFAULT 0")):
+                      ("remembered", "INTEGER DEFAULT 0"), ("model", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
     conn.executescript("""
@@ -147,6 +154,8 @@ def db():
         CREATE TABLE IF NOT EXISTS skill_prs (id INTEGER PRIMARY KEY, name TEXT NOT NULL, task_id INTEGER,
             pr_url TEXT, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);""")
+    if "minutes" not in {r[1] for r in conn.execute("PRAGMA table_info(job_runs)")}:
+        conn.execute("ALTER TABLE job_runs ADD COLUMN minutes INTEGER")  # F-024: bespaarde minuten, bij het starten
     return conn
 
 
@@ -261,6 +270,62 @@ def task_cmd(*args, timeout=600):
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+# --- Live logs (F-024): per taak (t<id>) of lokale job-run (r<id>) een bestand met één json-regel per gebeurtenis
+
+LOGS = HOME / "logs"
+
+
+def log_line(key, kind, text):
+    """kind: info, claude, tool, result, error, out. Wat op een geheim lijkt, wordt verborgen."""
+    LOGS.mkdir(exist_ok=True)
+    text = SECRET_RE.sub("[verborgen]", str(text))
+    lines = text.splitlines() if kind == "out" else [" ".join(text.split())]
+    with open(LOGS / f"{key}.log", "a") as f:
+        for line in lines or [""]:
+            f.write(json.dumps({"at": now(), "kind": kind, "text": line[:600]}, ensure_ascii=False) + "\n")
+
+
+def read_log(key, start=0, limit=500):
+    try:
+        with open(LOGS / f"{key}.log") as f:
+            lines = f.readlines()
+    except OSError:
+        return [], 0
+    return [json.loads(l) for l in lines[start:start + limit]], min(len(lines), start + limit)
+
+
+def tool_brief(inp):
+    for k in ("command", "file_path", "pattern", "path", "url", "description", "prompt"):
+        if inp.get(k):
+            return str(inp[k])[:240]
+    return json.dumps(inp, ensure_ascii=False)[:240]
+
+
+def stream_lines(ev):
+    """Wat er in een stream-json-gebeurtenis van Claude Code gebeurt, als leesbare logregels."""
+    kind = ev.get("type")
+    if kind == "system" and ev.get("subtype") == "init":
+        return [("info", f"sessie gestart, model {ev.get('model', '?')}")]
+    if kind == "result":
+        return [("info", f"ronde klaar na {ev.get('num_turns', '?')} beurten, "
+                         f"{round((ev.get('duration_ms') or 0) / 1000)} s")]
+    out = []
+    for b in (ev.get("message") or {}).get("content") or [] if kind in ("assistant", "user") else []:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "text" and b.get("text", "").strip():
+            out.append(("claude", b["text"].strip()[:1500]))
+        elif b.get("type") == "tool_use":
+            out.append(("tool", f"{b.get('name')}: {tool_brief(b.get('input') or {})}"))
+        elif b.get("type") == "tool_result":
+            c = b.get("content")
+            txt = (c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))).strip()
+            n = len(txt.splitlines())
+            first = txt.splitlines()[0][:200] if txt else "(leeg)"
+            out.append(("error" if b.get("is_error") else "result", first + (f" (+{n - 1} regels)" if n > 1 else "")))
+    return out
+
+
 # --- Een ronde van een taak
 
 def write_prompt(t, text):
@@ -293,6 +358,9 @@ def run_round(task_id):
             prompt = t["pending_input"]
         write_prompt(t, prompt)
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
+        _round_started[task_id] = now()
+        log_line(f"t{task_id}", "info", f"ronde {t['rounds'] + 1} gestart" + (
+            "" if first else ": " + first_line(prompt)))
         result, turns, capped = stream_claude(task_id, "new" if first else "resume")
     except Exception as e:
         log(f"taak {task_id}: {e}")
@@ -325,6 +393,10 @@ def stream_claude(task_id, mode):
             ev = json.loads(line)
         except ValueError:
             continue
+        for kind, text in stream_lines(ev):
+            log_line(f"t{task_id}", kind, text)
+        if ev.get("type") == "system" and ev.get("model"):
+            update(task_id, model=ev["model"])
         if ev.get("type") == "assistant":
             turns += 1
             if turns % 5 == 0:
@@ -335,6 +407,7 @@ def stream_claude(task_id, mode):
         elif ev.get("type") == "result":
             result = ev
     p.wait()
+    _round_started.pop(task_id, None)
     with _lock:
         _procs.pop(task_id, None)
         if task_id in _cancel:
@@ -837,8 +910,9 @@ def tick(now_dt):
 
 def dispatch(job, due, manual=False):
     with _lock, db() as c:
-        run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual) VALUES (?,?,?,?,?,?,?)",
-                           (job["name"], job["kind"], job["model"], due, now(), "queued", int(manual))).lastrowid
+        run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual, minutes) "
+                           "VALUES (?,?,?,?,?,?,?,?)", (job["name"], job["kind"], job["model"], due, now(), "queued",
+                                                        int(manual), job["minutes"])).lastrowid
     threading.Thread(target=run_job, args=(run_id, job), daemon=True).start()
     return run_id
 
@@ -930,14 +1004,38 @@ def call_llm(job, text):
 def run_local(run_id, job):
     """Een lokale job: tekst verzamelen en door het lokale model laten samenvatten. Geen Claude."""
     update_run(run_id, status="running", started=now())
+    key = f"r{run_id}"
     try:
+        log_line(key, "info", f"{JOB_KINDS[job['kind']]}: tekst verzamelen")
         text = gather(job, run_id)
+        log_line(key, "out" if job["kind"] == "script" else "info",
+                 text[-4000:] if job["kind"] == "script" else f"{len(text)} tekens verzameld")
+        if run_id in _cancel_runs:
+            raise InterruptedError
         if len(text) > LOCAL_MAX_CHARS:
             text = text[:LOCAL_MAX_CHARS] + "\n[afgekapt]"
-        update_run(run_id, status="ok", ended=now(), summary=call_llm(job, text))
+            log_line(key, "info", f"afgekapt op {LOCAL_MAX_CHARS} tekens")
+        log_line(key, "tool", "lokaal model: samenvatten")
+        started = time.monotonic()
+        summary = call_llm(job, text)
+        if run_id in _cancel_runs:
+            raise InterruptedError
+        log_line(key, "claude", summary)
+        log_line(key, "info", f"klaar in {round(time.monotonic() - started)} s")
+        update_run(run_id, status="ok", ended=now(), summary=summary)
+    except InterruptedError:
+        log_line(key, "info", "geannuleerd")
+        update_run(run_id, status="cancelled", ended=now(), note="geannuleerd op de pagina")
     except Exception as e:
-        update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
-        notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+        if run_id in _cancel_runs:
+            log_line(key, "info", "geannuleerd")
+            update_run(run_id, status="cancelled", ended=now(), note="geannuleerd op de pagina")
+        else:
+            log_line(key, "error", str(e))
+            update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
+            notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+    finally:
+        _cancel_runs.discard(run_id)
 
 
 def job_prompt(job, run_id):
@@ -1369,6 +1467,212 @@ def draft_name(text):
     return m.group(1) if m else ""
 
 
+# --- Overzicht (F-024): gezondheid (F-020, alleen lezen), nu bezig, de jobs-tijdlijn, gebruik en waarde
+
+MONITOR_DIR = Path(CONF.get("MONITOR_DIR", "/var/lib/homelab/monitor"))
+DEPLOY_STATE = Path(os.environ.get("DEPLOY_STATE", "/srv/homelab/state"))
+CHANGES_LOG = Path(CONF.get("LOG_FILE", "/var/log/homelab/changes.jsonl"))
+DAYS_NL = ("ma", "di", "wo", "do", "vr", "za", "zo")
+TL_PAST, TL_FUTURE, TL_NOW = timedelta(days=7), timedelta(hours=24), 70.0  # de laatste 24 uur krijgen 30% van de breedte
+STALE_CHECK = timedelta(minutes=10)  # de monitor draait elke 2 minuten
+
+
+def read_json(path, default):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def ts(iso):
+    return datetime.fromisoformat(iso) if iso else None
+
+
+def ago(iso):
+    if not iso:
+        return "nooit"
+    sec = int((datetime.now(timezone.utc) - ts(iso)).total_seconds())
+    return (f"{sec} s" if sec < 120 else f"{sec // 60} min" if sec < 7200 else f"{sec // 3600} uur" if sec < 172800
+            else f"{sec // 86400} dagen")
+
+
+def day_time(dt):
+    """'vandaag 07:00', 'morgen 07:00', 'gisteren 22:10', of 'wo 07:00'; binnen een week, anders met datum."""
+    d = dt.astimezone(TZ)
+    delta = (d.date() - datetime.now(TZ).date()).days
+    word = {0: "vandaag", 1: "morgen", -1: "gisteren"}.get(delta)
+    if word is None:
+        word = DAYS_NL[d.weekday()] + ("" if abs(delta) < 7 else f" {d:%d-%m}")
+    return f"{word} {d:%H:%M}"
+
+
+def minutes_nl(m):
+    return f"{m // 60} u {m % 60:02d} min" if m >= 60 else f"{m} min"
+
+
+def join_nl(items):
+    items = list(items)
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " en " + items[-1]
+
+
+def health():
+    checks = read_json(MONITOR_DIR / "checks.json", {})
+    deploys = [read_json(f, {}) | {"name": f.stem} for f in sorted(DEPLOY_STATE.glob("*.json")) if not f.stem.startswith("_")]
+    try:
+        changes = [json.loads(l) for l in CHANGES_LOG.read_text().splitlines()[-5:]][::-1]
+    except (OSError, ValueError):
+        changes = []
+    return {"checks": checks, "last": read_json(MONITOR_DIR / "last.json", {}).get("at"), "deploys": deploys,
+            "backup": read_json(CONF.get("BACKUP_STATUS", MONITOR_DIR / "backup.json"), {}), "changes": changes}
+
+
+def status_sentence(h):
+    """De zin bovenaan: is alles in orde? Geeft (zin, klasse)."""
+    fail = sorted(n for n, c in h["checks"].items() if c.get("status") == "FAIL")
+    warn = sorted(n for n, c in h["checks"].items() if c.get("status") == "WARN")
+    if not h["checks"]:
+        return "Er is nog geen gezondheidscheck gedraaid.", "attention"
+    if fail:
+        return (f"Eén check faalt: {fail[0]}." if len(fail) == 1 else f"{len(fail)} checks falen: {join_nl(fail)}."), "bad"
+    if h["last"] and datetime.now(timezone.utc) - ts(h["last"]) > STALE_CHECK:
+        return f"De bewaking heeft sinds {day_time(ts(h['last']))} niet gecontroleerd.", "attention"
+    if warn:
+        return (f"Eén check vraagt aandacht: {warn[0]}." if len(warn) == 1
+                else f"{len(warn)} checks vragen aandacht: {join_nl(warn)}."), "attention"
+    return "Alles in orde.", "ok"
+
+
+def model_name(model):
+    return f"Claude ({model.removeprefix('claude-')})" if model else "Claude"
+
+
+def live_items():
+    """Wat nu draait: inbox-taken en Claude-jobs (als taak) en lokale job-runs."""
+    items = []
+    recent = tasks(100)
+    for t in recent:
+        if t["status"] == "running":
+            what = (JOB_KINDS.get(JOBS.get(t["job"], {}).get("kind"), "job") if t["job"] else first_line(t["text"]))
+            items.append({"key": f"t{t['id']}", "title": label(t), "what": what, "repo": t["repo"],
+                          "model": model_name(t["model"]), "url": f"/task/{t['id']}", "cancel": f"/task/{t['id']}/cancel",
+                          "started": _round_started.get(t["id"]) or t["started"] or t["created"]})
+    with db() as c:
+        runs = c.execute("SELECT * FROM job_runs WHERE status='running' ORDER BY id").fetchall()
+    for r in runs:
+        items.append({"key": f"r{r['id']}", "title": f"Job {r['job']}", "what": JOB_KINDS.get(r["kind"], r["kind"]),
+                      "repo": "box", "model": f"lokaal model ({CONF.get('LLM_MODEL', '?')})", "url": f"/run/{r['id']}",
+                      "cancel": f"/run/{r['id']}/cancel", "started": r["started"] or r["created"]})
+    return items, sum(t["status"] == "queued" for t in recent)
+
+
+def next_job():
+    upcoming = [(job["cron"].next_after(datetime.now(timezone.utc)), name) for name, job in JOBS.items()
+                if "error" not in job and not job["paused"]]
+    return min(upcoming) if upcoming else None
+
+
+def activity_sentence(items, queued):
+    if not items:
+        now_part = "Niets bezig."
+    elif len(items) == 1:
+        it = items[0]
+        who = "Claude" if it["key"][0] == "t" else "Het lokale model"
+        now_part = f"{who} werkt aan {it['title'][0].lower() + it['title'][1:]}."
+    else:
+        now_part = f"Bezig: {join_nl(i['title'][0].lower() + i['title'][1:] for i in items)}."
+    if queued:
+        now_part += f" {queued} in de rij."
+    nxt = next_job()
+    return now_part + (f" Volgende job: {nxt[1]}, {day_time(nxt[0])}." if nxt else "")
+
+
+def tl_x(dt, now_dt):
+    d = (dt - now_dt).total_seconds()
+    if d <= 0:
+        return max(0.0, TL_NOW * (1 + d / TL_PAST.total_seconds()))
+    return min(100.0, TL_NOW + (100 - TL_NOW) * d / TL_FUTURE.total_seconds())
+
+
+def timeline():
+    """Per job: de runs van de laatste 7 dagen en de geplande van de komende 24 uur, met x in procenten."""
+    now_dt = datetime.now(timezone.utc)
+    with db() as c:
+        runs = c.execute("SELECT * FROM job_runs WHERE COALESCE(started, created) >= ? ORDER BY id",
+                         ((now_dt - TL_PAST).isoformat(timespec="seconds"),)).fetchall()
+    lanes = []
+    for name in sorted(set(JOBS) | {r["job"] for r in runs}):
+        job, marks = JOBS.get(name), []
+        for r in (r for r in runs if r["job"] == name):
+            status, summary, link, _ = run_view(r)
+            at = ts(r["started"] or r["created"])
+            marks.append({"x": tl_x(at, now_dt), "status": status, "link": link,
+                          "label": f"{day_time(at)}: {RUN_NL.get(status, status)}"
+                                   + (f". {first_line(summary)}" if summary else "")})
+        if job and "error" not in job and not job["paused"]:
+            t = now_dt
+            for _ in range(200):
+                t = job["cron"].next_after(t)
+                if t - now_dt > TL_FUTURE:
+                    break
+                marks.append({"x": tl_x(t, now_dt), "status": "plan", "link": f"/job/{name}",
+                              "label": f"gepland {day_time(t)}"})
+        lanes.append({"name": name, "job": job, "marks": marks})
+    ticks, local_now = [], now_dt.astimezone(TZ)
+    midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for i in range(-7, 2):  # middernachten: lijnen en weekdagen
+        m = (midnight + timedelta(days=i)).replace(tzinfo=None).replace(tzinfo=TZ)
+        x = tl_x(m, now_dt)
+        if 0 < x < 100:
+            ticks.append({"x": x, "label": DAYS_NL[m.weekday()], "day": True})
+    for h in range(1, 25):  # de komende 24 uur: 6u, 12u, 18u
+        t = (local_now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
+        if t.hour in (6, 12, 18):
+            ticks.append({"x": tl_x(t, now_dt), "label": f"{t.hour}u", "day": False})
+    ticks = [t for t in ticks if abs(t["x"] - TL_NOW) > 6]  # niet over "nu" heen, ook op de telefoon
+    return lanes, ticks
+
+
+def usage():
+    """Per dag (de laatste 7, in TZ): lokale LLM-calls, Claude-runs van jobs (tegen de daglimiet) en van inbox-taken,
+    en de bespaarde minuten van gelukte job-runs per soort."""
+    today = datetime.now(TZ).date()
+    days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    since = datetime.combine(days[0], dt_time(0), TZ).astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    def per_day(isos):
+        counts = dict.fromkeys(days, 0)
+        for iso in isos:
+            d = ts(iso).astimezone(TZ).date()
+            if d in counts:
+                counts[d] += 1
+        return [counts[d] for d in days]
+    llm = None
+    try:
+        with urllib.request.urlopen(f"{LLM_URL}/usage/hourly?days=8", timeout=5) as r:
+            hours = json.load(r)["hours"]
+        counts = dict.fromkeys(days, 0)
+        for h in hours:
+            d = datetime.fromisoformat(h["hour"] + ":00:00+00:00").astimezone(TZ).date()
+            if d in counts:
+                counts[d] += h["count"]
+        llm = [counts[d] for d in days]
+    except (OSError, ValueError, KeyError):
+        pass
+    with db() as c:
+        claude_jobs = [r[0] for r in c.execute("SELECT dispatched FROM job_runs WHERE task_id IS NOT NULL AND "
+                                               "dispatched >= ?", (since,))]
+        inbox = [r[0] for r in c.execute("SELECT created FROM tasks WHERE job IS NULL AND created >= ?", (since,))]
+        runs = c.execute("SELECT * FROM job_runs WHERE COALESCE(started, created) >= ?", (since,)).fetchall()
+    saved = {}
+    for r in runs:
+        mins = r["minutes"] if r["minutes"] is not None else JOBS.get(r["job"], {}).get("minutes")
+        if mins and run_view(r)[0] in ("ok", "pr"):
+            kind = JOB_KINDS.get(r["kind"], r["kind"])
+            saved[kind] = saved.get(kind, 0) + mins
+    return {"days": days, "llm": llm, "claude_jobs": per_day(claude_jobs), "inbox": per_day(inbox),
+            "cap": int(CONF.get("JOB_CLAUDE_CAP", 10)), "saved": saved}
+
+
 # --- Pagina
 
 def secret():
@@ -1417,22 +1721,9 @@ class Access:
         return login == cls.owner, device or ip
 
 
-CSS = """:root{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#1d4ed8;--bad:#b91c1c;--ok:#15803d}
-@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--line:#44403c;--accent:#93c5fd;
---bad:#f87171;--ok:#4ade80}}
-body{background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:16px}
-h1{font-size:1.35em;margin:0 0 .6em}h2{font-size:1.05em;margin:1.4em 0 .4em}a{color:var(--accent)}
-textarea,select,button,input{font:inherit;width:100%;box-sizing:border-box;margin:.25em 0;padding:.55em;border-radius:8px;
-border:1px solid var(--line);background:var(--bg);color:var(--fg)}textarea{min-height:7em}
-button{background:var(--accent);color:var(--bg);border:0;font-weight:600}button.ghost{background:none;color:var(--bad);
-border:1px solid var(--bad)}.task{border-top:1px solid var(--line);padding:.6em 0}.muted{color:var(--muted);font-size:.9em}
-.st{font-weight:600}.st.waiting,.st.failed,.st.capped,.st.refused{color:var(--bad)}.st.pr_open,.st.answered,
-.st.merged{color:var(--ok)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:none;margin:.3em 0}
-.st.run-failed,.st.run-held,.st.run-capped,.st.run-question{color:var(--bad)}.st.run-ok,.st.run-pr{color:var(--ok)}
-nav{margin-bottom:.6em}dl{display:grid;grid-template-columns:max-content 1fr;gap:.2em .8em;margin:.4em 0}dt{color:var(--muted)}
-dd{margin:0;overflow-wrap:anywhere}form{margin:.5em 0}code{overflow-wrap:anywhere}
-h3{font-size:.95em;margin:1em 0 .2em;color:var(--muted)}.kind{font-size:.8em;border:1px solid var(--line);
-border-radius:6px;padding:0 .35em;color:var(--muted)}"""
+WEB = ROOT / "web"
+TABS = (("overzicht", "/", "Overzicht"), ("taken", "/taken", "Taken"), ("jobs", "/jobs", "Jobs"),
+        ("geheugen", "/memory", "Geheugen"), ("skills", "/skills", "Skills"))
 
 
 def local(iso):
@@ -1442,75 +1733,105 @@ def local(iso):
         return iso  # een met de hand bewerkte datum in het geheugen
 
 
-def page(title, body, refresh=False):
+def asset(name):
+    """/static/<naam> met de wijzigingstijd erachter, zodat een nieuwe versie meteen geladen wordt."""
+    try:
+        return f"/static/{name}?v={int((WEB / name).stat().st_mtime)}"
+    except OSError:
+        return f"/static/{name}"
+
+
+def tab_of(title):
+    if title.startswith(("job", "concept", "run")):
+        return "jobs"
+    if title.startswith(("geheugen", "skills")):
+        return title.split()[0]
+    return "overzicht" if title == "homelab" else "taken"
+
+
+def page(title, body, refresh=False, narrow=True):
     meta = '<meta http-equiv="refresh" content="20">' if refresh else ""
+    current = tab_of(title)
+    tabs = "".join(f'<a href="{href}"{" aria-current=page" if key == current else ""}>{name}</a>'
+                   for key, href, name in TABS)
     return (f'<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)}</title>'
-            f'<style>{CSS}</style></head><body>{body}</body></html>')
+            f'<meta name="color-scheme" content="light dark"><link rel="stylesheet" href="{asset("app.css")}">'
+            f'<script src="{asset("app.js")}" defer></script></head><body>'
+            f'<header class="top"><a class="mark" href="/">homelab</a><nav class="tabs" aria-label="Onderdelen">'
+            f'{tabs}</nav></header><main{" class=narrow" if narrow else ""}>{body}</main></body></html>')
+
+
+def form(action, inner, button, ghost=False, cls=None):
+    cls = cls or ("ghost" if ghost else None)
+    return (f'<form method="post" action="{action}"><input type="hidden" name="csrf" value="{csrf_token()}">'
+            f'{inner}<button{f" class={cls}" if cls else ""}>{button}</button></form>')
+
+
+def meta(*parts):
+    return '<div class="row-meta">' + "".join(f"<span>{p}</span>" for p in parts if p) + "</div>"
 
 
 def task_row(t, link=True):
     e = html.escape
-    head = f'<a href="/task/{t["id"]}">#{t["id"]}</a>' if link else f'#{t["id"]}'
-    pr = f' · <a href="{e(t["pr_url"])}">PR #{t["pr_number"]}</a>' if t["pr_url"] else ""
-    times = f'gestart {local(t["started"])}' + (f', klaar {local(t["ended"])}' if t["ended"] else "")
-    return (f'<div class="task">{head} <span class="st {t["status"]}">{e(STATUS_NL[t["status"]])}</span> · '
-            f'{e(t["repo"])}{pr}<br>{e(f"job {t['job']}" if t["job"] else first_line(t["text"]))}'
-            f'<div class="muted">aangemaakt {local(t["created"])}; '
-            f'{times}</div></div>')
+    head = f'<a href="/task/{t["id"]}">{e(label(t))}</a>' if link else f'<b>{e(label(t))}</b>'
+    pr = f'<a href="{e(t["pr_url"])}">PR #{t["pr_number"]}</a>' if t["pr_url"] else ""
+    what = JOB_KINDS.get(JOBS.get(t["job"], {}).get("kind"), "job") if t["job"] else first_line(t["text"])
+    return (f'<div class="row"><div class="row-title">{head}<span class="st {t["status"]}">'
+            f'{e(STATUS_NL[t["status"]])}</span><span>{e(what)}</span></div>'
+            + meta(e(t["repo"]), f'aangemaakt {local(t["created"])}',
+                   f'klaar {local(t["ended"])}' if t["ended"] else "", pr) + '</div>')
 
 
-def index_page():
+def tasks_page():
     e = html.escape
     opts = "".join(f'<option value="{e(n)}">{e(n)}</option>' for n in sorted(repo_list()))
     all_tasks = tasks()
     queue = [t for t in all_tasks if t["status"] in ACTIVE + ("waiting",)][::-1]
-    body = (f'{nav()}<h1>homelab-inbox</h1><form method="post" action="/tasks">'
-            f'<input type="hidden" name="csrf" value="{csrf_token()}"><select name="repo">{opts}</select>'
-            f'<textarea name="text" required placeholder="Wat moet Claude doen of uitzoeken?"></textarea>'
-            f'<button>Versturen</button></form>'
-            f'<h2>Nu</h2>{"".join(task_row(t) for t in queue) or "<p class=muted>Niets in de rij.</p>"}'
-            f'<h2>Geschiedenis</h2>{"".join(task_row(t) for t in all_tasks if t not in queue) or "<p class=muted>Nog geen taken.</p>"}')
-    return page("homelab-inbox", body, refresh=bool(queue))
+    body = (f'<h1>Taken</h1><form method="post" action="/tasks" id="nieuw">'
+            f'<input type="hidden" name="csrf" value="{csrf_token()}"><label for="repo">Repo</label>'
+            f'<select name="repo" id="repo">{opts}</select><label for="text">Wat moet Claude doen of uitzoeken?</label>'
+            f'<textarea name="text" id="text" required></textarea><button>Taak sturen</button></form>'
+            f'<h2>Nu</h2>{"".join(task_row(t) for t in queue) or "<p class=empty>Niets in de rij.</p>"}'
+            f'<h2>Geschiedenis</h2>'
+            f'{"".join(task_row(t) for t in all_tasks if t not in queue) or "<p class=empty>Nog geen taken.</p>"}')
+    return page("taken", body, refresh=bool(queue))
+
+
+def log_html(key):
+    """Het log van een taak of run; app.js houdt het bij zolang hij loopt (zonder script: de stand bij het laden)."""
+    lines, _ = read_log(key, 0, 2000)
+    rows = "".join(f'<div class="k-{e["kind"]}"><time>{local(e["at"])[6:]}</time>{html.escape(e["text"])}</div>'
+                   for e in lines)
+    return (f'<h2>Log</h2><div class="log" role="log" data-key="{key}">'
+            f'{rows or "<div class=log-end>Nog geen regels.</div>"}</div>')
 
 
 def task_page(t):
     e = html.escape
-    parts = [f'{nav()}<h1>Taak #{t["id"]}</h1>', task_row(t, link=False),
-             f'<h2>Taak</h2><pre>{e(t["text"])}</pre>']
+    parts = [f'<h1>{e(label(t))}</h1>', task_row(t, link=False), f'<h2>Taak</h2><pre>{e(t["text"])}</pre>']
     if t["question"]:
         parts.append(f'<h2>Vraag van Claude</h2><pre>{e(t["question"])}</pre>')
         if t["status"] == "waiting":
-            parts.append(f'<form method="post" action="/task/{t["id"]}/answer"><input type="hidden" name="csrf" '
-                         f'value="{csrf_token()}"><textarea name="answer" required></textarea>'
-                         f'<button>Antwoorden</button></form>')
+            parts.append(form(f'/task/{t["id"]}/answer', '<label for="answer">Jouw antwoord</label>'
+                              '<textarea name="answer" id="answer" required></textarea>', "Antwoorden"))
     if t["answer"]:
         parts.append(f'<h2>Antwoord</h2><pre>{e(t["answer"])}</pre>')
     if t["summary"]:
         parts.append(f'<h2>{"Reden" if t["status"] == "refused" else "Samenvatting"}</h2><pre>{e(t["summary"])}</pre>')
     if t["note"]:
         parts.append(f'<p class="muted">{e(t["note"])}</p>')
-    parts.append(f'<p class="muted">{t["turns"]} beurten in {t["rounds"]} ronde(s); grens per ronde '
-                 f'{CONF["MAX_TURNS"]} beurten of {CONF["MAX_MINUTES"]} minuten.</p>')
+    parts.append(f'<p class="muted">{t["turns"]} beurten in {t["rounds"]} ronde(s), {e(model_name(t["model"]))}. '
+                 f'Grens per ronde: {CONF["MAX_TURNS"]} beurten of {CONF["MAX_MINUTES"]} minuten.</p>')
     if t["status"] in ACTIVE + ("waiting",):
-        parts.append(f'<form method="post" action="/task/{t["id"]}/cancel"><input type="hidden" name="csrf" '
-                     f'value="{csrf_token()}"><button class="ghost">Annuleren</button></form>')
-    return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] in ACTIVE)
-
-
-def nav():
-    return ('<nav class="muted"><a href="/">Taken</a> · <a href="/jobs">Jobs</a> · <a href="/skills">Skills</a> · '
-            '<a href="/memory">Geheugen</a></nav>')
-
-
-def form(action, inner, button, ghost=False):
-    cls = ' class="ghost"' if ghost else ""
-    return (f'<form method="post" action="{action}"><input type="hidden" name="csrf" value="{csrf_token()}">'
-            f'{inner}<button{cls}>{button}</button></form>')
+        parts.append(form(f'/task/{t["id"]}/cancel', "", "Annuleren", ghost=True))
+    parts.append(log_html(f"t{t['id']}"))
+    return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] == "queued")
 
 
 def when(dt):
-    return f'{("ma", "di", "wo", "do", "vr", "za", "zo")[dt.weekday()]} {dt.astimezone(TZ):%d-%m %H:%M}'
+    dt = dt.astimezone(TZ)
+    return f'{DAYS_NL[dt.weekday()]} {dt:%d-%m %H:%M}'
 
 
 def next_run(job):
@@ -1518,18 +1839,176 @@ def next_run(job):
         return "-"
     if job["paused"]:
         return "gepauzeerd"
-    return when(job["cron"].next_after(datetime.now(timezone.utc)))
+    return day_time(job["cron"].next_after(datetime.now(timezone.utc)))
 
 
 def run_row(r, show_job=False):
     e = html.escape
     status, summary, link, pr = run_view(r)
-    head = f'<a href="/job/{e(r["job"])}">{e(r["job"])}</a> · ' if show_job else ""
-    extra = f' · <a href="{e(pr)}">PR</a>' if pr else ""
-    return (f'<div class="task">{head}<a href="{link}">{local(r["due"])}</a> '
-            f'<span class="st run-{status}">{e(RUN_NL.get(status, status))}</span> · {e(r["model"] or "")}'
-            f'{" · nu gedraaid" if r["manual"] else ""}{extra}'
-            f'<div class="muted">{e(first_line(summary) if summary else "")}</div></div>')
+    head = f'<a href="/job/{e(r["job"])}">{e(r["job"])}</a>' if show_job else ""
+    return (f'<div class="row"><div class="row-title">{head}<a href="{link}">{local(r["due"])}</a>'
+            f'<span class="st run-{status}">{e(RUN_NL.get(status, status))}</span></div>'
+            + meta("lokaal model" if r["model"] == "local" else "Claude", "nu gedraaid" if r["manual"] else "",
+                   f'<a href="{e(pr)}">PR</a>' if pr else "", e(first_line(summary)) if summary else "")
+            + '</div>')
+
+
+# --- Het overzicht (F-024)
+
+def live_row(it):
+    e = html.escape
+    return (f'<div class="live-item" data-ssr="{it["key"]}" data-started="{it["started"]}">'
+            f'<span class="pulse" aria-hidden="true"></span><div><div class="row-title"><a href="{it["url"]}">'
+            f'{e(it["title"])}</a><span>{e(it["what"])}</span></div>'
+            + meta(e(it["repo"]), e(it["model"]), f'bezig sinds <span class="elapsed">{ago(it["started"])}</span>')
+            + '</div></div>')
+
+
+def timeline_html():
+    e = html.escape
+    lanes, ticks = timeline()
+    if not lanes:
+        return ('<p class="empty">Nog geen jobs. <a href="/jobs">Maak een job</a> en hij verschijnt hier met zijn '
+                'runs en zijn volgende keren.</p>')
+    scale = "".join(f'<span style="left:{t["x"]:.2f}%">{t["label"]}</span>' for t in ticks)
+    days = "".join(f'<i class="tl-day" style="left:{t["x"]:.2f}%"></i>' for t in ticks if t["day"])
+    rows = []
+    for lane in lanes:
+        job = lane["job"]
+        if not job:
+            sub = "verwijderd"
+        elif "error" in job:
+            sub = "fout in het bestand"
+        else:
+            sub = ("gepauzeerd" if job["paused"] else
+                   ("lokaal" if job["model"] == "local" else "Claude") + f", {e(job['when'] or job['schedule'])}")
+        marks = "".join(f'<a class="mk {m["status"]}" style="left:{m["x"]:.2f}%" href="{m["link"]}" '
+                        f'title="{e(m["label"])}" aria-label="{e(m["label"])}"></a>' for m in lane["marks"])
+        rows.append(f'<div class="tl-row"><div class="tl-name"><a href="/job/{e(lane["name"])}">{e(lane["name"])}</a>'
+                    f'<small>{sub}</small></div><div class="tl-lane">{days}<i class="tl-now"></i>{marks}</div></div>')
+    legend = "".join(f'<span><i class="mk {k}"></i>{v}</span>' for k, v in (
+        ("ok", "gelukt"), ("pr", "PR"), ("failed", "mislukt"), ("held", "wacht of vraag"), ("running", "bezig"),
+        ("plan", "gepland")))
+    return (f'<div class="tl"><div class="tl-scale" aria-hidden="true">{scale}'
+            f'<span class="now" style="left:{TL_NOW}%">nu</span></div>{"".join(rows)}</div>'
+            f'<div class="legend">{legend}</div>')
+
+
+def bars(values, days, cap=None):
+    top = max([*values, cap or 0, 1])
+    today = len(values) - 1
+    cols = "".join(f'<i{" class=today" if i == today else ""} style="height:{v / top * 100:.0f}%" '
+                   f'title="{DAYS_NL[d.weekday()]} {d:%d-%m}: {v}"></i>' for i, (v, d) in enumerate(zip(values, days)))
+    capline = f'<span class="cap" style="bottom:{cap / top * 100:.0f}%" title="daglimiet {cap}"></span>' if cap else ""
+    letters = "".join(f"<span>{DAYS_NL[d.weekday()]}</span>" for d in days)
+    return f'<div><div class="bars" aria-hidden="true">{cols}{capline}</div><div class="days" aria-hidden="true">{letters}</div></div>'
+
+
+def usage_html():
+    u = usage()
+    rows = []
+    if u["llm"] is None:
+        rows.append('<div class="use"><div><div class="use-label">Lokaal model</div><div class="use-value">'
+                    '<small>de helper is niet bereikbaar</small></div></div></div>')
+    else:
+        rows.append(f'<div class="use"><div><div class="use-label">Lokaal model</div><div class="use-value">'
+                    f'{sum(u["llm"])}<small>calls, vandaag {u["llm"][-1]}</small></div></div>{bars(u["llm"], u["days"])}</div>')
+    rows.append(f'<div class="use"><div><div class="use-label">Claude voor jobs</div><div class="use-value">'
+                f'{sum(u["claude_jobs"])}<small>runs, vandaag {u["claude_jobs"][-1]} van {u["cap"]}</small></div></div>'
+                f'{bars(u["claude_jobs"], u["days"], u["cap"])}</div>')
+    rows.append(f'<div class="use"><div><div class="use-label">Claude voor jouw taken</div><div class="use-value">'
+                f'{sum(u["inbox"])}<small>taken, vandaag {u["inbox"][-1]}</small></div></div>'
+                f'{bars(u["inbox"], u["days"])}</div>')
+    total = sum(u["saved"].values())
+    kinds = "".join(f'<li><span>{html.escape(k)}</span><b>{minutes_nl(v)}</b></li>'
+                    for k, v in sorted(u["saved"].items(), key=lambda kv: -kv[1]))
+    rows.append(f'<div class="use"><div><div class="use-label">Tijd bespaard door jobs</div><div class="use-value">'
+                f'{minutes_nl(total)}</div></div>'
+                + (f'<ul class="saved">{kinds}</ul>' if kinds else
+                   '<p class="saved">Telt gelukte runs van jobs met <code>minutes</code> in hun bestand.</p>')
+                + '</div>')
+    return "".join(rows)
+
+
+CHECK_NL = {"OK": "in orde", "WARN": "let op", "FAIL": "faalt"}
+
+
+def change_text(c):
+    if c.get("kind") in ("instant", "refused"):
+        what = f"{c.get('action')} {' '.join(c.get('args') or [])}"
+    else:
+        what = f"{c.get('change', 'machine.conf')}: {c.get('summary') or c.get('result', '')}"
+    return what.strip()[:90]
+
+
+def health_html(h):
+    e = html.escape
+    checks = sorted(h["checks"].items(), key=lambda kv: (kv[1].get("status") == "OK", kv[0]))
+    bad = [(n, c) for n, c in checks if c.get("status") != "OK"]
+
+    def check_row(n, c):
+        st = c.get("status", "?")
+        return (f'<div class="check"><span class="st {"ok" if st == "OK" else st.lower()}">{CHECK_NL.get(st, st)}</span>'
+                f'<div><b>{e(n)}</b>' + meta(e(c.get("text", "")), f'sinds {day_time(ts(c["since"]))}' if c.get("since")
+                                               else "") + '</div></div>')
+    parts = [f'<p class="note">{len(checks) - len(bad)} van {len(checks)} checks in orde, laatst gecontroleerd '
+             f'{day_time(ts(h["last"])) if h["last"] else "nooit"}. Alleen lezen.</p>']
+    parts += [check_row(n, c) for n, c in bad]
+    if checks:
+        parts.append(f'<details><summary>Alle checks</summary>{"".join(check_row(n, c) for n, c in checks)}</details>')
+    facts = []
+    for d in h["deploys"]:
+        last = d.get("last_deploy") or {}
+        state = ("ok" if last.get("ok") else "mislukt") if last else "nog niet"
+        facts.append((e(d["name"]), f'<span class="st {"ok" if last.get("ok") else "fail"}">{state}</span>, '
+                                    f'{e((d.get("deployed_sha") or "-")[:7])}, {e(day_time(ts(last["at"])) if last else "-")}'
+                                    + (f'<br><span class="error">{e(d["sync_error"])}</span>' if d.get("sync_error") else "")))
+    b = h["backup"]
+    if b:
+        facts.append(("Backup", f'<span class="st {"ok" if b.get("ok") else "fail"}">{"ok" if b.get("ok") else "mislukt"}'
+                                f'</span>, {e(day_time(ts(b["at"])) if b.get("at") else "-")}; '
+                                f'{b.get("free_bytes", 0) // 2**30} GB vrij ({b.get("free_pct", "?")}%)'))
+    else:
+        facts.append(("Backup", "nog geen"))
+    parts.append('<h3>Deploys en backup</h3><dl class="facts">'
+                 + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>")
+    return "".join(parts)
+
+
+def changes_html(h):
+    e = html.escape
+    parts = []
+    if h["changes"]:
+        parts.append("".join(
+            f'<div class="row"><div class="row-title"><span class="st {"ok" if c.get("ok") else "fail"}">'
+            f'{"ok" if c.get("ok") else "fout"}</span><span>{e(change_text(c))}</span></div>'
+            + meta(e(day_time(ts(c["at"]))), e(c.get("user", "")), e(c.get("reason", "")[:80])) + '</div>'
+            for c in h["changes"]))
+    return "".join(parts)
+
+
+def overview_page():
+    h = health()
+    sentence, cls = status_sentence(h)
+    items, queued = live_items()
+    live = "".join(live_row(it) for it in items) or \
+        '<p class="empty">Niets bezig. Taken en jobs verschijnen hier zodra ze starten.</p>'
+    body = (f'<section class="hero {cls}"><h1>{html.escape(sentence)}</h1>'
+            f'<p id="activity">{html.escape(activity_sentence(items, queued))}</p></section>'
+            f'<div class="grid"><div>'
+            f'<section id="live" data-csrf="{csrf_token()}"><div class="section-head"><h2>Nu bezig</h2>'
+            f'<p class="note"><span class="queued">{f"{queued} in de rij" if queued else ""}</span> '
+            f'<a href="/taken#nieuw">Taak sturen</a></p></div><div class="live-list">{live}</div></section>'
+            f'<section><div class="section-head"><h2>Jobs</h2><p class="note">Zeven dagen terug, 24 uur vooruit. '
+            f'<a href="/jobs">Alle jobs</a></p></div>{timeline_html()}</section>'
+            f'<section><div class="section-head"><h2>Wijzigingen op de box</h2><p class="note">de laatste vijf, '
+            f'via homelab-admin</p></div>{changes_html(h) or "<p class=empty>Nog geen wijzigingen.</p>"}</section>'
+            f'</div><div>'
+            f'<section><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
+            f'{usage_html()}</section>'
+            f'<section><h2>Gezondheid</h2>{health_html(h)}</section>'
+            f'</div></div>')
+    return page("homelab", body, narrow=False)
 
 
 def job_facts(job):
@@ -1558,33 +2037,34 @@ def jobs_page():
     rows = []
     for name, job in sorted(JOBS.items()):
         if "error" in job:
-            rows.append(f'<div class="task"><a href="/job/{e(name)}">{e(name)}</a> <span class="st failed">fout in '
-                        f'het bestand</span><div class="muted">{e(job["error"])}</div></div>')
+            rows.append(f'<div class="row"><div class="row-title"><a href="/job/{e(name)}">{e(name)}</a>'
+                        f'<span class="st failed">fout in het bestand</span></div>{meta(e(job["error"]))}</div>')
             continue
         last = job_runs(name, 1)
-        last_txt = f' · laatste: {e(RUN_NL.get(run_view(last[0])[0], ""))}' if last else ""
-        rows.append(f'<div class="task"><a href="/job/{e(name)}">{e(name)}</a> · {e(JOB_KINDS[job["kind"]])} · '
-                    f'{"lokaal" if job["model"] == "local" else "Claude"}<div class="muted">{e(job["when"] or job["schedule"])}'
-                    f'; volgende: {e(next_run(job))}{last_txt}</div></div>')
+        last_txt = f'laatste: {e(RUN_NL.get(run_view(last[0])[0], ""))}' if last else ""
+        rows.append(f'<div class="row"><div class="row-title"><a href="/job/{e(name)}">{e(name)}</a>'
+                    f'<span>{e(JOB_KINDS[job["kind"]])}, {"lokaal" if job["model"] == "local" else "Claude"}</span></div>'
+                    + meta(e(job["when"] or job["schedule"]), f'volgende: {e(next_run(job))}', last_txt) + '</div>')
     with db() as c:
         drafts = c.execute("SELECT * FROM drafts WHERE status IN ('drafting','ready','failed') ORDER BY id DESC "
                            "LIMIT 10").fetchall()
-    open_drafts = "".join(f'<div class="task"><a href="/draft/{d["id"]}">concept #{d["id"]}</a> '
-                          f'<span class="muted">{e(first_line(d["request"]))}</span></div>' for d in drafts)
-    body = (f'{nav()}<h1>Jobs</h1><p class="muted">Claude-runs door jobs vandaag: {claude_runs_today()} van {cap}. '
+    open_drafts = "".join(f'<div class="row"><div class="row-title"><a href="/draft/{d["id"]}">concept #{d["id"]}</a>'
+                          f'<span>{e(first_line(d["request"]))}</span></div></div>' for d in drafts)
+    body = (f'<h1>Jobs</h1><p class="muted">Claude-runs door jobs vandaag: {claude_runs_today()} van {cap}. '
             f'Tijden in {TZ.key}.</p>'
-            + form("/jobs/draft", '<textarea name="text" required placeholder="Bijvoorbeeld: elke werkdag om 7:00, '
-                   'vertel me wat er vannacht misging"></textarea>', "Job opstellen")
+            + form("/jobs/draft", '<label for="jobtext">Wat moet de job doen, en wanneer?</label><textarea name="text" '
+                   'id="jobtext" required placeholder="Bijvoorbeeld: elke werkdag om 7:00, vertel me wat er vannacht '
+                   'misging"></textarea>', "Job opstellen")
             + (f'<h2>Concepten</h2>{open_drafts}' if open_drafts else "")
-            + f'<h2>Alle jobs</h2>{"".join(rows) or "<p class=muted>Nog geen jobs.</p>"}'
-            + f'<h2>Laatste runs</h2>{"".join(run_row(r, True) for r in job_runs(limit=20)) or "<p class=muted>Nog geen runs.</p>"}')
+            + f'<h2>Alle jobs</h2>{"".join(rows) or "<p class=empty>Nog geen jobs.</p>"}'
+            + f'<h2>Laatste runs</h2>{"".join(run_row(r, True) for r in job_runs(limit=20)) or "<p class=empty>Nog geen runs.</p>"}')
     return page("jobs", body, refresh=any(d["status"] == "drafting" for d in drafts))
 
 
 def job_page(name, error=None, text=None):
     e = html.escape
     job = JOBS[name]
-    parts = [f'{nav()}<h1>Job {e(name)}</h1>']
+    parts = [f'<h1>Job {e(name)}</h1>']
     if error:
         parts.append(f'<p class="st failed">{e(error)}</p>')
     if "error" in job:
@@ -1597,7 +2077,7 @@ def job_page(name, error=None, text=None):
         parts.append('<h2>Wijzigen</h2>' + form(f"/job/{e(name)}/change", '<textarea name="text" required '
                      'placeholder="Bijvoorbeeld: om 8:00 in plaats van 7:00"></textarea>', "Wijziging opstellen"))
     runs = job_runs(name)
-    parts.append(f'<h2>Geschiedenis</h2>{"".join(run_row(r) for r in runs) or "<p class=muted>Nog geen runs.</p>"}')
+    parts.append(f'<h2>Geschiedenis</h2>{"".join(run_row(r) for r in runs) or "<p class=empty>Nog geen runs.</p>"}')
     parts.append('<h2>Bestand</h2>' + form(f"/job/{e(name)}/save", f'<textarea name="text" rows="14">'
                  f'{e(text or job["text"])}</textarea>', "Opslaan"))
     parts.append(form(f"/job/{e(name)}/delete", "", "Job verwijderen", ghost=True))
@@ -1606,7 +2086,7 @@ def job_page(name, error=None, text=None):
 
 def draft_page(d, error=None, text=None):
     e = html.escape
-    parts = [f'{nav()}<h1>Concept #{d["id"]}{" voor " + e(d["base"]) if d["base"] else ""}</h1>',
+    parts = [f'<h1>Concept #{d["id"]}{" voor " + e(d["base"]) if d["base"] else ""}</h1>',
              f'<pre>{e(d["request"])}</pre>']
     if d["status"] == "drafting":
         parts.append('<p class="muted">Claude stelt de job op&hellip;</p>')
@@ -1632,11 +2112,14 @@ def draft_page(d, error=None, text=None):
 def run_page(r):
     e = html.escape
     status, summary, _, _ = run_view(r)
-    return page(f"run {r['id']}", f'{nav()}<h1>Job <a href="/job/{e(r["job"])}">{e(r["job"])}</a></h1>'
-                f'<p>{local(r["due"])} · <span class="st run-{status}">{e(RUN_NL.get(status, status))}</span> · '
-                f'{e(r["model"] or "")}</p><pre>{e(r["summary"] or "")}</pre>'
-                + (f'<p class="muted">{e(r["note"])}</p>' if r["note"] else ""),
-                refresh=status in ("queued", "running"))
+    cancel = form(f"/run/{r['id']}/cancel", "", "Annuleren", ghost=True) if r["status"] == "running" else ""
+    return page(f"run {r['id']}", f'<h1>Job <a href="/job/{e(r["job"])}">{e(r["job"])}</a></h1>'
+                f'<div class="row-title"><span>{local(r["due"])}</span><span class="st run-{status}">'
+                f'{e(RUN_NL.get(status, status))}</span><span>{"lokaal model" if r["model"] == "local" else "Claude"}'
+                f'</span></div><pre>{e(r["summary"] or "")}</pre>'
+                + (f'<p class="muted">{e(r["note"])}</p>' if r["note"] else "") + cancel
+                + (log_html(f"r{r['id']}") if r["model"] == "local" else ""),
+                refresh=status == "queued")
 
 
 def skills_page():
@@ -1645,18 +2128,18 @@ def skills_page():
     for job in JOBS.values():
         for s in job.get("skills", []):
             used.setdefault(s, []).append(job["name"])
-    rows = "".join(f'<div class="task"><b>{e(n)}</b> · {e(d)}<div class="muted">jobs: '
-                   f'{", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in used.get(n, [])) or "geen"}</div></div>'
-                   for n, d in skill_list().items())
+    rows = "".join(f'<div class="row"><div class="row-title"><b>{e(n)}</b><span>{e(d)}</span></div>'
+                   + meta("jobs: " + (", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in used.get(n, [])) or "geen"))
+                   + '</div>' for n, d in skill_list().items())
     with db() as c:
         prs = c.execute("SELECT * FROM skill_prs ORDER BY id DESC LIMIT 20").fetchall()
-    props = "".join(f'<div class="task">{e(p["name"])} · <a href="{e(p["pr_url"])}">PR</a> · uit '
-                    f'<a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a> <span class="muted">{local(p["created"])}'
-                    f'</span></div>' for p in prs)
-    return page("skills", f'{nav()}<h1>Skills</h1><p class="muted">Gemergde skills op main; elke taak en Claude-job kan '
+    props = "".join(f'<div class="row"><div class="row-title"><b>{e(p["name"])}</b><a href="{e(p["pr_url"])}">PR</a>'
+                    f'</div>' + meta(f'uit <a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a>', local(p["created"]))
+                    + '</div>' for p in prs)
+    return page("skills", f'<h1>Skills</h1><p class="muted">Gemergde skills op main; elke taak en Claude-job kan '
                 f'ze gebruiken. Nieuwe en betere komen alleen via een PR die jij merget.</p>'
-                f'{rows or "<p class=muted>Nog geen skills.</p>"}<h2>Voorstellen</h2>'
-                f'{props or "<p class=muted>Nog geen voorstellen.</p>"}')
+                f'{rows or "<p class=empty>Nog geen skills.</p>"}<h2>Voorstellen</h2>'
+                f'{props or "<p class=empty>Nog geen voorstellen.</p>"}')
 
 
 def mem_matches(m, words):
@@ -1667,10 +2150,11 @@ def mem_matches(m, words):
 def mem_row(m):
     e = html.escape
     title = first_line(m["body"]).lstrip("# ") if m["kind"] == "geschiedenis" else m["name"]
-    status = f' · <span class="st">{e(m["status"])}</span>' if m["status"] else ""
-    return (f'<div class="task"><a href="/memory/e/{e(m["id"])}">{e(title)}</a> <span class="kind">{e(m["about"])}</span>'
-            f'{status}<div class="muted">{e(first_line(m["body"]) if m["kind"] != "geschiedenis" else "")}</div>'
-            f'<div class="muted">{local(m["changed"])} · {e(m["source"] or "-")}</div></div>')
+    status = f'<span class="st">{e(m["status"])}</span>' if m["status"] else ""
+    body = f'<div>{e(first_line(m["body"]))}</div>' if m["kind"] != "geschiedenis" else ""
+    return (f'<div class="row"><div class="row-title"><a href="/memory/e/{e(m["id"])}">{e(title)}</a>'
+            f'<span class="kind">{e(m["about"])}</span>{status}</div>{body}'
+            + meta(local(m["changed"]), e(m["source"] or "")) + '</div>')
 
 
 def memory_page(q="", error=None):
@@ -1678,11 +2162,12 @@ def memory_page(q="", error=None):
     words = q.lower().split()
     hits = [m for m in MEMORY if mem_matches(m, words)]
     abouts = ["algemeen", "box", *sorted(repo_list())]
-    parts = [f'{nav()}<h1>Geheugen</h1><p class="muted">Wat Claude in de inbox over jou, de box en eerdere taken weet. '
+    parts = [f'<h1>Geheugen</h1><p class="muted">Wat Claude in de inbox over jou, de box en eerdere taken weet. '
              f'Elke taak en Claude-job begint met de voorkeuren en de feiten; de geschiedenis kan hij doorzoeken. Wat je '
              f'hier wist of verandert, geldt vanaf de volgende taak.</p>'
-             f'<form method="get" action="/memory"><input type="search" name="q" value="{e(q)}" '
-             f'placeholder="Zoeken, bijvoorbeeld: deploy mislukt"><button>Zoeken</button></form>']
+             f'<form method="get" action="/memory" class="searchbar" role="search"><input type="search" name="q" '
+             f'value="{e(q)}" aria-label="Zoeken in het geheugen" placeholder="Zoeken, bijvoorbeeld: deploy mislukt">'
+             f'<button>Zoeken</button></form>']
     if error:
         parts.append(f'<p class="st failed">{e(error)}</p>')
     for kind, title in (("voorkeuren", "Voorkeuren"), ("feiten", "Feiten"), ("geschiedenis", "Geschiedenis")):
@@ -1691,20 +2176,22 @@ def memory_page(q="", error=None):
         if kind == "geschiedenis":
             items.sort(key=lambda m: m["added"], reverse=True)
             shown = items if q else items[:30]
-            parts.append("".join(mem_row(m) for m in shown) or '<p class="muted">Niets.</p>')
+            parts.append("".join(mem_row(m) for m in shown) or '<p class="empty">Niets.</p>')
             if len(shown) < len(items):
                 parts.append(f'<p class="muted">De nieuwste 30; zoek om de rest te vinden.</p>')
             continue
         for about in sorted({m["about"] for m in items}, key=lambda a: (a not in ("algemeen", "box"), a)):
             parts.append(f'<h3>{e(about)}</h3>' + "".join(mem_row(m) for m in items if m["about"] == about))
         if not items:
-            parts.append('<p class="muted">Niets.</p>')
+            parts.append('<p class="empty">Niets.</p>')
     opts = "".join(f'<option value="{e(a)}">{e(a)}</option>' for a in abouts)
     parts.append('<h2>Zelf toevoegen</h2>' + form(
-        "/memory/add", '<select name="kind"><option value="voorkeuren">voorkeur</option><option value="feiten">feit'
-        f'</option></select><select name="about">{opts}</select><input name="name" required placeholder="naam-met-'
-        'streepjes" pattern="[a-z0-9][a-z0-9-]{0,40}"><textarea name="text" required placeholder="Bijvoorbeeld: '
-        'houd PR\'s klein, één onderwerp per PR"></textarea>', "Toevoegen"))
+        "/memory/add", '<label for="mkind">Soort</label><select name="kind" id="mkind"><option value="voorkeuren">'
+        'voorkeur</option><option value="feiten">feit</option></select><label for="mabout">Over</label>'
+        f'<select name="about" id="mabout">{opts}</select><label for="mname">Naam</label><input name="name" '
+        'id="mname" required placeholder="naam-met-streepjes" pattern="[a-z0-9][a-z0-9-]{0,40}"><label for="mtext">'
+        'Tekst</label><textarea name="text" id="mtext" required placeholder="Bijvoorbeeld: houd PR\'s klein, één '
+        'onderwerp per PR"></textarea>', "Toevoegen"))
     return page("geheugen", "".join(parts))
 
 
@@ -1719,7 +2206,7 @@ def entry_page(m, error=None, text=None):
         rows.append(("Status", e(m["status"])))
     if m["pr"]:
         rows.append(("PR", f'<a href="{e(m["pr"])}">{e(m["pr"])}</a>'))
-    parts = [f'{nav()}<h1>{e(m["name"])}</h1>', f'<p class="muted"><code>{e(m["id"])}.md</code> op de branch '
+    parts = [f'<h1>{e(m["name"])}</h1>', f'<p class="muted"><code>{e(m["id"])}.md</code> op de branch '
              f'{e(CONF.get("MEMORY_BRANCH", "memory"))} van {e(CONF["DATA_REPO"])}</p>']
     if error:
         parts.append(f'<p class="st failed">{e(error)}</p>')
@@ -1736,12 +2223,16 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, ctype="text/html; charset=utf-8", location=None):
-        data = body.encode()
+    def send(self, code, body, ctype="text/html; charset=utf-8", location=None, cache=None):
+        data = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
+        self.send_header("Cache-Control", cache or "no-store")
+        # Alleen eigen bestanden; inline style alleen voor posities in de tijdlijn (style-attributen).
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+                         "script-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; "
+                         "base-uri 'none'; frame-ancestors 'none'")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
         if location:
@@ -1760,13 +2251,39 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard():
             return
         url = urllib.parse.urlsplit(self.path)
+        if m := re.fullmatch(r"/static/((?:fonts/)?[A-Za-z0-9-]+\.(css|js|woff2))", url.path):
+            f = WEB / m.group(1)
+            if f.is_file():
+                ctype = {"css": "text/css; charset=utf-8", "js": "text/javascript; charset=utf-8",
+                         "woff2": "font/woff2"}[m.group(2)]
+                return self.send(200, f.read_bytes(), ctype, cache="private, max-age=86400")
+        if url.path == "/api/live":
+            items, queued = live_items()
+            return self.send(200, json.dumps({"items": items, "queued": queued,
+                                              "activity": activity_sentence(items, queued)}),
+                             "application/json")
+        if m := re.fullmatch(r"/api/log/([tr])(\d+)", url.path):
+            start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
+            lines, nxt = read_log(f"{m.group(1)}{m.group(2)}", max(0, start))
+            if m.group(1) == "t":
+                done = (t := get(int(m.group(2)))) is None or t["status"] != "running"
+            else:
+                with db() as c:
+                    r = c.execute("SELECT status FROM job_runs WHERE id=?", (int(m.group(2)),)).fetchone()
+                done = r is None or r["status"] not in ("queued", "running")
+            # Klaar, maar nog regels te gaan: dan eerst die (done pas als alles binnen is).
+            more = read_log(f"{m.group(1)}{m.group(2)}", nxt, 1)[0]
+            return self.send(200, json.dumps({"lines": lines, "next": nxt, "done": done and not more}),
+                             "application/json")
+        if url.path == "/taken":
+            return self.send(200, tasks_page())
         if url.path == "/memory":
             return self.send(200, memory_page(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
         if (m := re.fullmatch(r"/memory/e/(.+)", self.path)) and (entry := mem_get(m.group(1))):
             return self.send(200, entry_page(entry))
         m = re.fullmatch(r"/task/(\d+)", self.path)
         if self.path == "/":
-            return self.send(200, index_page())
+            return self.send(200, overview_page())
         if m and (t := get(int(m.group(1)))):
             return self.send(200, task_page(t))
         if self.path == "/jobs":
@@ -1804,6 +2321,8 @@ class Handler(BaseHTTPRequestHandler):
                                 (repo, text[:8000], "queued", now(), str(uuid.uuid4())))
                 tid = cur.lastrowid
             return self.send(303, "", location=f"/task/{tid}")
+        if m := re.fullmatch(r"/run/(\d+)/cancel", self.path):
+            return self.cancel_run(int(m.group(1)))
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
         if self.path.startswith("/memory/"):
@@ -1875,6 +2394,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, job_page(name, error=str(ex), text=text or None))
         return self.send(303, "", location=f"/job/{name}")
 
+
+    def cancel_run(self, run_id):
+        """Een lokale job-run stoppen (F-024); een Claude-job annuleer je via zijn taak, net als in F-021."""
+        with db() as c:
+            r = c.execute("SELECT * FROM job_runs WHERE id=?", (run_id,)).fetchone()
+        if not r:
+            return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        if r["task_id"]:
+            return self.send(303, "", location=f"/task/{r['task_id']}")
+        if r["status"] == "running":
+            _cancel_runs.add(run_id)
+            update_run(run_id, status="cancelled", ended=now(), note="geannuleerd op de pagina")
+            log_line(f"r{run_id}", "info", "geannuleerd op de pagina")
+            if r["kind"] == "script":
+                threading.Thread(target=task_cmd, args=("kill", f"j{run_id}"), kwargs={"timeout": 30},
+                                 daemon=True).start()
+        return self.send(303, "", location=f"/run/{run_id}")
 
     def post_memory(self, form):
         """Geheugen (F-023): toevoegen, bewerken, wissen; elke wijziging een commit op naam van de gebruiker."""

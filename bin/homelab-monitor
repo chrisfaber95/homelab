@@ -28,7 +28,7 @@ LINE_STATUS = ("OK", "WARN", "FAIL")
 
 def load_config():
     conf = {}
-    for name in ("backup.conf", "admin.conf", "llm.conf"):
+    for name in ("backup.conf", "admin.conf", "llm.conf", "inbox.conf"):
         f = ROOT / "config" / name
         if not f.exists():
             continue
@@ -231,56 +231,13 @@ def text(d):
 
 
 def render_html(d):
-    e = html.escape
-    rows = "".join(
-        f"<tr class='{c['status'].lower()}'><td>{e(c['status'])}</td><td>{e(n)}</td><td>{e(local(c['since']))}</td>"
-        f"<td>{e(c['text'])}</td></tr>"
-        for n, c in sorted(d["checks"].items(), key=lambda kv: (kv[1]["status"] == "OK", kv[0])))
-    deploys = "".join(
-        f"<tr class='{'ok' if (s.get('last_deploy') or {}).get('ok') else 'fail'}'><td>{e(s['name'])}</td>"
-        f"<td>{e(s.get('kind', ''))}</td><td><code>{e((s.get('deployed_sha') or '-')[:7])}</code></td>"
-        f"<td>{e(ago(s.get('synced_at')))}</td><td>{e((s.get('last_deploy') or {}).get('message', '-'))}</td></tr>"
-        for s in d["deploys"])
-    if d["llm"]:
-        t = d["llm"]["total"]
-        llm = f"<p>{t['count']} calls, gemiddeld {t['avg_seconds']} s, {t['failures']} mislukt.</p><table>" + "".join(
-            f"<tr><td>{e(k)}</td><td>{e(str(r[k]))}</td><td>{r['count']}</td><td>{r['avg_seconds']} s</td>"
-            f"<td>{r['failures']}</td></tr>"
-            for k, group in (("caller", d["llm"]["by_caller"]), ("job", d["llm"]["by_job"])) for r in group) + "</table>"
-    else:
-        llm = "<p>Helper niet bereikbaar.</p>"
-    changes = "".join(f"<li>{e(local(c['at']))} {e(change_line(c))}</li>" for c in d["changes"]) or "<li>geen</li>"
-    b = d["backup"]
-    backup = (f"<p>Laatste run {e(local(b.get('at')))}: {'ok' if b.get('ok') else 'MISLUKT: ' + e(b.get('error', ''))}."
-              f" Laatste geslaagde {e(local(b.get('last_ok')))}. Vrij {b.get('free_bytes', 0) // 2**30} GB"
-              f" ({b.get('free_pct', '?')}%).</p>") if b else "<p>Nog geen backup.</p>"
+    """Sinds F-024 staat het overzicht op de homelab-pagina (de inbox); deze pagina verwijst ernaar."""
+    url = f"http://{CONF.get('TAILNET_NAME', 'homelab')}:{CONF.get('INBOX_PORT', '8105')}/"
     bad = sum(c["status"] != "OK" for c in d["checks"].values())
-    page = f"""<!doctype html><html lang="nl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60">
-<title>homelab</title><style>
-:root {{ --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --ok:#15803d; --warn:#b45309; --fail:#b91c1c; }}
-@media (prefers-color-scheme: dark) {{ :root {{ --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c;
-  --ok:#4ade80; --warn:#fbbf24; --fail:#f87171; }} }}
-body {{ background:var(--bg); color:var(--fg); font:15px/1.45 system-ui,sans-serif; margin:0 auto; max-width:900px;
-  padding:16px; }}
-h1 {{ font-size:1.4em; margin:0 }} h2 {{ font-size:1.05em; margin:1.6em 0 .4em; }}
-.meta {{ color:var(--muted); font-size:.9em }} table {{ border-collapse:collapse; width:100% }}
-td {{ border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; overflow-wrap:anywhere }}
-tr.ok td:first-child {{ color:var(--ok) }} tr.warn td:first-child {{ color:var(--warn); font-weight:600 }}
-tr.fail td:first-child {{ color:var(--fail); font-weight:600 }} ul {{ padding-left:1.2em }}
-.state {{ font-weight:600; color:{'var(--fail)' if bad else 'var(--ok)'} }}
-</style></head><body>
-<h1>homelab</h1>
-<p class="meta">Bijgewerkt {e(local(d['generated']))}; laatste check {e(ago(d['last_check'].get('at')))} geleden.
-Alleen lezen.</p>
-<p class="state">{f'{bad} check(s) niet in orde' if bad else 'Alles in orde'}</p>
-<h2>Checks</h2><table>{rows}</table>
-<h2>Deploys</h2><table>{deploys}</table>
-<h2>LLM, 7 dagen</h2>{llm}
-<h2>Laatste wijzigingen</h2><ul>{changes}</ul>
-<h2>Backup</h2>{backup}
-</body></html>"""
-    return page
+    return (f'<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" '
+            f'content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0; url={html.escape(url)}">'
+            f'<title>homelab</title></head><body><p>Het overzicht staat nu op <a href="{html.escape(url)}">'
+            f'{html.escape(url)}</a>. ({f"{bad} check(s) niet in orde" if bad else "Alles in orde"}.)</p></body></html>')
 
 
 def write_html(path, d):

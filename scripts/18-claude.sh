@@ -7,7 +7,7 @@
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
 # - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
-#   en een headless Chromium). Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
+#   en een headless Chromium), plus gitleaks in ~/.local/bin. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
 set -euo pipefail
 
@@ -103,7 +103,19 @@ with sync_playwright() as p:
     b.close()
 PY
 
+echo "== gitleaks $GITLEAKS_VERSION"
+if [[ $(~/.local/bin/gitleaks version 2>/dev/null) != "$GITLEAKS_VERSION" ]]; then
+  f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+  gl=$(mktemp -d)
+  curl -fsSL -o "$gl/$f" "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/$f"
+  echo "$GITLEAKS_SHA256  $gl/$f" | sha256sum -c --quiet -
+  tar -xzf "$gl/$f" -C "$gl" gitleaks
+  install -m 755 "$gl/gitleaks" ~/.local/bin/gitleaks
+  rm -rf "$gl"
+fi
+[[ $(~/.local/bin/gitleaks version) == "$GITLEAKS_VERSION" ]]
+
 echo "== Controle"
 id -nG | grep -qw docker && { echo "claude zit in de groep docker." >&2; exit 1; }
 node --version
-echo "Klaar: rootless Docker, de pre-push-hook en de skills ($SKILLS) staan."
+echo "Klaar: rootless Docker, de pre-push-hook en de skills ($SKILLS) en gitleaks staan."

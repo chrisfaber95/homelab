@@ -6,6 +6,8 @@
 #   het geheugen schrijft alleen de inbox (F-023).
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
+# - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
+#   en een headless Chromium). Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
 set -euo pipefail
 
@@ -52,7 +54,56 @@ git config --global core.hooksPath ~/.config/git/hooks
 
 mkdir -p ~/dev
 
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "$0")")/../config/claude.conf"
+
+echo "== Skills (${SKILLS_COMMIT:0:7})"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+git -C "$tmp" init --quiet
+git -C "$tmp" fetch --quiet --depth 1 "$SKILLS_REPO" "$SKILLS_COMMIT"
+git -C "$tmp" checkout --quiet FETCH_HEAD
+mkdir -p ~/.claude/skills
+for s in $SKILLS; do
+  [[ -f "$tmp/skills/$s/SKILL.md" ]] || { echo "Skill $s staat niet in $SKILLS_COMMIT." >&2; exit 1; }
+  rm -rf ~/.claude/skills/"$s"
+  cp -r "$tmp/skills/$s" ~/.claude/skills/"$s"
+done
+
+echo "== Systeempakketten voor de skills"
+missing=$(grep -E '^package ' "$(dirname "$(readlink -f "$0")")/../config/machine.conf" | awk '{print $2}' |
+  while read -r p; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+if [[ -n $missing ]]; then
+  echo "Ontbreekt: $(echo $missing). Na de merge legt homelab-admin ze aan; of nu:" >&2
+  echo "  homelab-admin package install $(echo $missing) --reason \"skills van claude\"" >&2
+  exit 1
+fi
+
+echo "== pnpm $PNPM_VERSION (web-artifacts-builder)"
+npm config set prefix ~/.local
+[[ $(pnpm -v 2>/dev/null) == "$PNPM_VERSION" ]] || npm install -g --silent "pnpm@$PNPM_VERSION"
+[[ $(~/.local/bin/pnpm -v) == "$PNPM_VERSION" ]]
+
+echo "== Playwright $PLAYWRIGHT_VERSION en headless Chromium (webapp-testing)"
+[[ -x "$PLAYWRIGHT_VENV/bin/python" ]] || python3 -m venv "$PLAYWRIGHT_VENV"
+"$PLAYWRIGHT_VENV/bin/pip" install --quiet "playwright==$PLAYWRIGHT_VERSION"
+"$PLAYWRIGHT_VENV/bin/playwright" install chromium >/dev/null
+# De skill roept `python` aan: dat wordt de venv (via ~/.local/bin). `python3` blijft die van Ubuntu (met python3-yaml).
+# Een wrapper, geen symlink: via een symlink herkent Python de venv niet.
+rm -f ~/.local/bin/python
+printf '#!/bin/sh\nexec "%s/bin/python" "$@"\n' "$PLAYWRIGHT_VENV" > ~/.local/bin/python
+chmod +x ~/.local/bin/python
+"$PLAYWRIGHT_VENV/bin/python" - <<'PY'
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(headless=True)
+    pg = b.new_page()
+    pg.set_content("<h1>ok</h1>")
+    assert pg.inner_text("h1") == "ok"
+    b.close()
+PY
+
 echo "== Controle"
 id -nG | grep -qw docker && { echo "claude zit in de groep docker." >&2; exit 1; }
 node --version
-echo "Klaar: rootless Docker en de pre-push-hook staan."
+echo "Klaar: rootless Docker, de pre-push-hook en de skills ($SKILLS) staan."

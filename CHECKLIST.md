@@ -255,6 +255,10 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`: controleert dat de repo privé is en dat het token
         erin kan schrijven.
   - [ ] Op de pagina een job of voorkeur opslaan: hij staat in `homelab-data`, niet in `homelab`.
+- [ ] Skills voor `claude` (`config/claude.conf`): frontend-design, web-artifacts-builder, webapp-testing.
+  - [ ] `homelab-admin status`: de pakketten uit `config/machine.conf` staan er (anders legt `homelab-admin` ze aan).
+  - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw; eindigt met "Klaar" (de Chromium-test
+        zit erin).
 - [ ] F-023 (geheugen): zie `docs/memory.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `memory` tegen).
   - [ ] Op de pagina, tab Geheugen: zelf een voorkeur toevoegen; hij staat op de branch `memory`, met jou als auteur.

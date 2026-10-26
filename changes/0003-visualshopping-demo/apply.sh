@@ -2,6 +2,7 @@
 # Demo-werknemer (demo@example.com / demo1234) en logo-URL in de bestaande database van visualshopping-server
 # Het SQL-bestand komt uit de server-repo (db/06_demo.sql) en is idempotent. Een nieuwe database krijgt het al bij de
 # eerste start; deze change is voor de database die op de box al bestond.
+# Opnieuw (2026-10-26): de eerste keer was db/06_demo.sql nog niet gemerged.
 set -euo pipefail
 SQL=/srv/homelab/repos/visualshopping-server/db/06_demo.sql
 CONTAINER=visualshopping-server-db-1

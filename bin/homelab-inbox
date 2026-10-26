@@ -1756,7 +1756,8 @@ def page(title, body, refresh=False, narrow=True):
                    for key, href, name in TABS)
     return (f'<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)}</title>'
-            f'<meta name="color-scheme" content="light dark"><link rel="stylesheet" href="{asset("app.css")}">'
+            f'<meta name="color-scheme" content="dark"><meta name="theme-color" content="#04070c">'
+            f'<link rel="stylesheet" href="{asset("app.css")}">'
             f'<script src="{asset("app.js")}" defer></script></head><body>'
             f'<header class="top"><a class="mark" href="/">homelab</a><nav class="tabs" aria-label="Onderdelen">'
             f'{tabs}</nav></header><main{" class=narrow" if narrow else ""}>{body}</main></body></html>')
@@ -1993,20 +1994,21 @@ def overview_page():
     items, queued = live_items()
     live = "".join(live_row(it) for it in items) or \
         '<p class="empty">Niets bezig. Taken en jobs verschijnen hier zodra ze starten.</p>'
-    body = (f'<section class="hero {cls}"><h1>{html.escape(sentence)}</h1>'
-            f'<p id="activity">{html.escape(activity_sentence(items, queued))}</p></section>'
+    body = (f'<section class="hero {cls}{" busy" if items else ""}"><div class="state-label">Status om '
+            f'{datetime.now(TZ):%H:%M}</div><h1>{html.escape(sentence)}</h1><div class="scanner" aria-hidden="true">'
+            f'</div><p id="activity">{html.escape(activity_sentence(items, queued))}</p></section>'
             f'<div class="grid"><div>'
-            f'<section id="live" data-csrf="{csrf_token()}"><div class="section-head"><h2>Nu bezig</h2>'
+            f'<section id="live" class="sec-live" data-csrf="{csrf_token()}"><div class="section-head"><h2>Nu bezig</h2>'
             f'<p class="note"><span class="queued">{f"{queued} in de rij" if queued else ""}</span> '
             f'<a href="/taken#nieuw">Taak sturen</a></p></div><div class="live-list">{live}</div></section>'
-            f'<section><div class="section-head"><h2>Jobs</h2><p class="note">Zeven dagen terug, 24 uur vooruit. '
+            f'<section class="sec-jobs"><div class="section-head"><h2>Jobs</h2><p class="note">Zeven dagen terug, 24 uur vooruit. '
             f'<a href="/jobs">Alle jobs</a></p></div>{timeline_html()}</section>'
-            f'<section><div class="section-head"><h2>Wijzigingen op de box</h2><p class="note">de laatste vijf, '
+            f'<section class="sec-changes"><div class="section-head"><h2>Wijzigingen op de box</h2><p class="note">de laatste vijf, '
             f'via homelab-admin</p></div>{changes_html(h) or "<p class=empty>Nog geen wijzigingen.</p>"}</section>'
             f'</div><div>'
-            f'<section><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
+            f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
             f'{usage_html()}</section>'
-            f'<section><h2>Gezondheid</h2>{health_html(h)}</section>'
+            f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'
             f'</div></div>')
     return page("homelab", body, narrow=False)
 

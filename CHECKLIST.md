@@ -270,7 +270,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/20-monitor.sh` (8104 verwijst naar de nieuwe pagina).
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (de pagina zelf, met `web/`).
   - [ ] Op de telefoon en op de pc: `http://homelab.tail4eb878.ts.net:8105` toont de statuszin, nu bezig, de
-        tijdlijn, deze week en gezondheid; niet zijwaarts scrollen; licht en donker. `:8104` verwijst ernaar.
+        tijdlijn, deze week en gezondheid; niet zijwaarts scrollen. `:8104` verwijst ernaar.
   - [ ] Een job "Nu draaien": hij staat binnen een paar seconden onder Nu bezig, het log loopt mee, en na afloop
         verdwijnt hij en staat hij als merkje op de tijdlijn. Een lopende run annuleren werkt.
   - [ ] Vanaf het LAN zonder Tailscale (`http://192.168.1.102:8105`) wordt de pagina geweigerd.

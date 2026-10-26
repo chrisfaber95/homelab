@@ -7,7 +7,7 @@ zin of alles in orde is, wat er nu draait en welke job hierna komt. De tabs **Ta
 ## Op het overzicht
 
 - **De statuszin**: "Alles in orde.", of welke check faalt of aandacht vraagt, of dat de bewaking al meer dan 10
-  minuten niet gecontroleerd heeft. Het streepje erboven is groen, oker of rood.
+  minuten niet gecontroleerd heeft. Het lampje erboven en de scanner eronder zijn groen/blauw, oker of rood.
 - **Nu bezig**: elke inbox-taak en job die nu draait, met het model (Claude en welk model, of het lokale model) en hoe
   lang hij al loopt. **Log tonen** laat het log meelopen (hooguit ~2 s achter): wat Claude zegt, welke tools hij
   gebruikt en wat die teruggeven (alleen de eerste regel). Iets wat op een token of wachtwoord lijkt, staat er als
@@ -36,9 +36,15 @@ alles behalve het meelopende log en de live lijst (die tonen dan de stand bij he
 
 ## Vormgeving
 
-Rustig en zakelijk: noordzeemist (koel grijs-groen, diep leiblauw, zeeblauw als accent) overdag en een nachthaven in
-het donker, volgens de instelling van je apparaat. Source Serif 4 voor de statuszin en de koppen, Source Sans 3 met
-cijfers op gelijke breedte voor de rest (beide OFL, in `web/fonts`). Stijl en script: `web/app.css` en `web/app.js`.
+Futuristisch, donker en blauw, naar de KITT-skin ("Co-pilot") van de claude-dashboard (keuze van de gebruiker,
+2026-10-26): bijna zwart met een blauwe gloed, doorschijnende panelen, kleine labels in JetBrains Mono en de rest in
+Space Grotesk (beide OFL, in `web/fonts`, dezelfde bestanden als de claude-dashboard). Blauw is het accent; rood
+betekent alleen "faalt". Onder de statuszin loopt een **scanner** (LED-segmenten met een heen en weer lopend licht):
+langzaam als het rustig is, snel zolang er iets draait, oker of rood als er iets aandacht vraagt of faalt.
+De staafjes van Deze week zijn LED-staafjes. Alleen donker, zoals de KITT-skin (de brief vroeg licht en donker; de
+gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-dashboard, en raken alleen transform,
+opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
+wijzigingen. Stijl en script: `web/app.css` en `web/app.js`.
 
 ## Beheer
 

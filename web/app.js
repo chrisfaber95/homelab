@@ -133,6 +133,8 @@ if (live) {
           const data = await r.json();
           render(data.items);
           if (activity) activity.textContent = data.activity;
+          // De scanner onder de statuszin loopt sneller zolang er iets draait.
+          document.querySelector(".hero")?.classList.toggle("busy", data.items.length > 0);
           const q = live.querySelector(".queued");
           if (q) q.textContent = data.queued ? `${data.queued} in de rij` : "";
         }

@@ -38,8 +38,10 @@ case $action in
     [[ $name =~ ^[a-z0-9][a-z0-9-]*$ && -d "$RUNNER_HOME/repos/$name/.git" ]] || { echo "onbekende repo" >&2; exit 2; }
     rm -rf "$work"
     mkdir -p "$work"
-    # De bron is van inbox-runner; git weigert een repo van een ander account, behalve voor deze ene clone.
-    git -c safe.directory='*' clone --quiet --no-hardlinks "$RUNNER_HOME/repos/$name" "$work/repo"
+    # De bron is van inbox-runner; git weigert een repo van een ander account, behalve voor deze ene clone. Ook voor
+    # upload-pack: dat draait aan de kant van de bron en krijgt de -c van clone niet mee (git wist die voor een lokale bron).
+    git -c safe.directory='*' clone --quiet --no-hardlinks --upload-pack="git -c safe.directory='*' upload-pack" \
+      "$RUNNER_HOME/repos/$name" "$work/repo"
     cd "$work/repo"
     git checkout --quiet -b "inbox/$id" origin/main
     git config user.name "Claude (homelab-inbox)"
@@ -108,7 +110,8 @@ case $action in
     rm -rf "$work"
     mkdir -p "$work"
     trap 'rm -rf "$work"' EXIT
-    git -c safe.directory='*' clone --quiet --no-hardlinks "$RUNNER_HOME/repos/$name" "$work/repo"
+    git -c safe.directory='*' clone --quiet --no-hardlinks --upload-pack="git -c safe.directory='*' upload-pack" \
+      "$RUNNER_HOME/repos/$name" "$work/repo"
     cd "$work/repo"
     [[ -f $path ]] || { echo "$path staat niet in $name" >&2; exit 65; }
     if [[ -x $path ]]; then cmd=("./$path"); else cmd=(bash "$path"); fi

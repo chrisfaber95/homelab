@@ -10,6 +10,7 @@
 # - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
 #   en een headless Chromium), plus gitleaks in ~/.local/bin. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
 # - graphify (config/claude.conf) in its own venv, for the Obsidian code map.
+# - claude/CLAUDE.md as ~/.claude/CLAUDE.md: instructions for every session of claude (second brain, code map).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
 set -euo pipefail
 
@@ -121,6 +122,9 @@ echo "== graphify $GRAPHIFY_VERSION (code map)"
 [[ -x "$GRAPHIFY_VENV/bin/python" ]] || python3 -m venv "$GRAPHIFY_VENV"
 "$GRAPHIFY_VENV/bin/pip" install --quiet "graphifyy[pdf,sql]==$GRAPHIFY_VERSION"
 [[ $("$GRAPHIFY_VENV/bin/pip" show graphifyy | sed -n 's/^Version: //p') == "$GRAPHIFY_VERSION" ]]
+
+echo "== Global instructions (claude/CLAUDE.md -> ~/.claude/CLAUDE.md)"
+install -m 644 "$(dirname "$(readlink -f "$0")")"/../claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 echo "== Agents (claude/agents)"
 mkdir -p ~/.claude/agents

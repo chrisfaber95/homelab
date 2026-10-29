@@ -26,7 +26,7 @@ telefoon ──tailnet──> homelab-inbox (inbox-runner) ── wachtrij ─�
 | Status | Wat |
 | --- | --- |
 | PR open | code-taak klaar: PR met samenvatting en commits; melding met de link |
-| beantwoord | een vraag ("waarom ...", "wat doet ..."): antwoord op de pagina, geen commit, branch of PR |
+| beantwoord | een vraag ("waarom ...", "wat doet ..."): antwoord op de pagina, geen commit, branch of PR; je kunt er op de pagina op reageren, dan gaat dezelfde sessie verder (nieuwe werkkopie) |
 | wacht op jou | Claude vond de taak te onduidelijk en stelde één vraag; antwoord op de pagina, dan gaat dezelfde taak verder |
 | geweigerd | mag niet (bijvoorbeeld iets wat F-019 verbiedt); de reden staat op de pagina |
 | gestopt bij limiet | 80 beurten of 30 minuten per ronde (`config/inbox.conf`); de commits staan op `inbox/<id>`, zonder PR |

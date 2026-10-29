@@ -136,7 +136,7 @@ code { font: 0.9em var(--font-mono); overflow-wrap: anywhere; color: var(--ink-2
 .st.ok, .st.pr_open, .st.answered, .st.merged, .st.run-ok, .st.run-pr { color: var(--good); }
 .st.waiting, .st.capped, .st.run-held, .st.run-capped, .st.run-question, .st.warn { color: var(--warn); }
 .st.failed, .st.refused, .st.run-failed, .st.fail { color: var(--crit); }
-.st.running, .st.queued, .st.run-running, .st.run-queued { color: var(--accent-text); }
+.st.running, .st.queued, .st.routed, .st.run-running, .st.run-queued { color: var(--accent-text); }
 .st.cancelled, .st.closed, .st.run-cancelled { color: var(--muted); }
 .kind { font: 500 11px/1.6 var(--font-mono); letter-spacing: 0.06em; color: var(--muted);
   border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 8px; }

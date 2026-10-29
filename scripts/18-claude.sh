@@ -6,6 +6,7 @@
 #   het geheugen schrijft alleen de inbox (F-023).
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
+# - Agents uit claude/agents/ en vastgepinde plugins (config/claude.conf) in een eigen lokale marketplace.
 # - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
 #   en een headless Chromium), plus gitleaks in ~/.local/bin. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
@@ -115,7 +116,58 @@ if [[ $(~/.local/bin/gitleaks version 2>/dev/null) != "$GITLEAKS_VERSION" ]]; th
 fi
 [[ $(~/.local/bin/gitleaks version) == "$GITLEAKS_VERSION" ]]
 
+echo "== Agents (claude/agents)"
+mkdir -p ~/.claude/agents
+for f in "$(dirname "$(readlink -f "$0")")"/../claude/agents/*.md; do
+  install -m 644 "$f" ~/.claude/agents/
+done
+
+echo "== Plugins (${PLUGINS_COMMIT:0:7}): $PLUGINS"
+pl=$(mktemp -d)
+git -C "$pl" init --quiet
+git -C "$pl" fetch --quiet --depth 1 --filter=blob:none "$PLUGINS_REPO" "$PLUGINS_COMMIT"
+# shellcheck disable=SC2086
+git -C "$pl" sparse-checkout set --no-cone /.claude-plugin $(printf '/plugins/%s ' $PLUGINS)
+git -C "$pl" checkout --quiet FETCH_HEAD
+rm -rf "$PLUGINS_DIR"
+mkdir -p "$PLUGINS_DIR/.claude-plugin" "$PLUGINS_DIR/plugins"
+for p in $PLUGINS; do
+  [[ -f "$pl/plugins/$p/.claude-plugin/plugin.json" ]] || { echo "Plugin $p staat niet in $PLUGINS_COMMIT." >&2; exit 1; }
+  cp -r "$pl/plugins/$p" "$PLUGINS_DIR/plugins/$p"
+done
+# Een eigen marketplace met alleen deze plugins, de vermeldingen overgenomen uit die van Anthropic.
+jq --arg names "$PLUGINS" '($names | split(" ")) as $n
+  | {name: "homelab-pinned", owner: {name: "homelab"}, plugins: [.plugins[] | select(.name as $x | $n | index($x))]}' \
+  "$pl/.claude-plugin/marketplace.json" > "$PLUGINS_DIR/.claude-plugin/marketplace.json"
+rm -rf "$pl"
+# Alleen plugins zonder hooks of scripts: niets dat buiten de sessie het netwerk op gaat (config/claude.conf).
+for p in $PLUGINS; do
+  d="$PLUGINS_DIR/plugins/$p"
+  if [[ -e $d/hooks || -e $d/scripts || -e $d/bin || -e $d/.mcp.json || -e $d/.lsp.json ]] ||
+    jq -e 'has("hooks") or has("mcpServers") or has("lspServers")' "$d/.claude-plugin/plugin.json" >/dev/null; then
+    echo "Plugin $p heeft hooks, scripts of een server; eerst lezen en apart beslissen." >&2
+    exit 1
+  fi
+done
+[[ $(jq '.plugins | length' "$PLUGINS_DIR/.claude-plugin/marketplace.json") == $(wc -w <<<"$PLUGINS") ]]
+if claude plugin marketplace list --json | jq -e '.[] | select(.name == "homelab-pinned")' >/dev/null; then
+  claude plugin marketplace update homelab-pinned >/dev/null
+else
+  claude plugin marketplace add "$PLUGINS_DIR" >/dev/null
+fi
+for p in $PLUGINS; do
+  claude plugin install "$p@homelab-pinned" >/dev/null
+done
+
 echo "== Controle"
 id -nG | grep -qw docker && { echo "claude zit in de groep docker." >&2; exit 1; }
 node --version
-echo "Klaar: rootless Docker, de pre-push-hook en de skills ($SKILLS) en gitleaks staan."
+for f in "$(dirname "$(readlink -f "$0")")"/../claude/agents/*.md; do
+  cmp -s "$f" ~/.claude/agents/"$(basename "$f")"
+done
+installed=$(claude plugin list --json)
+for p in $PLUGINS; do
+  jq -e --arg id "$p@homelab-pinned" '.[] | select(.id == $id and .enabled)' <<<"$installed" >/dev/null ||
+    { echo "Plugin $p is niet geïnstalleerd of staat uit." >&2; exit 1; }
+done
+echo "Klaar: rootless Docker, de pre-push-hook, de skills ($SKILLS), gitleaks, de agents en de plugins ($PLUGINS) staan."

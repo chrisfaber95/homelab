@@ -81,6 +81,13 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
   in `~/.local/share/playwright-venv`; `python` is die venv, `python3` die van Ubuntu). Een nieuwe commit van de skills:
   eerst alle bestanden lezen. Ook `gitleaks` (vastgepind, `~/.local/bin`): `gitleaks git <repo> --log-opts=--all` voordat een repo public gaat.
   Nog niet echt gedraaid: `init-artifact.sh` (auto mode hield het tegen; de gebruiker beslist).
+- Agents en plugins van `claude` (2026-10-29): eigen agents in `claude/agents/` (change-reviewer voor elke
+  `changes/*/apply.sh`, rebuild-auditor, exposure-checker voor poorten en diensten, health-triage; alle vier
+  alleen-lezen) en de plugins pr-review-toolkit en claude-md-management, vastgepind
+  in `config/claude.conf` via een eigen lokale marketplace `homelab-pinned`; geïnstalleerd door `scripts/18-claude.sh`.
+  Alleen plugins zonder hooks of scripts; geen security-guidance of claude-security (die roepen zelf de Claude-API
+  aan; keuze van de gebruiker). Gebruik
+  change-reviewer voordat je een PR met een change opent, en exposure-checker bij een nieuwe poort of dienst.
 - F-017: `llm/helper.py` (OpenAI-API, poort 8017) en `bin/llm`; instellingen in `config/llm.conf`; uitleg in
   `docs/llm.md`; geïnstalleerd met `scripts/17-llm.sh`. Testen zonder root kan met een eigen `ollama serve` op een
   andere poort (`/dev/nvidia*` is 0666) en de helper met `OLLAMA_URL`/`LLM_PORT`/`LLM_DB`.

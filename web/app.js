@@ -51,7 +51,11 @@ class LogView {
           this.box.append(el("div", { class: `k-${line.kind}` },
             el("time", { datetime: line.at, text: clock(line.at) }), line.text));
         }
-        if (!data.lines.length && !this.next) this.box.append(el("div", { class: "log-end", text: "Nog geen regels." }));
+        if (!data.lines.length && !this.next && !this.empty) {
+          this.empty = el("div", { class: "log-end", text: "Nog geen regels." });
+          this.box.append(this.empty);
+        }
+        if (data.lines.length && this.empty) { this.empty.remove(); this.empty = null; }
         this.next = data.next;
         if (atBottom) this.box.scrollTop = this.box.scrollHeight;
         if (data.done) {

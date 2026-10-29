@@ -55,6 +55,9 @@ zijn alleen voor root: Claude kan ze niet lezen.
 (en Claudes geheugen), de tokens in `/etc/homelab` (deploy, ntfy, heartbeat), de ntfy-gebruikers, de gegevens van de
 claude-dashboard (gekoppelde apparaten), het LLM-gebruikslog, het logboek van machinewijzigingen en de staat van
 `homelab-admin`. SQLite-bestanden worden met de backup-API gekopieerd, zodat ze heel zijn.
+Also the Obsidian second-brain vault (`/srv/obsidian/second-brain`, with its git history). After a restore, link its
+nightly timer again as `claude`: see "Nightly sync" in the vault's `CLAUDE.md`. The code map (`/srv/obsidian/code-map`)
+is not backed up: the vault's `bin/code-map.sh` rebuilds it.
 
 **Wat er niet in zit**: alles wat de repo herbouwt (programma's, configuratie, diensten), de Ollama-modellen (opnieuw
 downloaden), Docker-images en -volumes, en dev-clones (wat telt, is gepusht).

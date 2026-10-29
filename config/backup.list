@@ -18,6 +18,9 @@
 /var/lib/ntfy/user.db
 # claude-dashboard: gekoppelde apparaten, certificaat, commands.log.
 /home/claude/.local/share/claude-dashboard
+# Obsidian second brain: notes, sources and their git history; also holds its own scripts and systemd units.
+# Not /srv/obsidian/code-map: bin/code-map.sh regenerates it from the repos.
+/srv/obsidian/second-brain
 # Logboeken: LLM-gebruik (F-017) en machinewijzigingen (F-019), plus de staat van homelab-admin.
 /var/lib/private/llm-helper/usage.db
 /var/log/homelab/changes.jsonl

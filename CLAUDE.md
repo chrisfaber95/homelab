@@ -63,7 +63,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-022 jobs and skills | `bin/homelab-inbox` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab-inbox` | `config/inbox.conf` | `docs/memory.md` |
 | F-024 homelab page | `bin/homelab-inbox`, `web/` | | `docs/dashboard.md` |
-| Claude's skills, agents, plugins | `scripts/18-claude.sh`, `claude/agents/` | `config/claude.conf` | `STATUS.md` |
+| Claude's skills, agents, plugins, global CLAUDE.md | `scripts/18-claude.sh`, `claude/agents/`, `claude/CLAUDE.md` | `config/claude.conf` | `STATUS.md` |
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`
 (8104 redirects there); ntfy on port 8102 (topic `homelab`); claude-dashboard on `https://homelab:8101`.

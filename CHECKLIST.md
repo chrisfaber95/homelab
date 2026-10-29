@@ -265,6 +265,11 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Een PR van de inbox corrigeren in een commentaar ("geen emoji in commit-berichten"): na de nieuwe ronde staat
         er een voorkeur met een link naar dat commentaar, en een volgende taak hoeft die correctie niet meer.
   - [ ] Een vraag-taak "wanneer faalde ... het laatst?" antwoordt met de datum en de link van de eerdere taak.
+- [ ] Automatisch doorsturen (repo "auto" in de inbox): zie `docs/inbox.md`. Na de merge `scripts/21-inbox.sh` opnieuw draaien
+      (nieuwe `inbox-task`-actie `route`).
+  - [ ] Op `/taken`: repo "auto", bericht "fix de login in visualshopping-server en pas de client aan". Er verschijnen
+        twee taken onder het bericht, de tweede start pas na de eerste, en na afloop komt er een samenvatting.
+  - [ ] Een vaag bericht geeft één vraag terug; annuleren van het bericht stopt de taken die nog liepen.
 - [ ] F-024 (homelab-pagina): zie `docs/dashboard.md`. Na de merge, in deze volgorde:
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/17-llm.sh` (de helper krijgt `/usage/hourly`).
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/20-monitor.sh` (8104 verwijst naar de nieuwe pagina).

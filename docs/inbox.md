@@ -39,6 +39,26 @@ minuut gaat de taak terug in de rij; Claude gaat verder in dezelfde sessie en we
 PR, en je krijgt een melding. Alleen commentaar van `OWNER_GITHUB` (`chrisfaber95`) telt; andere accounts worden
 genegeerd. Elke ronde krijgt een nieuwe limiet.
 
+## Automatisch doorsturen (repo "auto")
+
+Kies je in het formulier **auto (homelab beslist)** in plaats van een repo, dan verdeelt een router jouw bericht:
+
+1. Een korte Claude-run **zonder tools** (zelfde route als het opstellen van een job) krijgt je bericht, de repo's uit
+   `config/repos.conf` plus `homelab` en per repo het begin van `CLAUDE.md` of `README.md`. Hij geeft JSON terug:
+   per taak een repo, een zelfstandige opdracht, een reden en eventueel `after` (eerst die andere taak).
+2. De inbox controleert dat: alleen repo's uit de lijst, hooguit `ROUTE_MAX_CHILDREN` (3) taken, geldige verwijzingen.
+   Klopt het niet, dan mislukt het bericht (er wordt niets verzonnen). Zijn het er te veel of kan de router niet kiezen,
+   dan krijg je één vraag ("wacht op jou") en gaat hij verder na je antwoord.
+3. Elke taak wordt een gewone taak ("Inbox N", met `Onderdeel van bericht #M` en de reden): zelfde wachtrij, limieten,
+   auto mode, PR en review-commentaar. Een taak met `after` start pas als zijn voorganger klaar is (antwoord of PR open);
+   mislukt, weigert of stopt de voorganger, dan start hij niet.
+4. Het bericht zelf krijgt de status **doorgestuurd**, met de taken eronder. Zodra alle taken klaar zijn, staat er een
+   samenvatting met de PR's en krijg je één extra melding. Elke taak meldt zelf ook nog (PR, vraag, ...).
+   Annuleren van het bericht annuleert alle taken die nog niet klaar zijn.
+
+Taken die de box zelf raken (dienst, poort, pakket, firewall) stuurt de router naar `homelab`; daar gelden F-019 en
+`changes/` zoals altijd. De router kan niets uitvoeren en heeft geen toegang tot repo's of tokens.
+
 ## Jobs en skills (F-022)
 
 Op dezelfde pagina staan de tabs **Jobs** (geplande jobs, op het lokale model of op Claude) en **Skills** (vaste

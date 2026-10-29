@@ -10,6 +10,7 @@
 # Voor de jobs (F-022), met een id j<run> of d<concept>:
 #   script j<run> <repo-map> <pad> [args]  een script uit die repo draaien (geen root), uitvoer op stdout, exit = die van het script
 #                                          (65: repo of pad ongeldig, het script draaide niet)
+#   route r<taak>                Claude zonder tools: een bericht over de repo's verdelen (json op stdout; prompt zoals bij draft)
 #   draft d<concept>             Claude zonder tools: een job-bestand opstellen uit RUNNER_HOME/share/<id>/prompt.txt (json op stdout)
 set -euo pipefail
 
@@ -22,7 +23,7 @@ TOKEN_FILE="${INBOX_CLAUDE_TOKEN:-/etc/homelab/inbox-claude-token}"
 
 action=${1:-}
 id=${2:-}
-[[ $id =~ ^[dj]?[0-9]{1,6}$ ]] || { echo "ongeldig taaknummer" >&2; exit 2; }
+[[ $id =~ ^[djr]?[0-9]{1,6}$ ]] || { echo "ongeldig taaknummer" >&2; exit 2; }
 work="$TASK_HOME/work/$id"
 umask 027
 # sudo zet PATH en HOME op standaardwaarden; Claude Code van inbox staat in ~/.local/bin.
@@ -124,7 +125,7 @@ case $action in
     (( code == 124 )) && echo "[gestopt na ${JOB_SCRIPT_MINUTES:-10} minuten]"
     exit "$code"
     ;;
-  draft)
+  draft|route)
     prompt="$RUNNER_HOME/share/$id/prompt.txt"
     system="$RUNNER_HOME/share/$id/system.txt"
     rm -rf "$work"

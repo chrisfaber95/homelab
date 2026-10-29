@@ -2268,7 +2268,7 @@ class Handler(BaseHTTPRequestHandler):
             start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
             lines, nxt = read_log(f"{m.group(1)}{m.group(2)}", max(0, start))
             if m.group(1) == "t":
-                done = (t := get(int(m.group(2)))) is None or t["status"] != "running"
+                done = (t := get(int(m.group(2)))) is None or t["status"] not in ACTIVE
             else:
                 with db() as c:
                     r = c.execute("SELECT status FROM job_runs WHERE id=?", (int(m.group(2)),)).fetchone()

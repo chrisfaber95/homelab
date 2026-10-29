@@ -141,7 +141,8 @@ def db():
     # F-022: een taak die een job-run is; F-023: bron van wat Claude deze ronde leert, geschiedenis geschreven
     # F-024: het model van de laatste ronde
     for col, kind in (("job", "TEXT"), ("run_id", "INTEGER"), ("mem_source", "TEXT"), ("mem_link", "TEXT"),
-                      ("remembered", "INTEGER DEFAULT 0"), ("model", "TEXT")):
+                      ("remembered", "INTEGER DEFAULT 0"), ("model", "TEXT"),
+                      ("reprepare", "INTEGER DEFAULT 0")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
     conn.executescript("""
@@ -349,15 +350,17 @@ def run_round(task_id):
             refresh_cache("homelab", repos["homelab"])  # de skills komen uit main van homelab
         load_memory()  # wat de gebruiker net wiste of veranderde, geldt al voor deze ronde
         first = t["rounds"] == 0
-        if first:
+        if first or t["reprepare"]:
             code, out = task_cmd("prepare", task_id, t["repo"])
             if code != 0:
                 raise RuntimeError(f"werkkopie maken mislukt: {out[-300:]}")
+        if first:
             prompt = f"Taak voor de repo {t['repo']}:\n\n{t['text']}"
         else:
             prompt = t["pending_input"]
         write_prompt(t, prompt)
-        update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
+        update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None,
+               reprepare=0)
         _round_started[task_id] = now()
         log_line(f"t{task_id}", "info", f"ronde {t['rounds'] + 1} gestart" + (
             "" if first else ": " + first_line(prompt)))
@@ -1818,6 +1821,9 @@ def task_page(t):
                               '<textarea name="answer" id="answer" required></textarea>', "Antwoorden"))
     if t["answer"]:
         parts.append(f'<h2>Antwoord</h2><pre>{e(t["answer"])}</pre>')
+        if t["status"] == "answered" and not t["job"]:
+            parts.append(form(f'/task/{t["id"]}/answer', '<label for="answer">Reageren op dit antwoord</label>'
+                              '<textarea name="answer" id="answer" required></textarea>', "Reactie sturen"))
     if t["summary"]:
         parts.append(f'<h2>{"Reden" if t["status"] == "refused" else "Samenvatting"}</h2><pre>{e(t["summary"])}</pre>')
     if t["note"]:
@@ -2338,6 +2344,13 @@ class Handler(BaseHTTPRequestHandler):
                 f"Antwoord van de gebruiker op je vraag:\n\n{form['answer'].strip()[:8000]}\n\n"
                 "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die. "
                 + LEARN_HINT), mem_source=f"jouw antwoord in {label(t).lower()}", mem_link=page_url(t["id"]))
+        elif m.group(2) == "answer" and t["status"] == "answered" and not t["job"] and form.get("answer", "").strip():
+            # Vervolg op een antwoord (bijvoorbeeld een plan met een vraag erin): zelfde sessie, nieuwe werkkopie.
+            update(t["id"], status="queued", question=t["answer"], answer=None, ended=None, reprepare=1,
+                   pending_input=(f"Reactie van de gebruiker op je antwoord:\n\n{form['answer'].strip()[:8000]}\n\n"
+                                  "Ga verder met de taak. Neem waar nodig een redelijke aanname en noem die. "
+                                  + LEARN_HINT),
+                   mem_source=f"jouw reactie in {label(t).lower()}", mem_link=page_url(t["id"]))
         elif m.group(2) == "cancel" and t["status"] in ACTIVE + ("waiting",):
             with _lock:
                 if t["status"] == "running":

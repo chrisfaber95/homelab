@@ -10,7 +10,9 @@ Inzien:
   homelab-admin changes [-n 20]     alle wijzigingen, nieuwste eerst
   homelab-admin status              lopende bevestigingen, mislukte wijzigingen, wat nog niet in de repo staat
 Alleen voor de gebruiker (root of de groep sudo), niet voor Claude:
-  sudo homelab-admin confirm <id>   een firewall- of netwerkwijziging bevestigen
+  sudo homelab-admin confirm <id>   een firewall- of netwerkwijziging, of een SSH-sleutel (key-...), bevestigen
+SSH-sleutels: alleen de homelab-pagina (account inbox-runner) mag er een aanvragen, voor SSH_KEY_USER. De sleutel komt pas
+in authorized_keys na de knop Bevestig in de melding (of sudo homelab-admin confirm key-...), binnen CONFIRM_SECONDS.
 De dienst zelf (root, systemd-unit homelab-admin):
   homelab-admin serve
 
@@ -20,7 +22,8 @@ SSH-configuratie, dan moet de gebruiker binnen CONFIRM_SECONDS bevestigen; ander
 Elke wijziging komt in LOG_FILE, daarna draait homelab-health; faalt die, dan volgt een pushmelding.
 
 Instellingen: config/admin.conf en config/deploy.conf naast bin/. Voor tests overschrijfbaar met omgevingsvariabelen
-met dezelfde namen, plus HOMELAB_ADMIN_FAKE=1: dan worden root-commando's alleen gelogd, niet uitgevoerd.
+met dezelfde namen, plus HOMELAB_ADMIN_FAKE=1: dan worden root-commando's alleen gelogd, niet uitgevoerd, en komen
+SSH-sleutels in AUTH_KEYS_DIR (verplicht in de testmodus) in plaats van ~SSH_KEY_USER/.ssh.
 """
 import argparse
 import filecmp
@@ -77,6 +80,13 @@ PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,99}$")
 UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._-]{0,99}$")
 PROTECTED_PORTS = {22}
 RULE_COMMENT = "homelab-admin"
+# Wie een SSH-sleutel mag aanvragen: alleen de dienst achter de homelab-pagina (die controleert met tailscale whois
+# dat het van een apparaat van de eigenaar komt). Niet claude en niet inbox: een sleutel bij SSH_KEY_USER is sudo.
+KEY_REQUESTER = "inbox-runner"
+KEY_TYPES = {"ssh-ed25519", "sk-ssh-ed25519@openssh.com", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
+             "ecdsa-sha2-nistp521", "sk-ecdsa-sha2-nistp256@openssh.com", "ssh-rsa"}
+KEY_LABEL_RE = re.compile(r"[A-Za-z0-9._@-]{1,40}")
+MAX_KEY_REQUESTS = 3
 
 # Wat de box vóór een goedgekeurde wijziging bewaart, om terug te kunnen.
 SNAP_PATHS = [Path(p) for p in os.environ.get("SNAP_PATHS", "/etc/ufw /etc/netplan /etc/ssh /etc/systemd/resolved.conf "
@@ -631,9 +641,18 @@ def check_deadlines():
             if datetime.now(timezone.utc) >= datetime.fromisoformat(item["deadline"]):
                 finish_pending(pending, cid)
                 save_state("pending", pending)
+        keys = state("keys", {})
+        for kid, item in list(keys.items()):
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(item["deadline"]):
+                keys.pop(kid)
+                save_state("keys", keys)
+                record(kind="sshkey", change=kid, summary=item["summary"], ok=False, user=KEY_REQUESTER,
+                       result=f"niet bevestigd binnen de tijd; niet toegevoegd ({item['fingerprint']})")
 
 
 def confirm(cid, by):
+    if cid.startswith("key-"):
+        return confirm_key(cid, by)
     with _lock:
         pending = state("pending", {})
         if cid not in pending:
@@ -641,6 +660,128 @@ def confirm(cid, by):
         finish_pending(pending, cid, confirmed_by=by)
         save_state("pending", pending)
         return True
+
+
+# --- SSH-sleutels via de homelab-pagina
+
+def parse_key(text, label):
+    """Eén publieke sleutel zonder opties (command=, from=, ...), met een eigen naam als commentaar.
+    Geeft (regel voor authorized_keys, vingerafdruk)."""
+    if "PRIVATE KEY" in text:
+        raise Refused("dit is een privésleutel; die deel je nooit. Plak het .pub-bestand")
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    if len(lines) != 1:
+        raise Refused("plak precies één publieke sleutel (één regel)")
+    parts = lines[0].split()
+    if len(parts) < 2 or parts[0] not in KEY_TYPES:
+        raise Refused("geen publieke sleutel: de regel begint met ssh-ed25519, ecdsa-sha2-... of ssh-rsa "
+                      "(opties zoals command= of from= kan de pagina niet toevoegen)")
+    if not re.fullmatch(r"[A-Za-z0-9+/]{16,16384}={0,3}", parts[1]):
+        raise Refused("de sleutel zelf (het lange stuk na het type) is beschadigd")
+    if not KEY_LABEL_RE.fullmatch(label):
+        raise Refused("geef de sleutel een naam: letters, cijfers en . _ @ -, hooguit 40 tekens")
+    line = f"{parts[0]} {parts[1]} {label} (homelab-pagina {datetime.now().astimezone():%Y-%m-%d})"
+    p = subprocess.run(["ssh-keygen", "-l", "-E", "sha256", "-f", "/dev/stdin"], input=line, capture_output=True,
+                       text=True, timeout=10)
+    m = re.match(r"(\d+) (SHA256:\S+) .* \((\S+)\)$", p.stdout.strip())
+    if p.returncode != 0 or not m:
+        raise Refused("ssh-keygen herkent dit niet als een geldige publieke sleutel")
+    if m.group(3) == "RSA" and int(m.group(1)) < 2048:
+        raise Refused(f"RSA-sleutel van {m.group(1)} bits is te zwak; gebruik ed25519")
+    return line, m.group(2)
+
+
+def keys_file():
+    """De authorized_keys van SSH_KEY_USER, en (uid, gid) om hem van die gebruiker te laten zijn."""
+    pw = pwd.getpwnam(CONF["SSH_KEY_USER"])
+    if FAKE:
+        return Path(os.environ["AUTH_KEYS_DIR"]) / "authorized_keys", None
+    return Path(pw.pw_dir) / ".ssh" / "authorized_keys", (pw.pw_uid, pw.pw_gid)
+
+
+def key_present(line):
+    path, _ = keys_file()
+    blob = line.split()[1]
+    try:
+        return any(blob in l.split() for l in path.read_text().splitlines())
+    except FileNotFoundError:
+        return False
+
+
+def key_request(req, user):
+    """Een sleutel aanvragen: nog niets toevoegen, alleen de vraag naar de telefoon sturen."""
+    label = str(req.get("label") or "").strip()
+    line, fp = parse_key(str(req.get("key") or ""), label)
+    device = re.sub(r"[^\w .@-]", "", str(req.get("by") or ""))[:60].strip() or "onbekend apparaat"
+    target = CONF["SSH_KEY_USER"]
+    with _lock:
+        if key_present(line):
+            raise Refused(f"deze sleutel staat al bij {target}")
+        keys = state("keys", {})
+        if any(k["line"].split()[1] == line.split()[1] for k in keys.values()):
+            raise Refused("deze sleutel wacht al op bevestiging; kijk op je telefoon")
+        if len(keys) >= MAX_KEY_REQUESTS:
+            raise Refused(f"er wachten al {len(keys)} sleutels op bevestiging; bevestig die of wacht tot ze verlopen")
+        kid = "key-" + secrets.token_hex(4)
+        secret = secrets.token_urlsafe(24)
+        deadline = (datetime.now(timezone.utc) + timedelta(seconds=int(CONF["CONFIRM_SECONDS"]))).isoformat(
+            timespec="seconds")
+        summary = f"SSH-sleutel {label} voor {target}"
+        keys[kid] = {"key": secret, "deadline": deadline, "summary": summary, "line": line, "fingerprint": fp,
+                     "device": device}
+        save_state("keys", keys)
+        record(kind="sshkey", change=kid, summary=summary, ok=True, user=user,
+               result=f"aangevraagd vanaf {device}, wacht op bevestiging ({fp})")
+    url = f"http://{CONF['TAILNET_NAME']}:{CONF['CONFIRM_PORT']}/confirm/{kid}/{secret}"
+    minutes = int(CONF["CONFIRM_SECONDS"]) // 60
+    notify(f"Nieuwe SSH-sleutel voor {target}: bevestig binnen {minutes} min",
+           f"Naam: {label}\n{fp}\nAangevraagd op de homelab-pagina vanaf {device}.\n"
+           f"Vergelijk de vingerafdruk met ssh-keygen -lf <bestand>.pub. Heb jij dit niet gedaan? Niet bevestigen: "
+           f"dan gebeurt er niets.\nVia SSH: sudo homelab-admin confirm {kid}",
+           actions=[{"action": "http", "label": "Bevestig", "url": url, "method": "POST", "clear": True}],
+           priority=5)
+    return kid, fp, deadline
+
+
+def add_key(line):
+    """Voeg één regel toe aan authorized_keys (aanvullen, nooit overschrijven), met de rechten die sshd eist."""
+    path, owner = keys_file()
+    for p in (path.parent, path):
+        if p.is_symlink():
+            raise RuntimeError(f"{p} is een symlink; niets toegevoegd")
+    if not path.parent.exists():
+        path.parent.mkdir(mode=0o700)
+        if owner:
+            os.chown(path.parent, *owner)
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "r+") as f:
+        if owner:
+            os.fchown(fd, *owner)
+        os.fchmod(fd, 0o600)
+        old = f.read()
+        f.write(("\n" if old and not old.endswith("\n") else "") + line + "\n")
+
+
+def confirm_key(kid, by):
+    with _lock:
+        keys = state("keys", {})
+        item = keys.pop(kid, None)
+        if not item:
+            return False
+        save_state("keys", keys)
+        try:
+            if key_present(item["line"]):
+                ok, result = True, "stond er al"
+            else:
+                add_key(item["line"])
+                ok, result = True, f"toegevoegd aan authorized_keys van {CONF['SSH_KEY_USER']}"
+        except Exception as e:
+            ok, result = False, f"mislukt: {e}"
+        record(kind="sshkey", change=kid, summary=item["summary"], ok=ok, user=by,
+               result=f"{result} ({item['fingerprint']})")
+    notify(f"{item['summary']}: {'toegevoegd' if ok else 'mislukt'}", f"{item['fingerprint']}\n{result}",
+           priority=2 if ok else 4)
+    return ok
 
 
 # --- Status
@@ -676,6 +817,9 @@ def status_text():
     lines.append(f"Dienst: laatste ronde {loop.get('at', 'nooit')}")
     for cid, item in state("pending", {}).items():
         lines.append(f"WACHT OP BEVESTIGING: {cid} ({item['summary']}), uiterlijk {item['deadline']}")
+    for kid, item in state("keys", {}).items():
+        lines.append(f"Sleutel wacht op bevestiging: {kid} ({item['summary']}, {item['fingerprint']}), "
+                     f"uiterlijk {item['deadline']}")
     for cid, item in state("applied", {}).items():
         if not item.get("ok"):
             lines.append(f"MISLUKT: {cid} op {item['at']} (zie homelab-admin changes)")
@@ -694,7 +838,7 @@ def changes_text(n):
         mark = "ok  " if e.get("ok") else "FOUT"
         if e["kind"] in ("instant", "refused"):
             what = f"{e.get('action')} {' '.join(e.get('args') or [])} — {e.get('reason') or ''} [{e.get('user', '?')}]"
-        elif e["kind"] in ("approved", "rollback", "confirmed"):
+        elif e["kind"] in ("approved", "rollback", "confirmed", "sshkey"):
             what = f"{e['change']}: {e.get('summary', '')}"
         else:
             what = "machine.conf"
@@ -738,11 +882,19 @@ def handle(conn):
                     raise Refused("alleen claude, inbox en beheerders")
                 ok, text, _ = instant(req, user)
                 reply = {"ok": ok, "text": text}
+            elif cmd == "sshkey":
+                if user != KEY_REQUESTER and not admin:
+                    raise Refused(f"een SSH-sleutel aanvragen kan alleen de homelab-pagina ({KEY_REQUESTER}), "
+                                  "niet claude of inbox")
+                kid, fp, deadline = key_request(req, user)
+                reply = {"ok": True, "text": f"{kid} wacht op bevestiging tot {deadline}", "id": kid,
+                         "fingerprint": fp, "deadline": deadline}
             elif cmd == "confirm":
                 if not admin:
                     raise Refused("bevestigen kan alleen de gebruiker (sudo homelab-admin confirm), niet Claude")
                 ok = confirm(str(req.get("change")), user)
-                reply = {"ok": ok, "text": "bevestigd" if ok else "die wijziging wacht niet op bevestiging"}
+                reply = {"ok": ok, "text": "bevestigd" if ok else "die wijziging wacht niet op bevestiging "
+                         "(of toevoegen mislukte: zie homelab-admin changes)"}
             elif cmd == "status":
                 bad, text = status_text()
                 reply = {"ok": not bad, "text": text}
@@ -754,6 +906,8 @@ def handle(conn):
             if req.get("cmd") == "instant":
                 record(kind="refused", user=user, action=req.get("action"), args=req.get("args"),
                        reason=req.get("reason"), ok=False, result=str(e))
+            elif req.get("cmd") == "sshkey" and user != KEY_REQUESTER and not admin:
+                record(kind="refused", user=user, action="sshkey", args=[], reason="", ok=False, result=str(e))
             reply = {"ok": False, "text": f"geweigerd: {e}"}
         except Exception as e:
             reply = {"ok": False, "text": f"fout: {e}"}
@@ -780,11 +934,11 @@ class ConfirmHandler(BaseHTTPRequestHandler):
             return self.reply(403, "alleen vanaf een ander apparaat op het tailnet")
         if len(parts) != 3 or parts[0] != "confirm":
             return self.reply(404, "onbekend")
-        item = state("pending", {}).get(parts[1])
+        item = state("keys" if parts[1].startswith("key-") else "pending", {}).get(parts[1])
         if not item or not secrets.compare_digest(item["key"], parts[2]):
             return self.reply(404, "die wijziging wacht niet op bevestiging")
-        confirm(parts[1], f"knop ({ip})")
-        self.reply(200, "bevestigd")
+        ok = confirm(parts[1], f"knop ({ip})")
+        self.reply(200 if ok else 500, "bevestigd" if ok else "mislukt; zie homelab-admin changes")
 
     def reply(self, code, text):
         data = (text + "\n").encode()

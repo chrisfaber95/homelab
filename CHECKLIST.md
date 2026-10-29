@@ -281,6 +281,16 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Vanaf het LAN zonder Tailscale (`http://192.168.1.102:8105`) wordt de pagina geweigerd.
   - [x] De vormgeving goedkeuren (`user_check` van de brief): goedgekeurd op 2026-10-26, in een preview op de box.
 
+- [ ] SSH-sleutels via de homelab-pagina: zie `docs/admin.md`. Na de merge, in deze volgorde:
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/19-admin.sh` (de actie `sshkey` en `SSH_KEY_USER`).
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (de tab SSH).
+  - [ ] Op een ander apparaat: `ssh-keygen -t ed25519 -f ~/.ssh/homelab-test`, de inhoud van `homelab-test.pub`
+        op de tab SSH plakken met naam `test`. Melding met dezelfde vingerafdruk als `ssh-keygen -lf ~/.ssh/homelab-test.pub`.
+  - [ ] Bevestig: `ssh -i ~/.ssh/homelab-test chris@homelab` werkt; de tab SSH toont "toegevoegd".
+  - [ ] Nog een aanvraag en niet bevestigen: na 5 minuten "niet bevestigd", en niets in `authorized_keys`.
+  - [ ] Als `claude`: een `sshkey`-verzoek op de socket wordt geweigerd (staat als `refused` in `homelab-admin changes`).
+  - [ ] De testsleutel weer weghalen uit `~/.ssh/authorized_keys`.
+
 ## 14. Verhuizen naar de desktop **(desktop)**
 
 - [ ] Nieuwe PSU erin. BIOS/UEFI van de desktop:

@@ -60,6 +60,8 @@ Checklist stap 0 t/m 11 zijn klaar en gecontroleerd:
 - F-019: `bin/homelab-admin` (root-dienst; socket `/run/homelab-admin.sock`), wijzigingen in `changes/`, blijvende
   pakketten en poorten in `config/machine.conf`, uitleg in `docs/admin.md`. Logboek: `homelab-admin changes`.
   Meldingen: ntfy op `http://homelab.tail4eb878.ts.net:8102` (topic `homelab`, de telefoon is Android).
+  SSH-sleutels voor `chris`: aanvragen op de tab SSH van de homelab-pagina (alleen `inbox-runner` mag dat bij de
+  socket), toevoegen pas na Bevestig op de telefoon. Claude vraagt nooit zelf een sleutel aan en zoekt er geen omweg voor.
 - F-020: `bin/homelab-monitor` (timer elke 2 min; `homelab-overview`; 8104 verwijst sinds F-024 naar 8105), `bin/homelab-backup`
   (timer 03:30), extra checks in `bin/homelab-health` (llm, deploy, `svc:<naam>`, backup); instellingen in
   `config/backup.conf`, inhoud van de backup in `config/backup.list`; uitleg in `docs/monitor.md`.

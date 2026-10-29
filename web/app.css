@@ -74,6 +74,7 @@ h3 { font: 500 11px/1.4 var(--font-mono); letter-spacing: 0.14em; text-transform
   margin: 20px 0 6px; }
 p { margin: 0 0 12px; max-width: 72ch; }
 .muted, .note { color: var(--muted); font-size: 14px; }
+.wrap { overflow-wrap: anywhere; }
 pre { font: 13px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 14px;
   color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
 code { font: 0.9em var(--font-mono); overflow-wrap: anywhere; color: var(--ink-2); }

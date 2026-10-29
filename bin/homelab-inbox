@@ -39,6 +39,7 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -1903,7 +1904,7 @@ class Access:
 
 WEB = ROOT / "web"
 TABS = (("overzicht", "/", "Overzicht"), ("taken", "/taken", "Taken"), ("jobs", "/jobs", "Jobs"),
-        ("geheugen", "/memory", "Geheugen"), ("skills", "/skills", "Skills"))
+        ("geheugen", "/memory", "Geheugen"), ("skills", "/skills", "Skills"), ("ssh", "/ssh", "SSH"))
 
 
 def local(iso):
@@ -1924,7 +1925,7 @@ def asset(name):
 def tab_of(title):
     if title.startswith(("job", "concept", "run")):
         return "jobs"
-    if title.startswith(("geheugen", "skills")):
+    if title.startswith(("geheugen", "skills", "ssh")):
         return title.split()[0]
     return "overzicht" if title == "homelab" else "taken"
 
@@ -2175,7 +2176,7 @@ def changes_html(h):
         parts.append("".join(
             f'<div class="row"><div class="row-title"><span class="st {"ok" if c.get("ok") else "fail"}">'
             f'{"ok" if c.get("ok") else "fout"}</span><span>{e(change_text(c))}</span></div>'
-            + meta(e(day_time(ts(c["at"]))), e(c.get("user", "")), e(c.get("reason", "")[:80])) + '</div>'
+            + meta(e(day_time(ts(c["at"]))), e(c.get("user", "")), e((c.get("reason") or "")[:80])) + '</div>'
             for c in h["changes"]))
     return "".join(parts)
 
@@ -2336,6 +2337,68 @@ def skills_page():
                 f'{props or "<p class=empty>Nog geen voorstellen.</p>"}')
 
 
+def admin_ask(req):
+    """Een verzoek aan homelab-admin (F-019) via zijn socket; die kijkt zelf wie het vraagt (inbox-runner)."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    try:
+        s.connect(CONF["SOCKET"])
+        s.sendall(json.dumps(req).encode() + b"\n")
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        return json.loads(data)
+    except (OSError, ValueError) as ex:
+        return {"ok": False, "text": f"homelab-admin antwoordt niet ({ex})"}
+    finally:
+        s.close()
+
+
+def ssh_page(done=None, error=None, key="", name=""):
+    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
+    e = html.escape
+    user = CONF.get("SSH_KEY_USER", "chris")
+    minutes = int(CONF.get("CONFIRM_SECONDS", 300)) // 60
+    if done:
+        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
+               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
+               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
+    else:
+        top = f'<p class="error">{e(error)}</p>' if error else ""
+    try:
+        entries = [c for l in CHANGES_LOG.read_text().splitlines() if '"sshkey"' in l
+                   and (c := json.loads(l)).get("kind") == "sshkey"]
+    except (OSError, ValueError):
+        entries = []
+
+    def st(c):
+        if c.get("result", "").startswith("aangevraagd"):
+            return "waiting", "aanvraag"
+        return ("ok", "ok") if c.get("ok") else ("fail", "fout")
+    rows = "".join(
+        f'<div class="row"><div class="row-title"><span class="st {st(c)[0]}">{st(c)[1]}</span>'
+        f'<span>{e(c.get("summary", ""))}</span></div><div class="muted wrap">{e(c.get("result", ""))}</div>'
+        + meta(e(local(c["at"])), e(c.get("user", ""))) + '</div>'
+        for c in entries[::-1][:15])
+    body = (f'<h1>SSH</h1><p class="muted">Een publieke sleutel om als <code>{e(user)}</code> in te loggen. Hij komt pas '
+            f'in <code>authorized_keys</code> als je binnen {minutes} minuten op <b>Bevestig</b> drukt in de melding op je '
+            f'telefoon. Vergelijk daar de vingerafdruk met <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code>.</p>{top}'
+            f'<form method="post" action="/ssh"><input type="hidden" name="csrf" value="{csrf_token()}">'
+            f'<label for="name">Naam (bijvoorbeeld het apparaat)</label>'
+            f'<input name="name" id="name" required maxlength="40" pattern="[A-Za-z0-9._@-]+" value="{e(name)}" '
+            f'placeholder="windows-pc">'
+            f'<label for="key">Publieke sleutel (de inhoud van het .pub-bestand)</label>'
+            f'<textarea name="key" id="key" required spellcheck="false" placeholder="ssh-ed25519 AAAA...">{e(key)}'
+            f'</textarea><button>Sleutel aanvragen</button></form>'
+            f'<p class="note">Nooit de privésleutel (het bestand zonder .pub). Weghalen doe je zelf: '
+            f'<code>~{e(user)}/.ssh/authorized_keys</code>; sleutels van deze pagina hebben "homelab-pagina" in hun '
+            f'commentaar.</p><h2>Geschiedenis</h2>{rows or "<p class=empty>Nog geen sleutels via deze pagina.</p>"}')
+    return page("ssh", body)
+
+
 def mem_matches(m, words):
     hay = " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
     return all(w in hay for w in words)
@@ -2471,6 +2534,8 @@ class Handler(BaseHTTPRequestHandler):
                              "application/json")
         if url.path == "/taken":
             return self.send(200, tasks_page())
+        if url.path == "/ssh":
+            return self.send(200, ssh_page())
         if url.path == "/memory":
             return self.send(200, memory_page(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
         if (m := re.fullmatch(r"/memory/e/(.+)", self.path)) and (entry := mem_get(m.group(1))):
@@ -2519,6 +2584,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.cancel_run(int(m.group(1)))
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
+        if self.path == "/ssh":
+            name, key = form.get("name", "").strip(), form.get("key", "").strip()
+            r = admin_ask({"cmd": "sshkey", "label": name, "key": key, "by": self.who})
+            if not r.get("ok"):
+                # Een geplakte privésleutel nooit terug op de pagina zetten.
+                return self.send(400, ssh_page(error=r.get("text", "mislukt"), name=name,
+                                               key="" if "PRIVATE KEY" in key else key))
+            return self.send(200, ssh_page(done=r, name=name))
         if self.path.startswith("/memory/"):
             return self.post_memory(form)
         m = re.fullmatch(r"/task/(\d+)/(answer|cancel)", self.path)

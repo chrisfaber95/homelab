@@ -2,7 +2,7 @@
 
 Eén pagina voor alles: **`http://homelab.tail4eb878.ts.net:8105`** (Tailscale aan). Het overzicht bovenaan zegt in één
 zin of alles in orde is, wat er nu draait en welke job hierna komt. De tabs **Taken** (F-021), **Jobs** (F-022),
-**Geheugen** (F-023) en **Skills** zitten op dezelfde pagina. Het oude overzicht op poort 8104 verwijst hierheen.
+**Geheugen** (F-023), **Skills** en **SSH** (een SSH-sleutel aanvragen, `docs/admin.md`) zitten op dezelfde pagina. Het oude overzicht op poort 8104 verwijst hierheen.
 
 ## Op het overzicht
 

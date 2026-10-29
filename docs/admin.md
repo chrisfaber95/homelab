@@ -80,6 +80,36 @@ abonneren op `homelab`. Tailscale moet op je telefoon aan staan. Je krijgt:
 Alleen de box kan publiceren (gebruiker `homelab-bot`, token in `/etc/homelab/ntfy-token`, alleen root); jij kunt
 alleen lezen. PR-meldingen gebruiken het token van `deploy`, dat daarvoor ook *Pull requests: Read-only* nodig heeft.
 
+## SSH-sleutels via de homelab-pagina
+
+Een nieuw apparaat laten inloggen als `chris` (`SSH_KEY_USER` in `config/admin.conf`), zonder eerst ergens anders in te
+loggen: tab **SSH** op `http://homelab.tail4eb878.ts.net:8105/ssh`.
+
+```
+pagina (inbox-runner, alleen jouw apparaten) ──sshkey──> homelab-admin (root) ── melding met vingerafdruk ──> telefoon
+                                                                    ▲                                         │
+                                                                    └─────────── Bevestig (binnen 5 min) ─────┘
+                                                                    └─> ~chris/.ssh/authorized_keys (aanvullen)
+```
+
+1. Plak de **publieke** sleutel (de inhoud van `~/.ssh/id_ed25519.pub`) en geef hem een naam (het apparaat).
+2. `homelab-admin` controleert hem met `ssh-keygen`: precies één sleutel, geen opties (`command=`, `from=`, ...), geen
+   privésleutel, RSA minstens 2048 bits. Er gebeurt nog niets met `authorized_keys`.
+3. Je krijgt een melding met de naam, de vingerafdruk en het apparaat waarvandaan het kwam. Vergelijk de vingerafdruk
+   met `ssh-keygen -lf ~/.ssh/id_ed25519.pub` en druk op **Bevestig** (of via SSH: `sudo homelab-admin confirm key-...`).
+4. Pas dan komt de sleutel erbij, met commentaar `<naam> (homelab-pagina <datum>)`; `.ssh` 700, het bestand 600, van
+   `chris`. Niet bevestigd binnen `CONFIRM_SECONDS`: de aanvraag vervalt en er verandert niets.
+
+Waarom zo: een sleutel bij `chris` is sudo, dus root. Alleen het account `inbox-runner` (de pagina, die met
+`tailscale whois` controleert dat het van jouw apparaten komt) mag een sleutel aanvragen; `claude` en `inbox` worden
+geweigerd (en gelogd). Bevestigen kan alleen met de knop, die niet werkt vanaf de box zelf en een sleutel vraagt die
+alleen in de melding staat, of met sudo. Claude kan zich dus geen toegang geven, ook niet via de pagina; en een
+gestolen laptop op je tailnet kan het niet zonder je telefoon. Hooguit 3 aanvragen tegelijk.
+
+Weghalen doe je zelf in `~chris/.ssh/authorized_keys` (sleutels van de pagina hebben "homelab-pagina" in hun
+commentaar). Het bestand zit in de dagelijkse backup (`config/backup.list`). Alles staat in het logboek
+(`homelab-admin changes`, soort `sshkey`) en onderaan de tab SSH.
+
 ## Inzien
 
 ```

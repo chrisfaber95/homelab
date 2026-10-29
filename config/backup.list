@@ -5,6 +5,8 @@
 /var/lib/tailscale/tailscaled.state
 # SSH-hostkeys: geen waarschuwing in Windows na een herbouw.
 /etc/ssh/ssh_host_*
+# SSH-sleutels van de gebruiker, ook die via de homelab-pagina erbij kwamen.
+/home/chris/.ssh/authorized_keys
 # Claude Code en gh van claude: ingelogd blijven. Plus Claudes geheugen.
 /home/claude/.claude/.credentials.json
 /home/claude/.claude.json

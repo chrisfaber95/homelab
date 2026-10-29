@@ -33,6 +33,10 @@ Dat is een kopie; het origineel staat in `team-hq` op de Windows-pc en wordt daa
   npm-code van projecten draait) en niet vanuit je eigen werkkopie.
 - Een merge naar `main` van homelab betekent root-acties op de box. Dat Claude niet naar `main` pusht of merget is een
   afspraak (keuze van de gebruiker), geen technische grens: houd je eraan.
+- Language: write everything new in English (docs, CLAUDE.md, CHECKLIST, comments, UI text, messages, commit
+  messages, PR's). Existing Dutch text stays as it is; don't translate it unless asked. Rewriting a section anyway?
+  Then write it in English. Keep existing keywords and routes (`GEHEUGEN:`, `KLAAR`, `/taken`, ...) unchanged: live
+  data depends on them.
 
 ## Stand (2026-10-26)
 

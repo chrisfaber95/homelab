@@ -290,6 +290,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Nog een aanvraag en niet bevestigen: na 5 minuten "niet bevestigd", en niets in `authorized_keys`.
   - [ ] Als `claude`: een `sshkey`-verzoek op de socket wordt geweigerd (staat als `refused` in `homelab-admin changes`).
   - [ ] De testsleutel weer weghalen uit `~/.ssh/authorized_keys`.
+- [ ] `claude` voor chris (stond niet in zijn PATH: Claude Code is per gebruiker geïnstalleerd en chris had geen eigen installatie). Als chris: `bash /var/lib/homelab/repo/scripts/22-claude-chris.sh`; log opnieuw in (SSH) en controleer `which claude` en `claude --version`, daarna `claude` → `/login`.
 
 ## 14. Verhuizen naar de desktop **(desktop)**
 

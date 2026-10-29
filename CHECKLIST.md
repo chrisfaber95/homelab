@@ -259,6 +259,11 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `homelab-admin status`: de pakketten uit `config/machine.conf` staan er (anders legt `homelab-admin` ze aan).
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw; eindigt met "Klaar" (de Chromium-test
         zit erin).
+- [ ] Agents en plugins voor `claude` (`config/claude.conf`, `claude/agents/`): change-reviewer, rebuild-auditor,
+      exposure-checker, health-triage; plugins pr-review-toolkit, security-guidance, claude-security, claude-md-management.
+  - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw; eindigt met "Klaar".
+  - [ ] In een nieuwe sessie van `claude`: `/agents` toont de vier eigen agents en die van pr-review-toolkit.
+  - [ ] `claude plugin list`: de vier plugins staan aan, `@homelab-pinned`.
 - [ ] F-023 (geheugen): zie `docs/memory.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `memory` tegen).
   - [ ] Op de pagina, tab Geheugen: zelf een voorkeur toevoegen; hij staat op de branch `memory`, met jou als auteur.

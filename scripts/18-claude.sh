@@ -140,6 +140,15 @@ jq --arg names "$PLUGINS" '($names | split(" ")) as $n
   | {name: "homelab-pinned", owner: {name: "homelab"}, plugins: [.plugins[] | select(.name as $x | $n | index($x))]}' \
   "$pl/.claude-plugin/marketplace.json" > "$PLUGINS_DIR/.claude-plugin/marketplace.json"
 rm -rf "$pl"
+# Alleen plugins zonder hooks of scripts: niets dat buiten de sessie het netwerk op gaat (config/claude.conf).
+for p in $PLUGINS; do
+  d="$PLUGINS_DIR/plugins/$p"
+  if [[ -e $d/hooks || -e $d/scripts || -e $d/bin || -e $d/.mcp.json || -e $d/.lsp.json ]] ||
+    jq -e 'has("hooks") or has("mcpServers") or has("lspServers")' "$d/.claude-plugin/plugin.json" >/dev/null; then
+    echo "Plugin $p heeft hooks, scripts of een server; eerst lezen en apart beslissen." >&2
+    exit 1
+  fi
+done
 [[ $(jq '.plugins | length' "$PLUGINS_DIR/.claude-plugin/marketplace.json") == $(wc -w <<<"$PLUGINS") ]]
 if claude plugin marketplace list --json | jq -e '.[] | select(.name == "homelab-pinned")' >/dev/null; then
   claude plugin marketplace update homelab-pinned >/dev/null
@@ -148,12 +157,6 @@ else
 fi
 for p in $PLUGINS; do
   claude plugin install "$p@homelab-pinned" >/dev/null
-done
-# Omgevingsvariabelen voor de plugins in ~/.claude/settings.json (de rest van dat bestand blijft staan).
-s=~/.claude/settings.json
-[[ -f $s ]] || echo '{}' > "$s"
-for kv in $PLUGINS_ENV; do
-  jq --arg k "${kv%%=*}" --arg v "${kv#*=}" '.env[$k] = $v' "$s" > "$s.new" && mv "$s.new" "$s"
 done
 
 echo "== Controle"

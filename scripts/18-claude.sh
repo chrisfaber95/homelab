@@ -9,6 +9,7 @@
 # - Agents uit claude/agents/ en vastgepinde plugins (config/claude.conf) in een eigen lokale marketplace.
 # - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
 #   en een headless Chromium), plus gitleaks in ~/.local/bin. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
+# - graphify (config/claude.conf) in its own venv, for the Obsidian code map.
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
 set -euo pipefail
 
@@ -116,6 +117,11 @@ if [[ $(~/.local/bin/gitleaks version 2>/dev/null) != "$GITLEAKS_VERSION" ]]; th
 fi
 [[ $(~/.local/bin/gitleaks version) == "$GITLEAKS_VERSION" ]]
 
+echo "== graphify $GRAPHIFY_VERSION (code map)"
+[[ -x "$GRAPHIFY_VENV/bin/python" ]] || python3 -m venv "$GRAPHIFY_VENV"
+"$GRAPHIFY_VENV/bin/pip" install --quiet "graphifyy[pdf,sql]==$GRAPHIFY_VERSION"
+[[ $("$GRAPHIFY_VENV/bin/pip" show graphifyy | sed -n 's/^Version: //p') == "$GRAPHIFY_VERSION" ]]
+
 echo "== Agents (claude/agents)"
 mkdir -p ~/.claude/agents
 for f in "$(dirname "$(readlink -f "$0")")"/../claude/agents/*.md; do
@@ -170,4 +176,4 @@ for p in $PLUGINS; do
   jq -e --arg id "$p@homelab-pinned" '.[] | select(.id == $id and .enabled)' <<<"$installed" >/dev/null ||
     { echo "Plugin $p is niet geïnstalleerd of staat uit." >&2; exit 1; }
 done
-echo "Klaar: rootless Docker, de pre-push-hook, de skills ($SKILLS), gitleaks, de agents en de plugins ($PLUGINS) staan."
+echo "Klaar: rootless Docker, de pre-push-hook, de skills ($SKILLS), gitleaks, graphify, de agents en de plugins ($PLUGINS) staan."

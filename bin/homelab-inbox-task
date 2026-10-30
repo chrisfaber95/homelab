@@ -5,6 +5,8 @@
 #   prepare <id> <repo-map>      werkkopie in TASK_HOME/work/<id> (clone van de kopie van de dienst), branch inbox/<id>
 #   run <id> <sessie> <new|resume>  Claude in auto mode, prompt uit RUNNER_HOME/share/<id>/prompt.txt, stream-json op stdout
 #   bundle <id>                  de nieuwe commits van inbox/<id> als bundle in TASK_HOME/out/<id>.bundle (exit 3: geen)
+#   sync <id>                    merge the latest main of the service's copy into inbox/<id> (exit 4 + the conflicted
+#                                files: the merge stays in progress for Claude to resolve)
 #   kill <id>                    de lopende Claude van deze taak stoppen
 #   cleanup <id>                 werkkopie en bundle weg
 # Voor de jobs (F-022), met een id j<run> of d<concept>:
@@ -91,6 +93,21 @@ case $action in
     git bundle create --quiet "$TASK_HOME/out/$id.bundle" "inbox/$id" "^$base"
     chmod 640 "$TASK_HOME/out/$id.bundle"
     git log --format='%h %s' "$base..inbox/$id"
+    ;;
+  sync)
+    [[ -d "$work/repo" ]] || { echo "geen werkkopie" >&2; exit 2; }
+    cd "$work/repo"
+    # Same safe.directory dance as the clone in prepare: the source belongs to inbox-runner.
+    git -c safe.directory='*' fetch --quiet --upload-pack="git -c safe.directory='*' upload-pack" origin main
+    git merge --quiet --no-edit origin/main >/dev/null 2>&1 && exit 0
+    files=$(git diff --name-only --diff-filter=U)
+    if [[ -z $files ]]; then
+      git merge --abort 2>/dev/null || true
+      echo "git merge origin/main failed without conflicts (uncommitted changes?)" >&2
+      exit 1
+    fi
+    echo "$files"
+    exit 4
     ;;
   kill)
     if [[ -f "$work/pid" ]]; then

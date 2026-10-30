@@ -73,6 +73,9 @@ Still for the user to test (also in `CHECKLIST.md`):
 - F-018: pair a device on the dashboard, 8101 refused from the LAN, Remote-SSH, reboot and power cut.
 - F-020: disk full and power cut give a notification (service stopped is tested). The offline notification
   (heartbeat) later; no restore drill (the user's choice).
+- Inbox parallelism (2026-10-30): up to 3 tasks per repo, one auto-merge per repo per poll, conflicts with main go back
+  to the task. Tested without root (fake GitHub, local repos); still to see live: two tasks on one repo and a real
+  conflict round.
 - After the move to the desktop: BIOS, `EXPECTED_GPU` to the GTX 1080, reboot and power test, the rebuild drill.
 
 ## Answered questions

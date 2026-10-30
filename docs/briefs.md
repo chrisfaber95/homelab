@@ -87,8 +87,11 @@ which turns it into a normal build from then on.
   as not met, the notification names it.
 - Merged: a notification with the PR, so you can revert. A task with `after` then starts by itself.
 - **Still waits for you**, with the usual notification: a task on **homelab** (a merge there runs root scripts), a
-  missed or unclear criterion after the automatic rework round, red CI, a merge GitHub refuses (conflict). The other
-  tasks of the build carry on.
+  missed or unclear criterion after the automatic rework round, red CI, a merge GitHub refuses, a conflict with main
+  that is still there after `CONFLICT_ROUNDS` automatic rounds (see `docs/inbox.md`). The other tasks of the build
+  carry on.
+- **One merge at a time per repo**: per GitHub poll the inbox merges at most one PR per repo, and only once GitHub has
+  checked it against the current main. The next PR follows in a later poll.
 - When all tasks are merged, the inbox merges the **handoff** PR too, unless the build has criteria only you can
   check ("Needs you"): then that PR waits for you.
 

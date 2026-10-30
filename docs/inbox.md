@@ -15,7 +15,9 @@ telefoon ──tailnet──> homelab-inbox (inbox-runner) ── wachtrij ─�
 ```
 
 1. **Repo's**: precies de repo's uit `config/repos.conf` (F-018) plus `homelab`. Andere repo's kun je niet kiezen.
-2. **Wachtrij**: hooguit 2 taken tegelijk, nooit 2 op dezelfde repo; de rest wacht op volgorde en start vanzelf.
+2. **Queue**: at most `MAX_RUNNING` tasks at once (4), and at most `MAX_PER_REPO` (3) on one repo; the rest waits in
+   order and starts by itself. Each task has its own working copy and branch; the service's own copy of a repo is
+   locked while one task uses it.
 3. **Uitvoeren**: het account `inbox` clonet de repo in een eigen werkkopie (`/var/lib/inbox/work/<id>`), op branch
    `inbox/<id>`, en draait Claude Code in **auto mode**: de veiligheidscheck van Claude Code beoordeelt elke actie
    (nooit `bypassPermissions`). Wat die weigert, staat op de pagina ("N actie(s) geweigerd door auto mode").
@@ -38,6 +40,13 @@ telefoon ──tailnet──> homelab-inbox (inbox-runner) ── wachtrij ─�
 minuut gaat de taak terug in de rij; Claude gaat verder in dezelfde sessie en werkkopie, de inbox pusht naar dezelfde
 PR, en je krijgt een melding. Alleen commentaar van `OWNER_GITHUB` (`chrisfaber95`) telt; andere accounts worden
 genegeerd. Elke ronde krijgt een nieuwe limiet.
+
+**Conflicts with main**: tasks on one repo run in parallel, so a PR can conflict with main once another one is merged.
+When GitHub reports that, the inbox merges main into `inbox/<id>` in the task's working copy (`homelab-inbox-task
+sync`). Without conflicts it pushes the merge right away. With conflicts the merge stays in progress and the task goes
+back in the queue: its own session continues, gets the list of conflicted files, resolves them, commits and ends with
+`KLAAR:` again; the inbox pushes to the same PR (a brief task is reviewed again). At most `CONFLICT_ROUNDS` (2) times
+per task; after that, or if the merge fails otherwise, you get a notification.
 
 ## Automatisch doorsturen (repo "auto")
 

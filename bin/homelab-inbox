@@ -50,6 +50,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import Counter
 from datetime import datetime, time as dt_time, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -168,11 +169,12 @@ def db():
                       ("reprepare", "INTEGER DEFAULT 0"), ("parent", "INTEGER"), ("after_task", "INTEGER"),
                       ("reason", "TEXT"), ("brief", "TEXT"), ("criteria", "TEXT"), ("reviews", "INTEGER DEFAULT 0"),
                       ("review", "TEXT"), ("handoff", "TEXT"), ("unattended", "INTEGER DEFAULT 0"),
-                      ("review_ok", "INTEGER")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
+                      ("review_ok", "INTEGER"), ("conflicts", "INTEGER DEFAULT 0"), ("conflict_sha", "TEXT")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
         # H-001: brief = the brief id (build parent and its children), criteria = JSON list for a child, reviews =
         # automatic rework rounds used, review = the reviewer's last verdict, handoff = the handed-off PR (or error)
         # Build without me: unattended = on a build, the inbox merges its PRs; review_ok = 1 when every criterion of
         # the last review passed
+        # Merge conflicts: conflicts = automatic conflict rounds used, conflict_sha = the PR head last handled
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
     conn.executescript("""
@@ -282,8 +284,21 @@ def remote_url(name, slug):
     return fake or f"https://github.com/{slug}.git"
 
 
+_repo_locks = {}  # repo name -> lock on the service's copy of it: parallel tasks on one repo share that copy
+
+
+def repo_lock(name):
+    with _lock:
+        return _repo_locks.setdefault(name, threading.RLock())
+
+
 def refresh_cache(name, slug):
     """De kopie van de dienst (waar de werkkopie van inbox uit clonet), op origin/main."""
+    with repo_lock(name):
+        return _refresh_cache(name, slug)
+
+
+def _refresh_cache(name, slug):
     d = HOME / "repos" / name
     if not (d / ".git").is_dir():
         d.parent.mkdir(parents=True, exist_ok=True)
@@ -387,7 +402,8 @@ def run_round(task_id):
         load_memory()  # wat de gebruiker net wiste of veranderde, geldt al voor deze ronde
         first = t["rounds"] == 0
         if first or t["reprepare"]:
-            code, out = task_cmd("prepare", task_id, t["repo"])
+            with repo_lock(t["repo"]):
+                code, out = task_cmd("prepare", task_id, t["repo"])
             if code != 0:
                 raise RuntimeError(f"werkkopie maken mislukt: {out[-300:]}")
         if first:
@@ -483,14 +499,15 @@ def push_branch(task_id, cache):
     if code != 0:
         raise RuntimeError(f"bundle mislukt: {out[-300:]}")
     bundle = Path(os.environ.get("INBOX_TASK_HOME", CONF["TASK_HOME"])) / "out" / f"{task_id}.bundle"
-    git(cache, "bundle", "verify", str(bundle))
     ref = f"refs/heads/inbox/{task_id}"
-    heads = git(cache, "bundle", "list-heads", str(bundle)).split()
-    if heads[1::2] != [ref]:
-        raise RuntimeError(f"de bundle bevat iets anders dan {ref}: {heads[1::2]}")
-    git(cache, "fetch", "--quiet", "--force", str(bundle), f"{ref}:refs/inbox/{task_id}")
-    # Alleen naar inbox/<id>, nooit naar main: de bestemming staat hier vast.
-    git(cache, "push", "--quiet", "--force", "origin", f"refs/inbox/{task_id}:{ref}")
+    with repo_lock(Path(cache).name):
+        git(cache, "bundle", "verify", str(bundle))
+        heads = git(cache, "bundle", "list-heads", str(bundle)).split()
+        if heads[1::2] != [ref]:
+            raise RuntimeError(f"de bundle bevat iets anders dan {ref}: {heads[1::2]}")
+        git(cache, "fetch", "--quiet", "--force", str(bundle), f"{ref}:refs/inbox/{task_id}")
+        # Alleen naar inbox/<id>, nooit naar main: de bestemming staat hier vast.
+        git(cache, "push", "--quiet", "--force", "origin", f"refs/inbox/{task_id}:{ref}")
     return [l for l in out.splitlines() if re.match(r"^[0-9a-f]{7,} ", l)]
 
 
@@ -1176,20 +1193,20 @@ def scheduler():
             settle_briefs()
             with _lock:
                 running = [t for t in tasks() if t["status"] == "running"]
-                busy = {t["repo"] for t in running}
+                per_repo = Counter(t["repo"] for t in running)
                 all_tasks = tasks()
                 by_id = {t["id"]: t for t in all_tasks}
                 for t in reversed([t for t in all_tasks if t["status"] == "queued"]):
                     if len(running) >= int(CONF["MAX_RUNNING"]):
                         break
-                    if t["repo"] in busy and t["repo"] not in (AUTO, BRIEF):
-                        continue  # nooit twee taken op dezelfde repo (de router is kort en raakt geen repo)
+                    if per_repo[t["repo"]] >= int(CONF.get("MAX_PER_REPO", 1)) and t["repo"] not in (AUTO, BRIEF):
+                        continue  # each task has its own working copy; the router is short and touches no repo
                     pre = by_id.get(t["after_task"], {"status": "queued"})["status"] if t["after_task"] else None
                     if pre in ACTIVE + ("waiting",) or (t["brief"] and pre == "pr_open"):
                         continue  # wacht op zijn voorganger (H-001: a brief task starts only after its PR is merged)
                     update(t["id"], status="running")
                     running.append(t)
-                    busy.add(t["repo"])
+                    per_repo[t["repo"]] += 1
                     threading.Thread(target=run_round, args=(t["id"],), daemon=True).start()
         except Exception as e:
             log(f"wachtrij: {e}")
@@ -1199,9 +1216,10 @@ def scheduler():
 def poll_github():
     while True:
         time.sleep(int(CONF["GITHUB_POLL_SECONDS"]))
+        merged = set()  # repos with a merge this cycle: one per repo, so GitHub rechecks the other PRs against main
         for t in [t for t in tasks() if t["status"] == "pr_open" and t["pr_number"]]:
             try:
-                check_pr(t)
+                check_pr(t, merged)
             except Exception as e:
                 log(f"PR van taak {t['id']}: {e}")
 
@@ -1269,9 +1287,11 @@ def auto_merge(t, slug, pr):
     notify(f"{label(t)}: PR #{t['pr_number']} merged",
            f"Build without me ({t['brief']}): every criterion met" + (", CI green" if state == "ok" else "")
            + ". To undo: revert the PR.", t["pr_url"])
+    return True
 
 
-def check_pr(t):
+def check_pr(t, merged=None):
+    merged = set() if merged is None else merged
     slug = repo_list().get(t["repo"])
     if not slug:
         return
@@ -1299,8 +1319,51 @@ def check_pr(t):
                mem_source=f"jouw PR-commentaar op PR #{t['pr_number']} ({label(t).lower()})", mem_link=comments[0][2],
                review_ok=None)
         log(f"taak {t['id']}: {len(comments)} review-commentaar, terug in de rij")
-    elif isinstance(pr, dict) and merges_itself(t):
-        auto_merge(t, slug, pr)
+    elif isinstance(pr, dict) and pr.get("mergeable") is False:
+        on_conflict(t, slug, pr)
+    elif isinstance(pr, dict) and merges_itself(t) and t["repo"] not in merged and pr.get("mergeable") is not None:
+        if auto_merge(t, slug, pr):  # mergeable None: GitHub is still checking the PR against main
+            merged.add(t["repo"])
+
+
+def on_conflict(t, slug, pr):
+    """The PR conflicts with main: merge main into the task's branch. A clean merge is pushed right away; conflicts
+    send the task back to its own session with the conflicted files, at most CONFLICT_ROUNDS times."""
+    sha = (pr.get("head") or {}).get("sha")
+    if sha and sha == t["conflict_sha"]:
+        return  # this head was already handled (or handed to you)
+    update(t["id"], conflict_sha=sha)
+    limit = int(CONF.get("CONFLICT_ROUNDS", 2))
+    if (t["conflicts"] or 0) >= limit:
+        log_line(f"t{t['id']}", "info", f"PR #{t['pr_number']} still conflicts after {limit} conflict round(s)")
+        return notify(f"{label(t)}: PR #{t['pr_number']} conflicts with main",
+                      f"Still conflicting after {limit} automatic round(s): resolve it yourself.", t["pr_url"])
+    try:
+        cache = refresh_cache(t["repo"], slug)
+        with repo_lock(t["repo"]):
+            code, out = task_cmd("sync", t["id"])
+        if code == 0:
+            push_branch(t["id"], cache)
+            update(t["id"], ended=now())  # CI runs again on the new head: its 30-minute wait starts now
+            return log_line(f"t{t['id']}", "info", f"PR #{t['pr_number']}: merged main into inbox/{t['id']}, "
+                                                   "no conflicts")
+        if code != 4:
+            raise RuntimeError(out.strip()[-300:] or f"exit {code}")
+    except Exception as e:
+        log(f"taak {t['id']}: conflict: {e}")
+        return notify(f"{label(t)}: PR #{t['pr_number']} conflicts with main",
+                      f"Couldn't merge main into the branch ({e}): resolve it yourself."[:300], t["pr_url"])
+    files = [f for f in out.splitlines() if f.strip()]
+    update(t["id"], status="queued", ended=None, conflicts=(t["conflicts"] or 0) + 1, review_ok=None,
+           mem_source=None, mem_link=None,
+           pending_input=(f"PR #{t['pr_number']} conflicts with main: other work was merged into main after you made "
+                          "it. `git merge origin/main` is already in progress in your working copy, with conflicts "
+                          "in:\n\n" + "\n".join(f"- {f}" for f in files)
+                          + "\n\nResolve them so that both your change and the one on main keep working, check that "
+                          "it still builds and the tests pass, commit the merge on the same branch and end with KLAAR: "
+                          "again (or VRAAG:/GEWEIGERD:)."))
+    log_line(f"t{t['id']}", "info", f"PR #{t['pr_number']} conflicts with main in {len(files)} file(s): back in "
+                                    "the queue")
 
 
 LEARN_HINT = ("Is iets hiervan een correctie die ook voor latere taken geldt, bewaar het dan als voorkeur "

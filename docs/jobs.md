@@ -114,7 +114,7 @@ Claude stelt het model voor, en jij kunt het vóór het bevestigen veranderen:
   Het model ziet hooguit ongeveer 9.000 tekens; de rest wordt afgekapt. Het is een klein model: geef één duidelijke
   opdracht en de vorm van het antwoord.
 - **claude**: alles wat tools, code of een repo nodig heeft (een repo-chore altijd). De job wordt een inbox-taak: hij
-  staat in dezelfde rij (hooguit twee tegelijk, nooit twee op dezelfde repo), heeft dezelfde grens van beurten en tijd,
+  staat in dezelfde rij (`MAX_RUNNING` at once, `MAX_PER_REPO` per repo), heeft dezelfde grens van beurten en tijd,
   eindigt code in een PR (nooit op `main`, nooit gemerged) en doet machinewijzigingen alleen via F-019. Bij een
   box-report of digest krijgt Claude de verzamelde tekst mee; een script draait Claude zelf in zijn werkkopie.
 

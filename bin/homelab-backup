@@ -7,9 +7,10 @@
 
 Wat erin gaat staat in config/backup.list; instellingen in config/backup.conf. De backups zijn alleen voor root
 leesbaar. De status van de laatste backup (zonder geheimen) staat in BACKUP_STATUS, voor de health check.
-Voor tests overschrijfbaar met BACKUP_DIR, BACKUP_STATUS, BACKUP_LIST, RESTORE_ROOT en NO_SERVICES=1.
+Voor tests overschrijfbaar met BACKUP_DIR, BACKUP_MOUNT, BACKUP_STATUS, BACKUP_LIST, RESTORE_ROOT en NO_SERVICES=1.
 """
 import argparse
+import contextlib
 import glob
 import json
 import os
@@ -105,8 +106,13 @@ def write_status(status):
 def cmd_run():
     status = {"at": now(), "ok": False, "dir": str(BACKUP_DIR)}
     try:
+        mount = CONF.get("BACKUP_MOUNT")
+        if mount and not os.path.ismount(mount):
+            raise RuntimeError(f"de backupschijf is niet gemount op {mount}")
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        BACKUP_DIR.chmod(0o700)
+        # Op ntfs of exfat regelen de mount-opties (uid=0, umask=077) de rechten en kan chmod niet.
+        with contextlib.suppress(PermissionError):
+            BACKUP_DIR.chmod(0o700)
         files, missing = paths()
         name = f"homelab-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
         tmp_file = BACKUP_DIR / f".{name}.tmp"
@@ -117,7 +123,8 @@ def cmd_run():
                     add(tar, p, tmpdir)
         finally:
             os.umask(old_umask)
-        tmp_file.chmod(0o600)
+        with contextlib.suppress(PermissionError):
+            tmp_file.chmod(0o600)
         tmp_file.rename(BACKUP_DIR / name)
         removed = prune()
         status.update(ok=True, file=name, size=(BACKUP_DIR / name).stat().st_size, files=len(files),

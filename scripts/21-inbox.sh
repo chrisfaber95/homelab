@@ -36,6 +36,25 @@ install -d -m 2750 -o inbox-runner -g inbox-share "$RUNNER_HOME" "$RUNNER_HOME/r
 install -d -m 2750 -o inbox -g inbox-share "$TASK_HOME" "$TASK_HOME/out"
 install -d -m 700 -o inbox -g inbox "$TASK_HOME/work"
 
+echo "== claude-dashboard may list inbox sessions (read-only)"
+# The dashboard runs as claude and reads $TASK_HOME/.claude/sessions/*.json (CLAUDE_EXTRA_DIRS in
+# deploy/claude-dashboard.service). claude only gets to pass through $TASK_HOME and .claude and to read that one folder;
+# the default ACL covers new session files (tasks run with umask 027), not the 0600 .key files beside them.
+dpkg -s acl >/dev/null 2>&1 || apt-get install -y -qq acl
+for d in "$TASK_HOME/.claude" "$TASK_HOME/.claude/sessions"; do
+  [[ -d $d ]] || install -d -m 700 -o inbox -g inbox "$d"
+done
+# Passing through makes files that others may read reachable: take that away at the two levels claude can reach.
+find "$TASK_HOME" "$TASK_HOME/.claude" -mindepth 1 -maxdepth 1 ! -type l -perm /o=rwx -exec chmod o-rwx {} +
+setfacl -m u:claude:x "$TASK_HOME" "$TASK_HOME/.claude"
+setfacl -m u:claude:rx,d:u:claude:r "$TASK_HOME/.claude/sessions"
+find "$TASK_HOME/.claude/sessions" -maxdepth 1 -type f -name '*.json' -exec setfacl -m u:claude:r {} +
+runuser -u claude -- ls "$TASK_HOME/.claude/sessions" >/dev/null
+if runuser -u claude -- ls "$TASK_HOME" >/dev/null 2>&1; then
+  echo "claude can list $TASK_HOME: only passing through was meant." >&2
+  exit 1
+fi
+
 echo "== Claude Code voor inbox"
 if [[ ! -x "$TASK_HOME/.local/bin/claude" ]]; then
   (cd / && sudo -u inbox -H bash -c 'curl -fsSL https://claude.ai/install.sh | bash')

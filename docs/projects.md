@@ -101,6 +101,10 @@ wijzigen). Hij ziet Claudes sessies op de box en kan Claude-sessies starten in `
 (`PROJECTS_ROOT`). Omdat hij Claude laat handelen, draait hij in LAN-modus: HTTPS met login per apparaat, op
 `https://homelab:8101` (het certificaat is zelfondertekend; je browser waarschuwt de eerste keer).
 
+It also lists the live sessions of inbox tasks (account `inbox`, project label `inbox`): read-only, without
+transcript or tokens. `scripts/21-inbox.sh` gives `claude` read access to `/var/lib/inbox/.claude/sessions` only (ACL),
+and `CLAUDE_EXTRA_DIRS` in `deploy/claude-dashboard.service` points the dashboard at it.
+
 **Een apparaat koppelen** kan alleen vanaf de box zelf (de vrijstelling "this PC": loopback). Vanaf Windows:
 
 ```

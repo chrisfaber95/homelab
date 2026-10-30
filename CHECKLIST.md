@@ -302,6 +302,16 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         build, a task with `after` waits for its predecessor's merge.
   - [ ] Every task PR gets a brief-review comment; a ❌ sends it back once before the notification.
   - [ ] After the last merge a `handoff/<id>` PR in the product repo sets `status: handed-off`.
+- [ ] claude-dashboard: approve and deny permission prompts from the dashboard (F-005; was team-hq T-045, moved
+      2026-10-30). Use a phone or tablet that is paired with `https://homelab:8101` (`docs/projects.md`); the box itself
+      counts as "this PC" and is refused. A scratch project in `~/dev` of `claude`, harmless command only. Until all
+      four pass, use approve/deny only for your own testing; F-005 isn't shipped before that.
+  - [ ] Allow: a dashboard-launched session asks to `touch proof-file.txt`; Approve on the phone, then the file
+        exists and the session continues.
+  - [ ] Deny: the same request; Deny, then there is no file and the session continues and says it was denied.
+  - [ ] Expiry: an unanswered request falls back to the normal prompt (`claude attach`) and shows as expired.
+  - [ ] Each of the three is in the approval log (`/home/claude/.local/share/claude-dashboard/commands.log`) with
+        time, device, session and command. Anything that fails: a task in the inbox (repo `claude-dashboard`).
 - [ ] `claude` voor chris (stond niet in zijn PATH: Claude Code is per gebruiker geïnstalleerd en chris had geen eigen installatie). Als chris: `bash /var/lib/homelab/repo/scripts/22-claude-chris.sh`; log opnieuw in (SSH) en controleer `which claude` en `claude --version`, daarna `claude` → `/login`.
 
 ## 14. Verhuizen naar de desktop **(desktop)**

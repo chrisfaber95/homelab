@@ -74,6 +74,21 @@ def load_config():
 
 
 CONF = load_config()
+
+
+def load_services():
+    """The services on the box for the overview: config/services.conf, one `name | address | what it is` per line."""
+    f = ROOT / "config" / "services.conf"
+    services = []
+    for line in (f.read_text().splitlines() if f.exists() else []):
+        parts = [p.strip() for p in line.split("|")]
+        if line.strip().startswith("#") or len(parts) != 3 or not all(parts):
+            continue
+        services.append(dict(zip(("name", "address", "note"), parts)))
+    return services
+
+
+SERVICES = load_services()
 HOME = Path(os.environ.get("INBOX_RUNNER_HOME", CONF["RUNNER_HOME"]))
 DB = HOME / "inbox.db"
 FAKE_GH = os.environ.get("INBOX_FAKE_GITHUB") == "1"
@@ -2717,6 +2732,23 @@ def changes_html(h):
     return "".join(parts)
 
 
+def services_html():
+    e = html.escape
+
+    def address(a):
+        if a.startswith(("http://", "https://")):
+            return f'<a href="{e(a)}">{e(a.split("://", 1)[1])}</a>'
+        return f"<code>{e(a)}</code>"
+    facts = "".join(f'<dt>{e(s["name"])}</dt><dd>{address(s["address"])}<br><span class="muted">{e(s["note"])}</span></dd>'
+                    for s in SERVICES)
+    return ((f'<dl class="facts">{facts}</dl>' if facts else '<p class="empty">No services in config/services.conf.</p>')
+            + '<h3>Run the designer</h3><p class="note">From your PC with Tailscale on, as <code>claude</code>. tmux '
+            'keeps the session alive if SSH drops; to get back in, run the first two lines again.</p>'
+            '<pre>ssh homelab-claude\ntmux new -A -s designer\ncd ~/dev/product &amp;&amp; claude</pre>'
+            '<p class="note">It interviews you and merges the brief as a draft; approve it on the '
+            '<a href="/briefs">Briefs</a> tab. More in docs/briefs.md.</p>')
+
+
 def overview_page():
     h = health()
     sentence, cls = status_sentence(h)
@@ -2735,6 +2767,8 @@ def overview_page():
             f'<section class="sec-changes"><div class="section-head"><h2>Wijzigingen op de box</h2><p class="note">de laatste vijf, '
             f'via homelab-admin</p></div>{changes_html(h) or "<p class=empty>Nog geen wijzigingen.</p>"}</section>'
             f'</div><div>'
+            f'<section class="sec-services"><div class="section-head"><h2>Services</h2><p class="note">only over '
+            f'Tailscale</p></div>{services_html()}</section>'
             f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
             f'{usage_html()}</section>'
             f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'

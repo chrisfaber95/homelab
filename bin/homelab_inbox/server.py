@@ -8,14 +8,14 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .briefs import brief_by_id, set_brief_status, start_build
-from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, SECRET_RE, _cancel_runs, _lock
+from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, update_draft, update_run
 from .memory import LEARN_HINT, MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, skills_page, ssh_page, task_page, tasks_page
-from .queue import cancel_task, recover, scheduler
+from .queue import cancel_task, recover, retry_task, scheduler
 from .router import children
 from .storage import db, get, log, now, update
 
@@ -153,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, ssh_page(done=r, name=name))
         if self.path.startswith("/memory/"):
             return self.post_memory(form)
-        m = re.fullmatch(r"/task/(\d+)/(answer|cancel|attended)", self.path)
+        m = re.fullmatch(r"/task/(\d+)/(answer|cancel|attended|retry)", self.path)
         t = get(int(m.group(1))) if m else None
         if not t:
             return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
@@ -177,6 +177,8 @@ class Handler(BaseHTTPRequestHandler):
                 update(t["id"], status="cancelled", ended=now())
             else:
                 cancel_task(t)
+        elif m.group(2) == "retry" and t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
+            retry_task(t)
         elif m.group(2) == "attended" and t["repo"] == BRIEF and t["unattended"]:
             update(t["id"], unattended=0)
             log_line(f"t{t['id']}", "info", f"build without me stopped by {self.who}: you merge the rest")

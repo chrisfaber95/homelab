@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 from .briefs import builds, live_build, load_briefs, split_frontmatter
-from .config import ACTIVE, AUTO, BRIEF, CONF, JOBS, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
+from .config import ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
@@ -200,6 +200,8 @@ def task_page(t):
                  f'Grens per ronde: {CONF["MAX_TURNS"]} beurten of {CONF["MAX_MINUTES"]} minuten.</p>')
     if t["status"] in ACTIVE + ("waiting",) or (t["status"] == "routed" and not t["ended"]):
         parts.append(form(f'/task/{t["id"]}/cancel', "", "Annuleren", ghost=True))
+    if t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
+        parts.append(form(f'/task/{t["id"]}/retry', "", "Retry"))
     parts.append(log_html(f"t{t['id']}"))
     return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] == "queued")
 

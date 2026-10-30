@@ -4,12 +4,12 @@ import time
 from collections import Counter
 
 from .briefs import plan_task, review_pr, settle_briefs
-from .config import ACTIVE, AUTO, BRIEF, CONF, _cancel, _lock, _round_started
+from .config import ACTIVE, AUTO, BRIEF, CONF, STATUS_NL, _cancel, _lock, _round_started
 from .helpers import first_line, gh, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
 from .jobs import propose_skill, split_skill
 from .memory import after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
-from .router import route_task, settle_routed
+from .router import children, route_task, settle_routed
 from .storage import db, get, log, now, tasks, update
 
 
@@ -51,6 +51,7 @@ def run_round(task_id):
             task_cmd("cleanup", task_id)
         notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
         return after_round(task_id, [])
+    update(task_id, restarts=0)
     text, blocks = split_memory((result or {}).get("result") or "")
     try:
         finish_round(task_id, cache, text, result, capped)
@@ -166,10 +167,61 @@ def scheduler():
         time.sleep(3)
 
 
+RESTART_ROUNDS = 2  # rounds in a row a restart may cut off before the task fails (a task that crashes the inbox)
+CONTINUE_HINT = ("Your working copy is as you left it: check `git status` and `git log` first, then continue where "
+                 "you left off and end with KLAAR: (or VRAAG:/GEWEIGERD:).")
+
+
 def recover():
-    """Na een herstart: wat liep is onderbroken (en een Claude die nog loopt, wordt gestopt)."""
+    """After a restart: a Claude that still runs is stopped and its task goes back in the queue, where its own
+    session continues; a brief task whose PR review was cut off is reviewed again."""
     for t in [t for t in tasks() if t["status"] == "running"]:
         stop(t["id"])
-    with db() as c:
-        c.execute("UPDATE tasks SET status='failed', ended=?, note='onderbroken door een herstart' "
-                  "WHERE status='running'", (now(),))
+        if (t["restarts"] or 0) >= RESTART_ROUNDS:
+            update(t["id"], status="failed", ended=now(), note="onderbroken door een herstart")
+            continue
+        # The router and planner start over; their pending_input would read as an answer to a question.
+        update(t["id"], status="queued", restarts=(t["restarts"] or 0) + 1, pending_input=None if t["repo"] in (
+            AUTO, BRIEF) else "The inbox restarted while you were working on this task, which cut off your last "
+                              "turn. " + CONTINUE_HINT)
+        log_line(f"t{t['id']}", "info", "interrupted by a restart of the inbox: back in the queue")
+    for t in [t for t in tasks() if t["status"] == "pr_open" and t["brief"] and t["review"] is None]:
+        threading.Thread(target=review_again, args=(t["id"],), daemon=True).start()
+
+
+def review_again(task_id):
+    t = get(task_id)
+    try:
+        review_pr(task_id, refresh_cache(t["repo"], repo_list()[t["repo"]]))
+    except Exception as e:
+        log(f"taak {task_id}: review after restart: {e}")
+
+
+def retry_task(t):
+    """Retry on the page: the task goes back in the queue (its own session, in its working copy if that's still
+    there), with the tasks of its build or message that were cancelled because of it."""
+    if t["rounds"]:
+        code, _ = task_cmd("has", t["id"])
+        fresh = code != 0
+        why = t["note"] or STATUS_NL[t["status"]]
+        update(t["id"], status="queued", ended=None, note=None, restarts=0, reprepare=int(fresh),
+               pending_input=f"This task stopped before it was finished ({why}) and the user asked to retry it. " + (
+                   f"Your working copy was cleaned up: this is a fresh copy of main on inbox/{t['id']}, so work "
+                   "from earlier rounds that isn't on main is gone. Do the task again and end with KLAAR: (or "
+                   "VRAAG:/GEWEIGERD:)." if fresh else CONTINUE_HINT))
+    else:
+        update(t["id"], status="queued", ended=None, note=None)
+    log_line(f"t{t['id']}", "info", "retried on the page: back in the queue")
+    parent = get(t["parent"]) if t["parent"] else None
+    if not parent or parent["status"] != "routed":
+        return
+    revived, kids = {t["id"]}, children(parent["id"])
+    while True:
+        more = [k for k in kids if k["id"] not in revived and k["status"] == "cancelled" and not k["rounds"]
+                and k["after_task"] in revived and (k["note"] or "").startswith("niet gestart: de voorgaande taak")]
+        if not more:
+            break
+        for k in more:
+            update(k["id"], status="queued", ended=None, note=None)
+            revived.add(k["id"])
+    update(parent["id"], ended=None)  # the build or message isn't finished any more

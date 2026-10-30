@@ -29,12 +29,14 @@ def db():
                       ("reprepare", "INTEGER DEFAULT 0"), ("parent", "INTEGER"), ("after_task", "INTEGER"),
                       ("reason", "TEXT"), ("brief", "TEXT"), ("criteria", "TEXT"), ("reviews", "INTEGER DEFAULT 0"),
                       ("review", "TEXT"), ("handoff", "TEXT"), ("unattended", "INTEGER DEFAULT 0"),
-                      ("review_ok", "INTEGER"), ("conflicts", "INTEGER DEFAULT 0"), ("conflict_sha", "TEXT")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
+                      ("review_ok", "INTEGER"), ("conflicts", "INTEGER DEFAULT 0"), ("conflict_sha", "TEXT"),
+                      ("restarts", "INTEGER DEFAULT 0")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
         # H-001: brief = the brief id (build parent and its children), criteria = JSON list for a child, reviews =
         # automatic rework rounds used, review = the reviewer's last verdict, handoff = the handed-off PR (or error)
         # Build without me: unattended = on a build, the inbox merges its PRs; review_ok = 1 when every criterion of
         # the last review passed
         # Merge conflicts: conflicts = automatic conflict rounds used, conflict_sha = the PR head last handled
+        # restarts = rounds in a row cut off by a restart of the inbox (recover puts the task back in the queue)
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
     conn.executescript("""

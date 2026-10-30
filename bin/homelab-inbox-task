@@ -7,6 +7,7 @@
 #   bundle <id>                  de nieuwe commits van inbox/<id> als bundle in TASK_HOME/out/<id>.bundle (exit 3: geen)
 #   sync <id>                    merge the latest main of the service's copy into inbox/<id> (exit 4 + the conflicted
 #                                files: the merge stays in progress for Claude to resolve)
+#   has <id>                     exit 0 if the task still has its working copy
 #   kill <id>                    de lopende Claude van deze taak stoppen
 #   cleanup <id>                 werkkopie en bundle weg
 # Voor de jobs (F-022), met een id j<run> of d<concept>:
@@ -108,6 +109,9 @@ case $action in
     fi
     echo "$files"
     exit 4
+    ;;
+  has)
+    [[ -d "$work/repo" ]]
     ;;
   kill)
     if [[ -f "$work/pid" ]]; then

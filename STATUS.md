@@ -76,6 +76,8 @@ Still for the user to test (also in `CHECKLIST.md`):
 - Inbox parallelism (2026-10-30): up to 3 tasks per repo, one auto-merge per repo per poll, conflicts with main go back
   to the task. Tested without root (fake GitHub, local repos); still to see live: two tasks on one repo and a real
   conflict round.
+- Inbox restarts and Retry (2026-10-30): a restart requeues running tasks instead of failing them; Retry on a failed
+  or cancelled task. Tested without root; still to see live: a task resuming after a restart.
 - After the move to the desktop: BIOS, `EXPECTED_GPU` to the GTX 1080, reboot and power test, the rebuild drill.
 
 ## Answered questions

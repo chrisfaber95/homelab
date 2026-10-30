@@ -6,6 +6,7 @@
 #   het geheugen schrijft alleen de inbox (F-023).
 #   GitHub kan dat voor privé-repo's zonder Pro niet afdwingen; dit vangt vergissingen af.
 # - ~/dev voor Claudes dev-clones.
+# - Own skills (claude/skills/, e.g. /ingest for the second brain) and scripts (claude/bin/ → ~/.local/bin).
 # - Agents uit claude/agents/ en vastgepinde plugins (config/claude.conf) in een eigen lokale marketplace.
 # - Skills (config/claude.conf): frontend-design, web-artifacts-builder (met pnpm) en webapp-testing (met Playwright
 #   en een headless Chromium), plus gitleaks in ~/.local/bin. Hun systeempakketten staan in config/machine.conf (homelab-admin legt ze aan).
@@ -131,6 +132,16 @@ echo "== Agents (claude/agents)"
 mkdir -p ~/.claude/agents
 for f in "$(dirname "$(readlink -f "$0")")"/../claude/agents/*.md; do
   install -m 644 "$f" ~/.claude/agents/
+done
+
+echo "== Own skills and scripts (claude/skills, claude/bin)"
+for d in "$(dirname "$(readlink -f "$0")")"/../claude/skills/*/; do
+  name=$(basename "$d")
+  rm -rf ~/.claude/skills/"$name"
+  cp -r "$d" ~/.claude/skills/"$name"
+done
+for f in "$(dirname "$(readlink -f "$0")")"/../claude/bin/*; do
+  install -m 755 "$f" ~/.local/bin/
 done
 
 echo "== Plugins (${PLUGINS_COMMIT:0:7}): $PLUGINS"

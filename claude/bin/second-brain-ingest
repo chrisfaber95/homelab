@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# second-brain-ingest raw/inbox/<file>: process one note into the second brain (the global /ingest skill).
+# Like the vault's nightly sync: Claude runs inside the vault with edits only there and no git writes beyond moving
+# the note; this script commits. Chris's own uncommitted edits get their own commit first.
+# Installed in ~/.local/bin by scripts/18-claude.sh from claude/bin/ in the homelab repo.
+set -euo pipefail
+umask 002  # files stay group-writable for chris (group obsidian)
+
+VAULT=${SECOND_BRAIN_DIR:-/srv/obsidian/second-brain}  # tests: another vault
+LOG_DIR=$HOME/.local/state/second-brain
+note=${1:-}
+[[ $note =~ ^raw/inbox/[A-Za-z0-9._-]+\.md$ && -f $VAULT/$note ]] || {
+  echo "usage: second-brain-ingest raw/inbox/<file>.md (an existing note in $VAULT)" >&2
+  exit 2
+}
+mkdir -p "$LOG_DIR"
+# Same lock as the nightly sync: never two sessions writing the wiki at once.
+exec 9>"$LOG_DIR/sync.lock"
+flock -w 900 9 || { echo "the second brain is busy (nightly sync?); the note stays in raw/inbox" >&2; exit 1; }
+
+cd "$VAULT"
+if [ -n "$(git status --porcelain -- . ":(exclude)$note")" ]; then
+  git add -A -- . ":(exclude)$note"
+  git -c commit.gpgsign=false commit -q -m "manual: edits since the last run ($(date +%F))"
+fi
+git add -- "$note"  # tracked, so the ingest can git mv it
+
+allowed=(
+  Read Glob Grep
+  "Edit(//srv/obsidian/second-brain/**)" "Write(//srv/obsidian/second-brain/**)"
+  "Bash(git mv raw/inbox/*)" "Bash(git status:*)" "Bash(git log:*)" "Bash(ls:*)"
+)
+timeout 15m "${CLAUDE_BIN:-$HOME/.local/bin/claude}" -p \
+  "Follow .claude/skills/ingest/SKILL.md for the single file $note. This is an unattended run started by the global
+/ingest skill: don't commit (the wrapper commits after you finish) and don't ask questions; put anything unclear under
+the page's Open questions. End with the short summary from step 4." \
+  --allowedTools "${allowed[@]}" | tee "$LOG_DIR/last-ingest.md"
+
+if [ -n "$(git status --porcelain)" ]; then
+  git add -A
+  git -c commit.gpgsign=false commit -q -m "ingest: $(basename "$note" .md)"
+  echo "committed: $(git log -1 --format='%h %s')"
+else
+  echo "no changes"
+fi

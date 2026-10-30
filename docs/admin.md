@@ -60,7 +60,9 @@ script in `scripts/` names its account and inputs in a header line:
   snapshot first, the [safety net](#vangnet) if the firewall, network or SSH changed, then `homelab-health` and a
   notification ("ran", "mislukt" or "Bevestig"). A failed script only runs again when its inputs change again.
 - **`manual`**: only a notification with the command to run yourself. These scripts are `05-09-base.sh` (SSH and
-  firewall), `19-admin.sh` (it restarts `homelab-admin` itself) and `22-claude-chris.sh`.
+  firewall), `19-admin.sh` (it restarts `homelab-admin` itself) and `22-claude-chris.sh`. `19-admin.sh` only asks when the script
+  itself changes: `20-monitor.sh` and `21-inbox.sh` already install `bin/homelab-admin` and its config, and
+  `homelab-admin` then restarts itself.
 - No header line: never run automatically.
 
 | Script | Runs as | Inputs (besides the script) |

@@ -16,7 +16,7 @@ from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
-from .router import children
+from .router import blocked_by, children
 from .storage import db, log, tasks
 
 
@@ -201,7 +201,12 @@ def task_page(t):
     if t["status"] in ACTIVE + ("waiting",) or (t["status"] == "routed" and not t["ended"]):
         parts.append(form(f'/task/{t["id"]}/cancel', "", "Annuleren", ghost=True))
     if t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
-        parts.append(form(f'/task/{t["id"]}/retry', "", "Retry"))
+        pre = blocked_by(t)
+        if pre:  # a retry would be cancelled again on the next pass of the scheduler
+            parts.append(f'<p class="muted">Waits for <a href="/task/{pre["id"]}">#{pre["id"]}</a>: continue or '
+                         'retry that task first; this one then comes back in the queue by itself.</p>')
+        else:
+            parts.append(form(f'/task/{t["id"]}/retry', "", "Continue" if t["status"] == "capped" else "Retry"))
     parts.append(log_html(f"t{t['id']}"))
     return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] == "queued")
 

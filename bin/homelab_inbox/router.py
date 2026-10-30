@@ -138,6 +138,15 @@ def children(task_id):
         return c.execute("SELECT * FROM tasks WHERE parent=? ORDER BY id", (task_id,)).fetchall()
 
 
+PRE_OK = ACTIVE + ("waiting", "answered", "pr_open", "merged")  # a follow-up task may run after these
+
+
+def blocked_by(t):
+    """The predecessor that stops this follow-up task from running (settle_routed cancels it), or None."""
+    pre = get(t["after_task"]) if t["after_task"] else None
+    return pre if pre and pre["status"] not in PRE_OK else None
+
+
 def settle_routed():
     """Kindtaken waarvan de voorganger niet goed afliep, stoppen; een doorgestuurd bericht afsluiten als alle kinderen klaar zijn."""
     with db() as c:
@@ -147,8 +156,7 @@ def settle_routed():
         by_id = {k["id"]: k for k in kids}
         for k in kids:
             pre = by_id.get(k["after_task"])
-            if k["status"] == "queued" and pre and pre["status"] not in ACTIVE + ("waiting", "answered", "pr_open",
-                                                                                  "merged"):
+            if k["status"] == "queued" and pre and pre["status"] not in PRE_OK:
                 update(k["id"], status="cancelled", ended=now(),
                        note=f"niet gestart: de voorgaande taak #{pre['id']} was {STATUS_NL[pre['status']]}")
         kids = children(p["id"])

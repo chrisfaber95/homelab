@@ -16,7 +16,7 @@ from .memory import LEARN_HINT, MEM_ID_RE, entry_text, load_memory, mem_get, sav
 from .overview import activity_sentence, live_items
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import cancel_task, recover, retry_task, scheduler
-from .router import children
+from .router import blocked_by, children
 from .storage import db, get, log, now, update
 
 
@@ -177,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
                 update(t["id"], status="cancelled", ended=now())
             else:
                 cancel_task(t)
-        elif m.group(2) == "retry" and t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
+        elif m.group(2) == "retry" and t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF) and not blocked_by(t):
             retry_task(t)
         elif m.group(2) == "attended" and t["repo"] == BRIEF and t["unattended"]:
             update(t["id"], unattended=0)

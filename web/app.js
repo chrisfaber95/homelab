@@ -125,7 +125,9 @@ if (live) {
       });
       return node;
     });
-    list.replaceChildren(...nodes);
+    // Only move what changed: a node taken out and put back (replaceChildren) loses the scroll position of its log.
+    for (const n of [...list.children]) if (!nodes.includes(n)) n.remove();
+    nodes.forEach((n, i) => { if (list.children[i] !== n) list.insertBefore(n, list.children[i] || null); });
     if (!items.length) list.append(el("p", { class: "empty", text: "Niets bezig. Taken en jobs verschijnen hier zodra ze starten." }));
   }
 

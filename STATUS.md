@@ -62,6 +62,11 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
 1. Backups to the external 2 TB USB HDD (PR #11, open): the laptop didn't see the disk yet (no USB storage in
    `lsusb`). The user picks that up later.
 2. F-024 waits for the merge.
+3. H-001 (2026-10-30): the product repo `chrisfaber95/product` with the designer is merged (PR #1). Phase 2, the tab
+   Briefs with Build, planner, brief reviewer and handoff (`docs/briefs.md`), is on branch `h-001-briefs`; tested
+   end to end with fakes (planner split with `after`, one automatic rework round, wait for merge, handoff PR) and
+   Playwright screenshots. Not yet seen with real Claude runs. Phase 3, moving claude-dashboard's open team-hq
+   tickets, waits for the user.
 
 Still for the user to test (also in `CHECKLIST.md`):
 - F-016: SSH from another network; lid closed.

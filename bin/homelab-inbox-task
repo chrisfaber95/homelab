@@ -48,10 +48,17 @@ case $action in
     git -c safe.directory='*' clone --quiet --no-hardlinks --upload-pack="git -c safe.directory='*' upload-pack" \
       "$RUNNER_HOME/repos/$name" "$work/repo"
     cd "$work/repo"
-    git checkout --quiet -b "inbox/$id" origin/main
+    # Commits an earlier round pushed (push_branch keeps them as refs/inbox/<id> in the source): a capped task that the
+    # user continues, or a follow-up whose working copy was cleaned up, carries on from those instead of from main.
+    from=origin/main
+    if git -c safe.directory='*' fetch --quiet --upload-pack="git -c safe.directory='*' upload-pack" \
+        origin "refs/inbox/$id:refs/remotes/origin/inbox-$id" 2>/dev/null; then
+      from="origin/inbox-$id"
+    fi
+    git checkout --quiet -b "inbox/$id" "$from"
     git config user.name "Claude (homelab-inbox)"
     git config user.email "noreply@anthropic.com"
-    git rev-parse HEAD > "$work/base"
+    git rev-parse origin/main > "$work/base"
     # De gemergde skills van de homelab-repo (F-022) voor Claude Code; rsync vervangt bestand voor bestand, zodat een
     # taak die al loopt nooit een halve map ziet.
     # In tests (INBOX_TASK_HOME) is HOME die van claude: dan alleen naar INBOX_SKILLS_DIR, nooit naar ~/.claude/skills.

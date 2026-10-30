@@ -4,8 +4,8 @@ import time
 from collections import Counter
 
 from .briefs import plan_task, review_pr, settle_briefs
-from .config import ACTIVE, AUTO, BRIEF, CONF, STATUS_NL, _cancel, _lock, _round_started
-from .helpers import first_line, gh, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
+from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, STATUS_NL, _cancel, _lock, _round_started
+from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
 from .jobs import propose_skill, split_skill
 from .memory import after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
@@ -197,6 +197,15 @@ def review_again(task_id):
         log(f"taak {task_id}: review after restart: {e}")
 
 
+def pushed(t):
+    """Whether an earlier round pushed commits to inbox/<id> (push_branch keeps them in the service's copy too)."""
+    try:
+        git(HOME / "repos" / t["repo"], "rev-parse", "--verify", "--quiet", f"refs/inbox/{t['id']}")
+        return True
+    except RuntimeError:
+        return False
+
+
 def retry_task(t):
     """Retry on the page: the task goes back in the queue (its own session, in its working copy if that's still
     there), with the tasks of its build or message that were cancelled because of it."""
@@ -204,11 +213,18 @@ def retry_task(t):
         code, _ = task_cmd("has", t["id"])
         fresh = code != 0
         why = t["note"] or STATUS_NL[t["status"]]
+        if not fresh:
+            hint = CONTINUE_HINT
+        elif pushed(t):  # prepare restores the working copy from the commits pushed to inbox/<id>
+            hint = (f"Your working copy was cleaned up and rebuilt from your commits on inbox/{t['id']}: uncommitted "
+                    "work is gone. " + CONTINUE_HINT)
+        else:
+            hint = (f"Your working copy was cleaned up: this is a fresh copy of main on inbox/{t['id']}, so work "
+                    "from earlier rounds that isn't on main is gone. Do the task again and end with KLAAR: (or "
+                    "VRAAG:/GEWEIGERD:).")
         update(t["id"], status="queued", ended=None, note=None, restarts=0, reprepare=int(fresh),
-               pending_input=f"This task stopped before it was finished ({why}) and the user asked to retry it. " + (
-                   f"Your working copy was cleaned up: this is a fresh copy of main on inbox/{t['id']}, so work "
-                   "from earlier rounds that isn't on main is gone. Do the task again and end with KLAAR: (or "
-                   "VRAAG:/GEWEIGERD:)." if fresh else CONTINUE_HINT))
+               pending_input=f"This task stopped before it was finished ({why}) and the user asked to "
+                             f"{'continue' if t['status'] == 'capped' else 'retry'} it. " + hint)
     else:
         update(t["id"], status="queued", ended=None, note=None)
     log_line(f"t{t['id']}", "info", "retried on the page: back in the queue")
@@ -217,11 +233,17 @@ def retry_task(t):
         return
     revived, kids = {t["id"]}, children(parent["id"])
     while True:
-        more = [k for k in kids if k["id"] not in revived and k["status"] == "cancelled" and not k["rounds"]
+        # also a task with rounds: the user retried it, and settle_routed cancelled it again before it could start
+        more = [k for k in kids if k["id"] not in revived and k["status"] == "cancelled"
                 and k["after_task"] in revived and (k["note"] or "").startswith("niet gestart: de voorgaande taak")]
         if not more:
             break
         for k in more:
+            if k["rounds"]:  # it ran before: resume its session, in a working copy rebuilt if that was cleaned up
+                update(k["id"], reprepare=int(k["reprepare"] or task_cmd("has", k["id"])[0] != 0),
+                       pending_input=k["pending_input"] or "The task before this one stopped early and the user "
+                       "continued it, so this task is back in the queue. Check `git status` and `git log` first, "
+                       "then continue where you left off and end with KLAAR: (or VRAAG:/GEWEIGERD:).")
             update(k["id"], status="queued", ended=None, note=None)
             revived.add(k["id"])
     update(parent["id"], ended=None)  # the build or message isn't finished any more

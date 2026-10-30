@@ -43,10 +43,10 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
 - F-023 (merged): memory tab; preferences, facts and history as files on the `memory` branch of `DATA_REPO` (never
   merged; only the inbox writes to it). Claude stores with `GEHEUGEN:` blocks under its last message; Claude Code auto
   memory is off for `inbox`. After `21-inbox.sh` and `18-claude.sh`: the tests in `CHECKLIST.md`.
-- F-024 (2026-10-26, branch `f-024-dashboard`): the homelab page in the same service; `/` is the overview (status
+- F-024 (merged 2026-10-26, PR #20): the homelab page in the same service; `/` is the overview (status
   sentence, live logs of what is running, jobs timeline, this week, health). Built and tested without root, with
   Playwright screenshots. Look approved by the user (futuristic dark and blue after the KITT skin of claude-dashboard,
-  dark only; an earlier "paper" version was rejected). Waiting for the merge.
+  dark only; an earlier "paper" version was rejected). The post-merge steps and checks are in `CHECKLIST.md`.
 - Claude's skills (2026-10-26): frontend-design, web-artifacts-builder and webapp-testing from `anthropics/skills`,
   pinned in `config/claude.conf`, installed by `scripts/18-claude.sh` (with pnpm in `~/.local` and Playwright in
   `~/.local/share/playwright-venv`; `python` is that venv, `python3` Ubuntu's). Also `gitleaks` (pinned,
@@ -61,12 +61,11 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
 
 1. Backups to the external 2 TB USB HDD (PR #11, open): the laptop didn't see the disk yet (no USB storage in
    `lsusb`). The user picks that up later.
-2. F-024 waits for the merge.
-3. H-001 (2026-10-30): the product repo `chrisfaber95/product` with the designer is merged (PR #1). Phase 2, the tab
-   Briefs with Build, planner, brief reviewer and handoff (`docs/briefs.md`), is on branch `h-001-briefs`; tested
-   end to end with fakes (planner split with `after`, one automatic rework round, wait for merge, handoff PR) and
-   Playwright screenshots. Not yet seen with real Claude runs. Phase 3, moving claude-dashboard's open team-hq
-   tickets, waits for the user.
+2. H-001 (2026-10-30), all three phases merged: the private product repo `chrisfaber95/product` with the designer
+   (product PR #1), the tab Briefs with Build, planner, brief reviewer and handoff (`docs/briefs.md`, PR #39;
+   `21-inbox.sh` ran on 2026-10-30), and claude-dashboard's two open team-hq tickets (T-103 became brief H-002,
+   `needs-design`; T-045 is in `CHECKLIST.md`, PR #40). Tested end to end with fakes, not yet with real Claude
+   runs: the first real build is the next step (`CHECKLIST.md`).
 
 Still for the user to test (also in `CHECKLIST.md`):
 - F-016: SSH from another network; lid closed.

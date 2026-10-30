@@ -4,12 +4,15 @@ From an idea to merged PRs without writing tickets or prompts yourself. The brie
 `homelab/briefs/H-001-designer-and-product-repo.md` in the private repo `chrisfaber95/product`.
 
 ```
-you ──interview──> designer (~/dev/product) ──PR──> product repo ──you merge = approved
-                                                         │
-homelab page, tab Briefs: Build ──> planner (no tools) ──┘ splits the brief into 1..PLAN_MAX_TASKS inbox tasks
+you ──interview──> designer (~/dev/product) ──PR, merged by the designer──> product repo: status draft
+                                                                                   │
+homelab page, tab Briefs: read it, Approve & build (or ... without me) ──> status approved
+                                                                                   │
+                                     planner (no tools) <──────────────────────────┘ splits the brief into 1..PLAN_MAX_TASKS inbox tasks
                                        │
                inbox task per repo ──> PR ──> brief reviewer ──miss──> one automatic rework round ──> PR updated
                                                     └── pass (or after the rework) ──> notification to you
+                                                    └── build without me: all criteria met + CI green ──> the inbox merges
                all tasks merged ──> PR in the product repo: status handed-off, PRs on the roadmap
 ```
 
@@ -18,14 +21,22 @@ homelab page, tab Briefs: Build ──> planner (no tools) ──┘ splits the 
 On the box, as `claude`: `cd ~/dev/product && claude`. The repo's `CLAUDE.md` and `.claude/` make that session the
 designer: it reads the project's vision, roadmap and briefs and the second brain, asks two or three multiple-choice
 rounds, and writes a brief with testable acceptance criteria. For questions about the code it asks the `feasibility`
-subagent, which answers from the code map. Approve, and it opens a PR `brief/H-NNN`; **merging that PR approves the
-brief**. Projects: `homelab`, `claude-dashboard`, `visual-shopping` (one folder each). New ids are `H-NNN`; `F-NNN`
+subagent, which answers from the code map. When you're done, it opens a PR `brief/H-NNN` with `status: draft` and
+merges it itself (since 2026-10-30). **Approving happens on the page** (section 2), not by merging. Projects: `homelab`, `claude-dashboard`, `visual-shopping` (one folder each). New ids are `H-NNN`; `F-NNN`
 came from team-hq and keep their ids.
 
 ## 2. Build
 
-Tab **Briefs** on the homelab page (`/briefs`) lists the approved briefs on `main` of `PRODUCT_REPO`. **Build** starts
-a build: a task with the pseudo-repo `brief`. Nothing starts without that button.
+Tab **Briefs** on the homelab page (`/briefs`) lists the briefs on `main` of `PRODUCT_REPO`: **To approve** (`draft`),
+**Approved**, and **Needs design** (no buttons; that needs another designer session). Click an id to read the brief.
+
+- **Approve & build** on a draft commits `status: approved` to the brief on `main` (the commit says it was approved on
+  the page, by which device) and starts a build: a task with the pseudo-repo `brief`. On an approved brief the
+  button is just **Build**.
+- **Approve & build without me** does the same, as a build without you (below).
+- **Park** commits `status: parked`; the brief leaves the page.
+
+Nothing starts without one of those buttons.
 
 - The **planner** is Claude without tools (the same route as the router of "auto"). It gets the brief and the
   profiles of the brief's `repos` (only those in `config/repos.conf` plus `homelab`) and returns up to
@@ -47,6 +58,21 @@ diff (up to `REVIEW_MAX_DIFF` characters) and comments on the PR with ✅/❌/�
   page. Your own PR comments send the task back as always; the reviewer checks every new push again but sends it back
   automatically only once.
 - The reviewer's comments carry `<!-- homelab-inbox review -->` and never trigger a round themselves.
+
+## Build without me
+
+A build started with **… without me** carries that mode; its page says so and has **Stop: I merge the rest myself**,
+which turns it into a normal build from then on.
+
+- The inbox merges a task PR itself (`merge`, as its own token) when the last brief review found **every** criterion
+  met (✅; a ❔ counts as not met) and CI on the PR's head commit is green, or the repo has no CI. CI that hasn't
+  finished after 30 minutes counts as failed. Your own PR comments still send the task back first.
+- Merged: a notification with the PR, so you can revert. A task with `after` then starts by itself.
+- **Still waits for you**, with the usual notification: a task on **homelab** (a merge there runs root scripts), a
+  missed or unclear criterion after the automatic rework round, red CI, a merge GitHub refuses (conflict). The other
+  tasks of the build carry on.
+- When all tasks are merged, the inbox merges the **handoff** PR too, unless the build has criteria only you can
+  check ("Needs you"): then that PR waits for you.
 
 ## 4. Handoff
 

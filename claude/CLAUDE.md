@@ -45,5 +45,6 @@ repos in `config/repos.conf` of homelab except homelab itself: `claude-dashboard
 - Merge with `gh pr merge <n> --merge --delete-branch`; still never push to `main` (the pre-push hook stays).
 - Afterwards, check `homelab-deploy status`: the new commit is running. If the deploy failed or the app broke, open
   and merge a revert PR right away, and say so in your answer.
-- Not on `homelab` (a merge there runs scripts as root: Chris merges), not on `product` (briefs are Chris's
-  decisions), not on the data repo (jobs, memory), and not on any repo outside that list.
+- Not on `homelab` (a merge there runs scripts as root: Chris merges), not on the data repo (jobs, memory), and not
+  on any repo outside that list. In `product`, only a designer's own brief PR (`brief/H-NNN`) with `status: draft`:
+  Chris approves briefs on the Briefs tab of the homelab page, never by a merge.

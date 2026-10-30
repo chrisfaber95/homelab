@@ -50,7 +50,7 @@ wijzigingen. Stijl en script: `web/app.css` en `web/app.js`.
 
 ## Beheer
 
-Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`, `web/` of de config:
+Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`, `bin/homelab_inbox/`, `web/` of de config:
 `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`. Logs van taken en runs staan in
 `/var/lib/homelab-inbox/logs/` (één bestand per taak of run). Testen zonder root: zie de docstring van
-`bin/homelab-inbox`, plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
+`bin/homelab-inbox` (de HTML staat in `bin/homelab_inbox/pages.py`, de gegevens in `overview.py`, de HTTP-handler in `server.py`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.

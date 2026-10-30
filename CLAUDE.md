@@ -64,12 +64,18 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-018 projects and deploy | `bin/homelab-deploy`, `deploy/`, `scripts/18-projects.sh` | `config/repos.conf`, `config/deploy.conf` | `docs/projects.md` |
 | F-019 root changes, ntfy | `bin/homelab-admin`, `changes/`, `scripts/19-admin.sh` | `config/machine.conf`, `config/admin.conf` | `docs/admin.md` |
 | F-020 monitor, overview, backups | `bin/homelab-monitor`, `bin/homelab-backup`, `scripts/20-monitor.sh` | `config/backup.conf`, `config/backup.list` | `docs/monitor.md` |
-| F-021 task inbox (port 8105) | `bin/homelab-inbox`, `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
-| F-022 jobs and skills | `bin/homelab-inbox` | `config/inbox.conf` | `docs/jobs.md` |
-| F-023 memory | `bin/homelab-inbox` | `config/inbox.conf` | `docs/memory.md` |
-| F-024 homelab page | `bin/homelab-inbox`, `web/` | | `docs/dashboard.md` |
-| H-001 briefs: build, review, handoff | `bin/homelab-inbox` | `config/inbox.conf` | `docs/briefs.md` |
+| F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
+| F-022 jobs and skills | `bin/homelab_inbox/jobs.py` | `config/inbox.conf` | `docs/jobs.md` |
+| F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
+| F-024 homelab page | `bin/homelab_inbox/{overview,pages,server}.py`, `web/` | | `docs/dashboard.md` |
+| H-001 briefs: build, review, handoff | `bin/homelab_inbox/briefs.py` | `config/inbox.conf` | `docs/briefs.md` |
 | Claude's skills, agents, plugins, global CLAUDE.md | `scripts/18-claude.sh`, `claude/agents/`, `claude/CLAUDE.md` | `config/claude.conf` | `STATUS.md` |
+
+`bin/homelab-inbox` only parses the command line and imports the modules in `bin/homelab_inbox/` (installed next to it
+by `scripts/21-inbox.sh`). Layers, each importing only from the ones above it: `config` (settings, shared state),
+`storage` (SQLite), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
+round), `router`, `briefs` (H-001), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
+`overview` (page data), `pages` (HTML), `server` (HTTP handler, serve). No import cycles: keep it that way.
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`
 (8104 redirects there); ntfy on port 8102 (topic `homelab`); claude-dashboard on `https://homelab:8101`.

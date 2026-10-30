@@ -93,10 +93,14 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now homelab-monitor.timer homelab-backup.timer homelab-overview-web.service
+systemctl enable --now homelab-monitor.timer homelab-backup.timer
+# One start per run (enable --now plus restart was two): systemd blocks a unit after 5 starts in 10 s.
+systemctl enable homelab-overview-web.service
 systemctl restart homelab-overview-web.service
 # Bijgewerkte programma's laden.
-systemctl restart homelab-deploy.service homelab-admin.service
+systemctl restart homelab-deploy.service
+# Run by homelab-admin itself (HOMELAB_RERUN): it restarts on its own once the script is done and recorded.
+[[ -n ${HOMELAB_RERUN:-} ]] || systemctl restart homelab-admin.service
 
 echo "== Eerste backup en eerste check"
 systemctl start homelab-backup.service

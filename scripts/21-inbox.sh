@@ -158,7 +158,9 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable homelab-inbox
-systemctl restart homelab-inbox homelab-admin
+systemctl restart homelab-inbox
+# Run by homelab-admin itself (HOMELAB_RERUN): it restarts on its own once the script is done and recorded.
+[[ -n ${HOMELAB_RERUN:-} ]] || systemctl restart homelab-admin
 
 echo "== Controle"
 systemctl is-active homelab-inbox

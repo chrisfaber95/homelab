@@ -79,7 +79,10 @@ first time `homelab-admin` sees a script, it only remembers its state and assume
 `homelab-admin changes` (kind `script`); `homelab-admin status` lists failed scripts.
 
 Adding a script: give it the header line and list every repo path it copies. A forgotten path means a merge of that
-file doesn't reach the box.
+file doesn't reach the box. `homelab-admin` runs scripts with `HOMELAB_RERUN=1`, so a script must never restart
+`homelab-admin` when that is set: the restart would kill the run. `homelab-admin` restarts itself once the run has been
+recorded, if the script replaced its program file. A run that stops anyway counts as failed ("interrupted") and isn't
+retried in a loop.
 
 **Review accordingly:** after a merge, changes to `bin/`, `web/`, `deploy/`, `claude/` and `config/` are live within
 a minute, just like `changes/`.

@@ -27,7 +27,7 @@ git add -- "$note"  # tracked, so the ingest can git mv it
 
 allowed=(
   Read Glob Grep
-  "Edit(//srv/obsidian/second-brain/**)" "Write(//srv/obsidian/second-brain/**)"
+  "Edit(//srv/obsidian/second-brain/**)"  # Edit rules cover every file-editing tool, Write included
   "Bash(git mv raw/inbox/*)" "Bash(git status:*)" "Bash(git log:*)" "Bash(ls:*)"
 )
 timeout 15m "${CLAUDE_BIN:-$HOME/.local/bin/claude}" -p \

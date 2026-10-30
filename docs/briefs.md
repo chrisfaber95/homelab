@@ -65,8 +65,11 @@ A build started with **… without me** carries that mode; its page says so and 
 which turns it into a normal build from then on.
 
 - The inbox merges a task PR itself (`merge`, as its own token) when the last brief review found **every** criterion
-  met (✅; a ❔ counts as not met) and CI on the PR's head commit is green, or the repo has no CI. CI that hasn't
-  finished after 30 minutes counts as failed. Your own PR comments still send the task back first.
+  met and CI on the PR's head commit is green, or the repo has no CI. CI that hasn't finished after 30 minutes counts
+  as failed. Your own PR comments still send the task back first.
+- Verdicts: ✅ met, ❌ missed, 🧪 only running it shows (tests, lint, typecheck, build pass): CI decides, so the PR
+  waits for you if the repo has no CI; ❔ can't be judged from the diff (behaviour on the box, in a browser): counts
+  as not met, the notification names it.
 - Merged: a notification with the PR, so you can revert. A task with `after` then starts by itself.
 - **Still waits for you**, with the usual notification: a task on **homelab** (a merge there runs root scripts), a
   missed or unclear criterion after the automatic rework round, red CI, a merge GitHub refuses (conflict). The other

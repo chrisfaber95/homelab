@@ -316,6 +316,14 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] The next PR that changes `bin/homelab-admin`: no "Run 19-admin.sh yourself" notification any more (#45).
   - [ ] Claude merges one of its own product PRs (e.g. claude-dashboard) and `homelab-deploy status` shows the new
         commit.
+- [ ] Briefs: approve on the page and build without me (`docs/briefs.md`). After the merge (`21-inbox.sh` runs by
+      itself) and the merge of the product repo PR (designer merges drafts itself):
+  - [ ] Design a small brief in `~/dev/product`: the designer merges it as `draft`; it appears under **To approve**.
+  - [ ] **Park** a test draft: `status: parked` on main of the product repo, gone from the page.
+  - [ ] **Approve & build without me** on a brief for one product repo: a commit "approved on the homelab page by
+        ..." on main, the build page shows **Build without me** with the Stop button.
+  - [ ] A task PR with all ✅ and green CI is merged by the inbox, with a notification; the handoff PR is merged too.
+  - [ ] A task PR with a ❌ after the rework round gets the usual notification "... waits for you" and stays open.
 - [ ] claude-dashboard: approve and deny permission prompts from the dashboard (F-005; was team-hq T-045, moved
       2026-10-30). Use a phone or tablet that is paired with `https://homelab:8101` (`docs/projects.md`); the box itself
       counts as "this PC" and is refused. A scratch project in `~/dev` of `claude`, harmless command only. Until all

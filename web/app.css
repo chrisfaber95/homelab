@@ -269,3 +269,7 @@ dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .error { color: var(--crit); font-weight: 600; }
+
+/* Briefs: a row of buttons (Approve & build, without me, Park). */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.actions form { margin: 0; }

@@ -304,13 +304,16 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] After the last merge a `handoff/<id>` PR in the product repo sets `status: handed-off`.
 - [ ] Install scripts run themselves after a merge (`docs/admin.md`, "Install scripts after a merge"). After the
       merge, in this order:
-  - [ ] `sudo bash /var/lib/homelab/repo/scripts/19-admin.sh` (the new `homelab-admin`; it remembers every script
-        as already run).
-  - [ ] Claude runs `bash /var/lib/homelab/repo/scripts/18-claude.sh` once (no sudo), so the new
-        `~/.claude/CLAUDE.md` with "Merging product PRs" is installed.
-  - [ ] A small PR that only changes a comment in `config/health.conf`: within a minute of the merge a notification
-        "13-health-check.sh ran", and `homelab-admin changes` shows `script  script-13-health-check`.
-  - [ ] A PR that changes `bin/homelab-admin`: a notification "Run 19-admin.sh yourself"; nothing runs.
+  - [x] `sudo bash /var/lib/homelab/repo/scripts/19-admin.sh` (the new `homelab-admin`; it remembers every script
+        as already run). Done 2026-10-30.
+  - [x] Claude runs `bash /var/lib/homelab/repo/scripts/18-claude.sh` once (no sudo), so the new
+        `~/.claude/CLAUDE.md` with "Merging product PRs" is installed. Done 2026-10-30.
+  - [x] A small PR that only changes a comment in `config/health.conf`: within a minute of the merge a notification
+        "13-health-check.sh ran", and `homelab-admin changes` shows `script  script-13-health-check`. PR #43: ran
+        3 s after the merge. `20-monitor.sh` (also watches the file) then killed `homelab-admin` mid-run; fixed in #44.
+  - [x] A PR that changes `bin/homelab-admin` (#44): `20-monitor.sh` and `21-inbox.sh` ran and `homelab-admin`
+        restarted itself with the new version; the overview page stayed up.
+  - [ ] The next PR that changes `bin/homelab-admin`: no "Run 19-admin.sh yourself" notification any more (#45).
   - [ ] Claude merges one of its own product PRs (e.g. claude-dashboard) and `homelab-deploy status` shows the new
         commit.
 - [ ] claude-dashboard: approve and deny permission prompts from the dashboard (F-005; was team-hq T-045, moved

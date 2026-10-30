@@ -48,3 +48,4 @@ repos in `config/repos.conf` of homelab except homelab itself: `claude-dashboard
 - Not on `homelab` (a merge there runs scripts as root: Chris merges), not on the data repo (jobs, memory), and not
   on any repo outside that list. In `product`, only a designer's own brief PR (`brief/H-NNN`) with `status: draft`:
   Chris approves briefs on the Briefs tab of the homelab page, never by a merge.
+  Never merge a designer's setup PR (`setup/H-NNN`) either: the inbox merges it when Chris approves the build.

@@ -104,6 +104,10 @@ STATUS_NL = {"queued": "in de rij", "running": "bezig", "waiting": "wacht op jou
              "routed": "doorgestuurd"}
 AUTO = "auto"  # pseudo-repo: een router verdeelt het bericht over de repo's (kindtaken)
 BRIEF = "brief"  # pseudo-repo (H-001): the planner splits an approved brief into child tasks
+# Repos of new projects (`build: {new_repo: owner/name}` in a brief), added when Chris approves that brief: name -> slug.
+NEW_REPOS = HOME / "new-repos.json"
+# What the designer's setup PR (branch setup/<brief id>) may change; the inbox merges it when the build starts.
+SETUP_PATHS = re.compile(r"(CLAUDE\.md|\.claude/kit\.md|\.claude/agents/[\w.-]+\.md|\.claude/skills/[\w.-]+/.+)")
 ACTIVE = ("queued", "running")
 
 SYSTEM_PROMPT = """Je werkt voor de homelab-inbox: de gebruiker heeft vanaf zijn telefoon een taak gestuurd. Je zit in een
@@ -212,6 +216,8 @@ def repo_list():
                 repos[parts[0]] = parts[1]
     except OSError:
         pass
+    for name, slug in read_json(NEW_REPOS, {}).items():
+        repos.setdefault(name, slug)
     return repos
 
 
@@ -814,6 +820,7 @@ def load_briefs(max_age=60):
                 continue
             items.append({"id": bid, "title": str(meta.get("title") or f.stem), "status": str(meta.get("status") or ""),
                           "priority": str(meta.get("priority") or ""), "repos": [str(r) for r in as_list(meta.get("repos"))],
+                          "build": meta.get("build") if isinstance(meta.get("build"), dict) else {},
                           "project": f.parent.parent.name, "path": str(f.relative_to(d)), "text": text})
     _briefs_cache.update(at=time.monotonic(), items=items)
     return items
@@ -854,6 +861,47 @@ def set_brief_status(bid, status, why):
     _briefs_cache["at"] = 0.0
 
 
+def brief_new_repo(b):
+    """A new project's repo from the brief (`build: {new_repo: owner/name}`) as (name, slug), or None: only under the
+    owner's GitHub account, and only a name that the brief's `repos` lists."""
+    slug = str(b["build"].get("new_repo") or "")
+    m = re.fullmatch(r"([A-Za-z0-9-]+)/([a-z0-9][a-z0-9-]*)", slug)
+    if not m or m.group(1).lower() != CONF["OWNER_GITHUB"].lower() or m.group(2) not in b["repos"]:
+        return None
+    return m.group(2), slug
+
+
+def add_new_repo(b):
+    """Approving a brief for a new project adds its repo to the inbox's list (tasks, page, memory), like repos.conf."""
+    new = brief_new_repo(b)
+    if new and new[0] not in repo_list():
+        with _lock:
+            NEW_REPOS.write_text(json.dumps(read_json(NEW_REPOS, {}) | {new[0]: new[1]}, indent=1))
+        log(f"{b['id']}: new repo {new[1]} added to the inbox's list")
+
+
+def merge_setup_pr(bid, slug):
+    """Merge the designer's setup PR for this brief (branch setup/<bid>): the skills, agents and CLAUDE.md Chris chose
+    in the interview, so every task of the build has them. Approving the brief is the approval of this PR; a PR that
+    changes anything else, or comes from a fork, stops the build. No PR: nothing to do."""
+    owner = slug.split("/")[0]
+    for pr in as_records(gh("GET", f"/repos/{slug}/pulls?state=open&head={owner}:setup/{bid}")):
+        if ((pr.get("head") or {}).get("repo") or {}).get("full_name") != slug:
+            raise RuntimeError(f"setup PR #{pr.get('number')} in {slug} comes from another repo")
+        files = as_records(gh("GET", f"/repos/{slug}/pulls/{pr['number']}/files?per_page=100"))
+        bad = [f.get("filename", "?") for f in files if not SETUP_PATHS.fullmatch(f.get("filename", ""))]
+        if bad or len(files) >= 100:
+            raise RuntimeError(f"setup PR #{pr['number']} in {slug} changes more than CLAUDE.md and .claude/ "
+                               f"agents and skills: {', '.join(bad[:5]) or 'too many files'}")
+        gh("PUT", f"/repos/{slug}/pulls/{pr['number']}/merge",
+           {"merge_method": "merge", "commit_title": f"{bid}: build kit (merged when the build started)"})
+        log(f"{bid}: setup PR #{pr['number']} in {slug} merged")
+
+
+def as_records(value):
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
 def start_build(bid, unattended=False, who="the page"):
     """Build an approved brief; a draft is approved first (the button on the page is the approval)."""
     b = brief_by_id(bid, max_age=0)
@@ -867,6 +915,7 @@ def start_build(bid, unattended=False, who="the page"):
         raise ValueError(f"{bid} is not an approved brief on main of the product repo")
     if live_build(bid):
         raise ValueError(f"{bid} is already being built")
+    add_new_repo(b)
     with _lock, db() as c:
         return c.execute("INSERT INTO tasks (repo, text, status, created, session, brief, unattended) "
                          "VALUES (?,?,?,?,?,?,?)", (BRIEF, f"Build {bid}: {b['title']}", "queued", now(),
@@ -922,6 +971,9 @@ def plan_task(task_id):
         repos = {r: known[r] for r in b["repos"] if r in known}
         if not repos:
             raise RuntimeError(f"none of the brief's repos ({', '.join(b['repos']) or 'none'}) is in the inbox's list")
+        if not t["rounds"]:
+            for slug in repos.values():
+                merge_setup_pr(b["id"], slug)
         prompt = f"The brief ({b['path']} in the product repo):\n\n{b['text'][:20000]}"
         if t["rounds"] and t["pending_input"]:
             prompt += f"\n\nYou asked earlier: {t['question']}\n{t['pending_input']}"

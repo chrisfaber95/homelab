@@ -25,6 +25,15 @@ subagent, which answers from the code map. When you're done, it opens a PR `brie
 merges it itself (since 2026-10-30). **Approving happens on the page** (section 2), not by merging. Projects: `homelab`, `claude-dashboard`, `visual-shopping` (one folder each). New ids are `H-NNN`; `F-NNN`
 came from team-hq and keep their ids.
 
+**Build kit** (skills and agents for the build). Before the brief is written, the designer asks one more round: which
+skills and agents the build should have, from Chris's own marketplace (`chrisfaber95/claude-agent-skill-builder`),
+Anthropic's skills and plugins (`anthropics/skills`, `anthropics/claude-plugins-official`), and one or two skills it
+writes for this brief. For a new project it also asks the repo name and private or public. The choices go into the
+brief as a `build:` block (`new_repo`, `visibility`, `kit`). After merging the brief, its `build-setup` subagent
+creates a new repo if needed and opens a PR `setup/H-NNN` in each repo of the brief. That PR only adds `CLAUDE.md`,
+`.claude/kit.md`, `.claude/agents/*.md` and `.claude/skills/<name>/`, each copied from a source pinned to a commit.
+Nobody merges it by hand: the build does (section 2).
+
 ## 2. Build
 
 Tab **Briefs** on the homelab page (`/briefs`) lists the briefs on `main` of `PRODUCT_REPO`: **To approve** (`draft`),
@@ -35,6 +44,12 @@ Tab **Briefs** on the homelab page (`/briefs`) lists the briefs on `main` of `PR
   button is just **Build**.
 - **Approve & build without me** does the same, as a build without you (below).
 - **Park** commits `status: parked`; the brief leaves the page.
+
+When the build starts, the inbox first adds a new project's repo (`build.new_repo`, only under `OWNER_GITHUB`) to its
+own repo list (`new-repos.json` in its data folder, next to `config/repos.conf`). Then it merges each open setup PR
+(`setup/<id>`) of the brief's repos: approving the brief approves that PR. A setup PR that changes anything other than
+`CLAUDE.md` and `.claude/` agents, skills and `kit.md`, or that comes from a fork, stops the build with a notification.
+Deploying a new project on the box still takes a line in `config/repos.conf` (and a unit or compose file).
 
 Nothing starts without one of those buttons.
 

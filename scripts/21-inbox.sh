@@ -37,21 +37,67 @@ install -d -m 2750 -o inbox -g inbox-share "$TASK_HOME" "$TASK_HOME/out"
 install -d -m 700 -o inbox -g inbox "$TASK_HOME/work"
 
 echo "== claude-dashboard may list inbox sessions (read-only)"
-# The dashboard runs as claude and reads $TASK_HOME/.claude/sessions/*.json (CLAUDE_EXTRA_DIRS in
-# deploy/claude-dashboard.service). claude only gets to pass through $TASK_HOME and .claude and to read that one folder;
-# the default ACL covers new session files (tasks run with umask 027), not the 0600 .key files beside them.
+# The dashboard runs as claude and lists the live sessions in $SESSIONS_COPY/sessions (CLAUDE_EXTRA_DIRS in
+# deploy/claude-dashboard.service). An ACL on $TASK_HOME/.claude/sessions doesn't last: Claude Code chmods that folder
+# to 0700 on every start, which zeroes the ACL mask. So inbox copies the *.json files (never the .key files) into a
+# folder of group claude, on every change and once a minute. The copies are 0640 and new files take the group of the
+# setgid folder; rsync gets no -p, so it never touches the folder's own mode.
+SESSIONS_COPY=/var/lib/inbox-sessions
 dpkg -s acl >/dev/null 2>&1 || apt-get install -y -qq acl
 for d in "$TASK_HOME/.claude" "$TASK_HOME/.claude/sessions"; do
   [[ -d $d ]] || install -d -m 700 -o inbox -g inbox "$d"
 done
-# Passing through makes files that others may read reachable: take that away at the two levels claude can reach.
-find "$TASK_HOME" "$TASK_HOME/.claude" -mindepth 1 -maxdepth 1 ! -type l -perm /o=rwx -exec chmod o-rwx {} +
-setfacl -m u:claude:x "$TASK_HOME" "$TASK_HOME/.claude"
-setfacl -m u:claude:rx,d:u:claude:r "$TASK_HOME/.claude/sessions"
-find "$TASK_HOME/.claude/sessions" -maxdepth 1 -type f -name '*.json' -exec setfacl -m u:claude:r {} +
-runuser -u claude -- ls "$TASK_HOME/.claude/sessions" >/dev/null
-if runuser -u claude -- ls "$TASK_HOME" >/dev/null 2>&1; then
-  echo "claude can list $TASK_HOME: only passing through was meant." >&2
+install -d -m 2750 -o inbox -g claude "$SESSIONS_COPY" "$SESSIONS_COPY/sessions"
+# The ACLs of the first attempt (homelab#49): claude no longer needs to pass through $TASK_HOME.
+for p in "$TASK_HOME" "$TASK_HOME/.claude" "$TASK_HOME/.claude/sessions" "$TASK_HOME"/.claude/sessions/*.json; do
+  [[ -e $p ]] || continue
+  if getfacl -cp "$p" 2>/dev/null | grep -q '^user:claude:'; then setfacl -x u:claude "$p"; fi
+done
+setfacl -k "$TASK_HOME/.claude/sessions"
+cat > /etc/systemd/system/homelab-inbox-sessions.service <<EOF
+[Unit]
+Description=homelab: copy the inbox session files for claude-dashboard (read-only)
+
+[Service]
+Type=oneshot
+User=inbox
+Group=inbox
+UMask=0027
+ExecStart=/usr/bin/rsync -rt --delete --chmod=F640 --include=*.json --exclude=* $TASK_HOME/.claude/sessions/ $SESSIONS_COPY/sessions/
+EOF
+cat > /etc/systemd/system/homelab-inbox-sessions.path <<EOF
+[Unit]
+Description=homelab: copy the inbox session files when they change
+
+[Path]
+PathChanged=$TASK_HOME/.claude/sessions
+Unit=homelab-inbox-sessions.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+# A safety net for missed events: status changes of a long task still show within a minute.
+cat > /etc/systemd/system/homelab-inbox-sessions.timer <<EOF
+[Unit]
+Description=homelab: copy the inbox session files once a minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now homelab-inbox-sessions.path homelab-inbox-sessions.timer
+systemctl start homelab-inbox-sessions.service
+runuser -u claude -- ls "$SESSIONS_COPY/sessions" >/dev/null
+for f in "$SESSIONS_COPY"/sessions/*; do
+  [[ -e $f ]] || continue
+  runuser -u claude -- test -r "$f" || { echo "claude can't read $f." >&2; exit 1; }
+done
+if runuser -u claude -- ls "$TASK_HOME/.claude" >/dev/null 2>&1; then
+  echo "claude can still reach $TASK_HOME/.claude." >&2
   exit 1
 fi
 

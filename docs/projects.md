@@ -102,8 +102,10 @@ wijzigen). Hij ziet Claudes sessies op de box en kan Claude-sessies starten in `
 `https://homelab:8101` (het certificaat is zelfondertekend; je browser waarschuwt de eerste keer).
 
 It also lists the live sessions of inbox tasks (account `inbox`, project label `inbox`): read-only, without
-transcript or tokens. `scripts/21-inbox.sh` gives `claude` read access to `/var/lib/inbox/.claude/sessions` only (ACL),
-and `CLAUDE_EXTRA_DIRS` in `deploy/claude-dashboard.service` points the dashboard at it.
+transcript or tokens. `scripts/21-inbox.sh` installs `homelab-inbox-sessions.path` and `.timer`, which copy
+`/var/lib/inbox/.claude/sessions/*.json` (never the `.key` files) as `inbox` into `/var/lib/inbox-sessions/sessions`
+(group `claude`, on every change and once a minute), and `CLAUDE_EXTRA_DIRS` in `deploy/claude-dashboard.service`
+points the dashboard there. An ACL on the original folder doesn't work: Claude Code chmods it to 0700 on every start.
 
 **Een apparaat koppelen** kan alleen vanaf de box zelf (de vrijstelling "this PC": loopback). Vanaf Windows:
 

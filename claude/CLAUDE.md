@@ -14,8 +14,10 @@ project, concept and decision, each claim with its source. Start at its `index.m
 - It's synced nightly from each repo's main branch. When it disagrees with the repo you're in, the repo wins: say so
   in your answer so Chris can fix the wiki.
 - **Read-only from here.** Don't edit, add, move or commit anything in the vault from another session; only sessions
-  started inside the vault (its own skills and nightly job) change it. Found something worth keeping (a decision, a
-  lasting fact)? Mention it in your final answer, and Chris can add it with `/ingest`.
+  started inside the vault (its own skills and nightly job) change it. The one exception is the global `/ingest`
+  skill when Chris runs it: it writes one new note in `raw/inbox/` and `second-brain-ingest` has a vault session
+  process it. Found something worth keeping (a decision, a lasting fact)? Mention it in your final answer and offer
+  `/ingest`; don't run it unasked.
 - No secrets in there, and don't copy any from it into code, PRs or messages.
 
 ## Code map: code structure

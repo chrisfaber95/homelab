@@ -5,6 +5,7 @@
 # - De dienst homelab-admin (root): het directe pad voor Claude, changes/ uit main toepassen met vangnet, meldingen.
 # Opnieuw draaien na een wijziging aan bin/homelab-admin of config/admin.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/19-admin.sh   (de eerste keer: /home/claude/homelab/scripts/...)
+# homelab-rerun: manual bin/homelab-admin config/admin.conf config/deploy.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

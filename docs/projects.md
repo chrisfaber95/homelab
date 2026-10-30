@@ -29,9 +29,10 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping. Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
-- `service`: zet ook een unit `deploy/<naam>.service` in deze repo (zie `deploy/claude-dashboard.service`) en draai
-  `sudo bash /srv/homelab/repos/homelab/scripts/18-projects.sh`: een nieuwe systemd-unit heeft root nodig. Zonder unit
-  meldt de status `is niet geïnstalleerd`. Na het script probeert de box het binnen 30 minuten opnieuw.
+- `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
+  merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
+  scripts after a merge"). Until then the status says `is niet geïnstalleerd`; after the script the box retries
+  within 30 minutes.
 
 **Weghalen**: de regel eruit en mergen. De dienst stopt (`compose down`; de images gaan weg, volumes blijven; of de
 unit stopt) en de deploy-clone en releases worden verwijderd. De unit van een service haal je weg met `deploy/<naam>.service` eruit en
@@ -74,7 +75,8 @@ laatste deploy, met de foutmelding als die mislukte. Exit 1 als een sync of depl
 - **Jij**: VS Code → Remote-SSH → `homelab` → `~/dev/<repo>` (`git clone` met je eigen login). Node 24 staat
   systeembreed (`/usr/bin/node`).
 - **Claude**: werkt in `/home/claude/dev/<repo>`, met zijn eigen rootless Docker (`docker` werkt zonder sudo en
-  zonder de groep `docker`). Claude pusht naar branches en opent een PR; jij merget naar `main`, en dan deployt de box.
+  zonder de groep `docker`). Claude pushes branches and opens a PR. On the product repos Claude merges its own PRs
+  (rules in `claude/CLAUDE.md`); on homelab you merge. Then the box deploys.
   Een globale pre-push-hook weigert pushes van Claude naar `main` (GitHub kan dat voor privé-repo's zonder Pro niet
   afdwingen).
 

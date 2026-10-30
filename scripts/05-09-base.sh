@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # homelab: checklist stap 5 (SSH alleen met sleutel), 6 (firewall), 8 (swappiness) en 9 (klep, alleen laptop).
 # Draai als: sudo bash ~/setup/05-09-base.sh
+# homelab-rerun: manual
 set -euo pipefail
 
 LAN_SUBNET="192.168.1.0/24"

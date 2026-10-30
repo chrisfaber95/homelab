@@ -6,6 +6,7 @@
 # - Werkt homelab-health (nieuwe checks), homelab-deploy (compose-status) en homelab-admin (dagoverzicht) bij.
 # Opnieuw draaien na een wijziging aan een van die bin/-bestanden of config/backup.*.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/20-monitor.sh
+# homelab-rerun: root bin/homelab-health bin/homelab-deploy bin/homelab-admin bin/homelab-backup bin/homelab-monitor config/backup.conf config/backup.list config/health.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

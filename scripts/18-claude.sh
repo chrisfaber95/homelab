@@ -12,6 +12,7 @@
 # - graphify (config/claude.conf) in its own venv, for the Obsidian code map.
 # - claude/CLAUDE.md as ~/.claude/CLAUDE.md: instructions for every session of claude (second brain, code map).
 # Draai als claude: bash /home/claude/homelab/scripts/18-claude.sh
+# homelab-rerun: claude claude config/claude.conf
 set -euo pipefail
 
 if [[ $(id -un) != claude ]]; then

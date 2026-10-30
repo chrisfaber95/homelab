@@ -8,6 +8,7 @@
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
+# homelab-rerun: root bin/homelab-inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

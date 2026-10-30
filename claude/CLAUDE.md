@@ -30,3 +30,20 @@ files:
   visualshopping-server, werknemers-portfolio; all repos at once: `~/.local/share/code-map/merged/graphify-out/graph.json`).
 
 It reflects main, not your working branch: check the actual files before changing code.
+
+## Merging product PRs
+
+Chris's choice (2026-10-30): on the product repos Claude merges its own PRs, without waiting for Chris. These are the
+repos in `config/repos.conf` of homelab except homelab itself: `claude-dashboard`, `Visualshopping-Server-portfolio`,
+`Client-portfolio`, `Werknemers-portfolio`. The box deploys `main` within a minute (`homelab-deploy`).
+
+- Only a PR you opened yourself, from a branch you pushed. `gh` is logged in as Chris, so the PR author tells you
+  nothing: never merge a PR from someone else, from a fork or from the inbox (`inbox/<id>` branches) this way.
+- Before merging: the build and tests pass locally, `gh pr checks` is green (if the repo has CI), no secrets in the
+  diff (`gitleaks git . --log-opts=origin/main..HEAD`), and a repo's own merge rules (its `CLAUDE.md`, e.g.
+  `merge_mode: ask`) win.
+- Merge with `gh pr merge <n> --merge --delete-branch`; still never push to `main` (the pre-push hook stays).
+- Afterwards, check `homelab-deploy status`: the new commit is running. If the deploy failed or the app broke, open
+  and merge a revert PR right away, and say so in your answer.
+- Not on `homelab` (a merge there runs scripts as root: Chris merges), not on `product` (briefs are Chris's
+  decisions), not on the data repo (jobs, memory), and not on any repo outside that list.

@@ -23,8 +23,11 @@ part load automatically from `.claude/rules/` when you work on that part.
   - Everything else: `changes/<NNNN-name>/apply.sh` (first comment line = summary; optionally `revert.sh`) in a PR.
     After the merge the box runs it, with a safety net for firewall and network. Run the `change-reviewer` agent
     before opening a PR with a change.
-  - Installing or rebuilding a component: a script in `scripts/` that the user (`chris`) runs.
-  Write scripts idempotent, with `set -euo pipefail`, and let them check for themselves that they worked.
+  - Installing or rebuilding a component: a script in `scripts/`. Its `# homelab-rerun: <root|claude|manual>
+    <path>...` line lists every repo path it installs. After a merge that changes one of them, `homelab-admin` runs
+    it again (`docs/admin.md`). A new script needs that line too, or the user has to run it by hand.
+  Write scripts idempotent, with `set -euo pipefail`, without prompts on a re-run, and let them check for themselves
+  that they worked.
 - Everything on the box must be rebuildable from this repo: every change is in `CHECKLIST.md`, in a script, in
   `changes/` or in `config/machine.conf`. A change you don't record no longer exists after a rebuild.
 - Nothing reachable from the internet. From the LAN only SSH; services only via Tailscale.
@@ -35,9 +38,11 @@ part load automatically from `.claude/rules/` when you work on that part.
   (`changes/0001`).
 - Laptop phase: expect GTX 1050 / 2048 MiB; after the move GTX 1080 / 8192 MiB. Keep that in one setting
   (`EXPECTED_GPU` in `config/health.conf`), not in code.
-- Never push to `main` (of any repo): work on a branch, push it and open a PR; the user merges. A global pre-push hook
-  in `~/.config/git/hooks` blocks it; don't disable it. Don't run `gh pr merge`. This is an agreement (the user's
-  choice), not a technical boundary: stick to it. A merge to `main` of homelab means root actions on the box.
+- Never push to `main` (of any repo): work on a branch, push it and open a PR. A global pre-push hook in
+  `~/.config/git/hooks` blocks it; don't disable it. On **this repo** the user merges: don't run `gh pr merge` here.
+  A merge to `main` of homelab means root actions on the box (changes and install scripts). This is an agreement
+  (the user's choice), not a technical boundary: stick to it. Product repos are different: Claude merges its own PRs
+  there (`claude/CLAUDE.md`, "Merging product PRs").
 - Have the user run root scripts from root's clone, `/var/lib/homelab/repo/scripts/` (merged `main`, only root can
   change it). Not from the deploy clone in `/srv/homelab` (owned by `deploy`, which runs projects' npm code) and not
   from your own working copy. `/home/claude` is 750, so give the user scripts with their full path.

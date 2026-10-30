@@ -46,6 +46,44 @@ netplan, DNS, Tailscale-instellingen, pakketten verwijderen.
    (`/var/lib/homelab/repo`, alleen root kan die wijzigen) en voert hij `apply.sh` uit.
 4. Elke wijziging wordt één keer uitgevoerd. Een mislukte wijziging gaat pas opnieuw als `apply.sh` verandert.
 
+## Install scripts after a merge
+
+A merge that changes an install script, or a file it installs, is also the approval to run that script again. Each
+script in `scripts/` names its account and inputs in a header line:
+
+```
+# homelab-rerun: root bin/homelab-inbox bin/homelab-inbox-task ... web config/inbox.conf ...
+```
+
+- **`root`** or **`claude`**: once the new main is in root's clone, `homelab-admin` runs the script as that account
+  (root with `SUDO_USER=chris`; `claude` via `runuser` with its user session). It's the same flow as a change: a
+  snapshot first, the [safety net](#vangnet) if the firewall, network or SSH changed, then `homelab-health` and a
+  notification ("ran", "mislukt" or "Bevestig"). A failed script only runs again when its inputs change again.
+- **`manual`**: only a notification with the command to run yourself. These scripts are `05-09-base.sh` (SSH and
+  firewall), `19-admin.sh` (it restarts `homelab-admin` itself) and `22-claude-chris.sh`.
+- No header line: never run automatically.
+
+| Script | Runs as | Inputs (besides the script) |
+| --- | --- | --- |
+| `13-health-check.sh` | root | `bin/homelab-health`, `config/health.conf` |
+| `17-llm.sh` | root | `bin/llm`, `llm/`, `config/llm.conf` |
+| `18-projects.sh` | root | `bin/homelab-deploy`, `config/deploy.conf`, `deploy/` (new or changed units) |
+| `18-claude.sh` | claude | `claude/`, `config/claude.conf` |
+| `20-monitor.sh` | root | the `bin/` and `config/` files it installs |
+| `21-inbox.sh` | root | the `bin/`, `web/` and `config/` files it installs |
+| `05-09-base.sh`, `19-admin.sh`, `22-claude-chris.sh` | manual | |
+
+Scripts run one at a time, in name order, never while a confirmation is open. Prompts for a missing token or password
+can't be answered (there is no terminal), so that run fails with a notification: run the script yourself once. The
+first time `homelab-admin` sees a script, it only remembers its state and assumes you ran it. Results:
+`homelab-admin changes` (kind `script`); `homelab-admin status` lists failed scripts.
+
+Adding a script: give it the header line and list every repo path it copies. A forgotten path means a merge of that
+file doesn't reach the box.
+
+**Review accordingly:** after a merge, changes to `bin/`, `web/`, `deploy/`, `claude/` and `config/` are live within
+a minute, just like `changes/`.
+
 ## Vangnet
 
 Vóór elke goedgekeurde wijziging bewaart de box `/etc/ufw`, `/etc/netplan`, `/etc/ssh`, `/etc/systemd/resolved.conf(.d)`
@@ -131,3 +169,7 @@ De brief vraagt dat Claude niet naar `main` kan pushen of mergen. Claudes GitHub
 `repo`; zonder GitHub Pro kan een privé-repo `main` niet afschermen). Jouw keuze (2026-10-25): het blijft een
 afspraak (CLAUDE.md) plus de pre-push-hook. Een merge naar `main` van homelab betekent root-acties op de box; let bij
 het reviewen dus op `changes/` en `scripts/`.
+
+Since 2026-10-30 (your choice): Claude merges its own PRs on the product repos itself (the repos in
+`config/repos.conf` except homelab; rules in `claude/CLAUDE.md`). homelab itself stays merge-by-you: a homelab merge
+runs scripts as root.

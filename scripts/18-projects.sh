@@ -8,6 +8,7 @@
 # - Linger voor claude, zodat Claude zijn eigen rootless Docker kan draaien (daarna: bash scripts/18-claude.sh als claude).
 # Opnieuw draaien na een wijziging aan bin/homelab-deploy, config/deploy.conf of deploy/*.service.
 # Draai als: sudo bash <homelab-repo>/scripts/18-projects.sh
+# homelab-rerun: root bin/homelab-deploy config/deploy.conf deploy
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

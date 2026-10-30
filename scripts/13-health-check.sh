@@ -3,6 +3,7 @@
 # Kopieert bin/homelab-health en config/health.conf uit deze repo naar /usr/local/lib/homelab.
 # Opnieuw draaien na elke wijziging aan een van die twee (bijvoorbeeld EXPECTED_GPU na de verhuizing).
 # Draai als: sudo bash /home/claude/homelab/scripts/13-health-check.sh
+# homelab-rerun: root bin/homelab-health config/health.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

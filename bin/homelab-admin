@@ -21,6 +21,9 @@ naar main voert de dienst apply.sh als root uit, vanuit zijn eigen clone. Verand
 SSH-configuratie, dan moet de gebruiker binnen CONFIRM_SECONDS bevestigen; anders zet de dienst alles terug.
 Elke wijziging komt in LOG_FILE, daarna draait homelab-health; faalt die, dan volgt een pushmelding.
 
+Install scripts: a script in scripts/ with a `# homelab-rerun: <root|claude|manual> <path>...` line runs again (as
+that account, with the same safety net) when a merge changes it or one of those paths; `manual` only notifies.
+
 Instellingen: config/admin.conf en config/deploy.conf naast bin/. Voor tests overschrijfbaar met omgevingsvariabelen
 met dezelfde namen, plus HOMELAB_ADMIN_FAKE=1: dan worden root-commando's alleen gelogd, niet uitgevoerd, en komen
 SSH-sleutels in AUTH_KEYS_DIR (verplicht in de testmodus) in plaats van ~SSH_KEY_USER/.ssh.
@@ -454,13 +457,19 @@ def still_reachable():
 def apply_change(path, applied, pending):
     cid = path.name
     digest = file_hash(path / "apply.sh")
-    summary = change_summary(path)
+    ok = guarded(cid, "approved", change_summary(path), ["bash", str(path / "apply.sh")], pending, path)
+    applied[cid] = {"sha256": digest, "at": now(), "ok": ok}
+
+
+def guarded(cid, kind, summary, cmd, pending, revert_dir, env=None):
+    """Run cmd with the safety net: a snapshot, a restore on failure or when the box becomes unreachable, and a
+    confirmation request when the firewall, network or SSH changed. Records the result; returns ok."""
     snap = STATE / "snapshots" / cid
     snapshot(snap)
     say(f"{cid}: toepassen ({summary})")
-    code, out = run(["bash", str(path / "apply.sh")], timeout=1800, check=False, always=True)
+    code, out = run(cmd, timeout=1800, env=env, check=False, always=True)
     network = bool(changed_paths(snap))
-    entry = {"kind": "approved", "change": cid, "summary": summary, "ok": code == 0, "network": network,
+    entry = {"kind": kind, "change": cid, "summary": summary, "ok": code == 0, "network": network,
              "result": " | ".join(out.splitlines()[-5:])}
     if code != 0:
         errors = restore(snap, None) if network else []
@@ -469,7 +478,7 @@ def apply_change(path, applied, pending):
     elif network:
         ok, why = still_reachable()
         if not ok:
-            errors = restore(snap, path)
+            errors = restore(snap, revert_dir)
             entry.update(ok=False, result=f"teruggedraaid: {why}" + (f" ({'; '.join(errors)})" if errors else ""))
             notify(f"Wijziging {cid} teruggedraaid", f"{summary}\n{why}. De vorige configuratie staat terug.",
                    priority=5)
@@ -488,7 +497,7 @@ def apply_change(path, applied, pending):
     h_ok, failing = health()
     entry.update(health_ok=h_ok, health_failing=failing)
     record(**entry)
-    applied[cid] = {"sha256": digest, "at": now(), "ok": entry["ok"]}
+    return entry["ok"]
 
 
 def finish_pending(pending, cid, confirmed_by=None):
@@ -539,6 +548,90 @@ def reconcile_machine():
             record(kind="machine", ok=ok, result="; ".join(results))
     if ok:
         save_state("machine", {"sha256": digest, "at": now()})
+
+
+# --- Install scripts (scripts/ in the repo): run again after a merge
+
+# Header line in a script: `# homelab-rerun: <root|claude|manual> <path>...`, the repo paths it installs (the script
+# itself always counts). A merge that changes one of them is the approval to run it again, as that account. `manual`:
+# only a notification that the user has to run it. Scripts without the line are never touched.
+RERUN_RE = re.compile(r"^# homelab-rerun: (root|claude|manual)((?: \S+)*)\s*$")
+RUN_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def rerun_spec(script):
+    for line in script.read_text().splitlines()[1:20]:
+        m = RERUN_RE.match(line)
+        if m:
+            return m.group(1), m.group(2).split()
+    return None
+
+
+def tree_hash(paths):
+    h = hashlib.sha256()
+    for p in paths:
+        files = sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]
+        for f in files:
+            if "__pycache__" in f.parts:
+                continue
+            h.update(str(f.relative_to(REPO)).encode() + b"\0")
+            h.update(f.read_bytes() if f.is_file() else b"(missing)")
+            h.update(b"\0")
+    return h.hexdigest()
+
+
+def script_command(script, account):
+    if account == "root":
+        # SUDO_USER as if the user ran it with sudo: the scripts check things as that user at the end.
+        return ["bash", str(script)], {"PATH": RUN_PATH, "HOME": "/root", "SUDO_USER": CONF["SSH_KEY_USER"]}
+    pw = pwd.getpwnam(account)
+    run_dir = f"/run/user/{pw.pw_uid}"
+    return ["runuser", "-u", account, "--", "env", f"HOME={pw.pw_dir}", f"USER={account}", f"LOGNAME={account}",
+            f"PATH={pw.pw_dir}/.local/bin:{RUN_PATH}", f"XDG_RUNTIME_DIR={run_dir}",
+            f"DBUS_SESSION_BUS_ADDRESS=unix:path={run_dir}/bus", "bash", str(script)], {"PATH": RUN_PATH}
+
+
+def rerun_scripts(pending):
+    """Run every script with a homelab-rerun line whose files changed on main, one at a time, with the safety net.
+    The first time the service sees a script it only remembers its hash: it assumes the user ran it."""
+    if pending:
+        return  # a confirmation is open: nothing new until it is settled
+    seen = state("scripts", {})
+    for script in sorted((REPO / "scripts").glob("[0-9]*.sh")):
+        spec = rerun_spec(script)
+        if not spec:
+            continue
+        account, watched = spec
+        paths = [script] + [REPO / w for w in watched]
+        if any(not p.resolve().is_relative_to(REPO.resolve()) for p in paths):
+            say(f"{script.name}: homelab-rerun points outside the repo; skipped")
+            continue
+        digest, prev = tree_hash(paths), seen.get(script.name)
+        if prev and prev["sha256"] == digest:
+            continue
+        entry = {"sha256": digest, "at": now(), "ok": True}
+        if prev is None:
+            seen[script.name] = {**entry, "baseline": True}
+        elif account == "manual":
+            how = f"sudo bash {script}"
+            record(kind="script", change=script.name, summary="needs a manual run", ok=True, result=how)
+            notify(f"Run {script.name} yourself", f"A merge changed {script.name} or what it installs; this script "
+                   f"is not run automatically.\n{how}", priority=3)
+            seen[script.name] = {**entry, "manual": True}
+        else:
+            cid = f"script-{script.stem}"
+            cmd, env = script_command(script, account)
+            with _lock:
+                ok = guarded(cid, "script", f"{script.name} again after a merge (as {account})", cmd, pending,
+                             None, env)
+                save_state("pending", pending)
+            if ok and cid not in pending:
+                notify(f"{script.name} ran", "After a merge, as " + account + ". Health check: see homelab-admin "
+                       "changes.", priority=2)
+            seen[script.name] = {**entry, "ok": ok}
+        save_state("scripts", seen)
+        if pending:
+            break  # confirm this one first
 
 
 def github_get(path):
@@ -624,6 +717,8 @@ def apply_loop():
                     save_state("pending", pending)
                 if path.name in pending:
                     break  # eerst deze bevestigen, dan pas de volgende
+            if not pending:
+                rerun_scripts(pending)
             notify_new_prs()
             daily_summary()
         except Exception as e:
@@ -823,6 +918,9 @@ def status_text():
     for cid, item in state("applied", {}).items():
         if not item.get("ok"):
             lines.append(f"MISLUKT: {cid} op {item['at']} (zie homelab-admin changes)")
+    for name, item in state("scripts", {}).items():
+        if not item.get("ok"):
+            lines.append(f"MISLUKT: script {name} op {item['at']} (zie homelab-admin changes)")
     prs = state("prs", {})
     if prs.get("error"):
         lines.append(f"PR-meldingen werken niet: {prs['error']} (het token heeft 'Pull requests: Read-only' nodig)")
@@ -838,7 +936,7 @@ def changes_text(n):
         mark = "ok  " if e.get("ok") else "FOUT"
         if e["kind"] in ("instant", "refused"):
             what = f"{e.get('action')} {' '.join(e.get('args') or [])} — {e.get('reason') or ''} [{e.get('user', '?')}]"
-        elif e["kind"] in ("approved", "rollback", "confirmed", "sshkey"):
+        elif e["kind"] in ("approved", "rollback", "confirmed", "sshkey", "script"):
             what = f"{e['change']}: {e.get('summary', '')}"
         else:
             what = "machine.conf"

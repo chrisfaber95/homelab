@@ -2,6 +2,7 @@
 # homelab: Claude Code CLI voor de gebruiker chris (claude en inbox hebben een eigen installatie in hun ~/.local/bin).
 # Zet `claude` in de PATH van chris bij elke login (SSH, lokaal en niet-interactief via ~/.profile).
 # Draai als chris, zonder sudo: bash /var/lib/homelab/repo/scripts/22-claude-chris.sh
+# homelab-rerun: manual
 set -euo pipefail
 
 if [[ $(id -un) != chris ]]; then

@@ -302,6 +302,17 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         build, a task with `after` waits for its predecessor's merge.
   - [ ] Every task PR gets a brief-review comment; a ❌ sends it back once before the notification.
   - [ ] After the last merge a `handoff/<id>` PR in the product repo sets `status: handed-off`.
+- [ ] Install scripts run themselves after a merge (`docs/admin.md`, "Install scripts after a merge"). After the
+      merge, in this order:
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/19-admin.sh` (the new `homelab-admin`; it remembers every script
+        as already run).
+  - [ ] Claude runs `bash /var/lib/homelab/repo/scripts/18-claude.sh` once (no sudo), so the new
+        `~/.claude/CLAUDE.md` with "Merging product PRs" is installed.
+  - [ ] A small PR that only changes a comment in `config/health.conf`: within a minute of the merge a notification
+        "13-health-check.sh ran", and `homelab-admin changes` shows `script  script-13-health-check`.
+  - [ ] A PR that changes `bin/homelab-admin`: a notification "Run 19-admin.sh yourself"; nothing runs.
+  - [ ] Claude merges one of its own product PRs (e.g. claude-dashboard) and `homelab-deploy status` shows the new
+        commit.
 - [ ] claude-dashboard: approve and deny permission prompts from the dashboard (F-005; was team-hq T-045, moved
       2026-10-30). Use a phone or tablet that is paired with `https://homelab:8101` (`docs/projects.md`); the box itself
       counts as "this PC" and is refused. A scratch project in `~/dev` of `claude`, harmless command only. Until all

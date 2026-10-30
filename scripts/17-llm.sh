@@ -4,6 +4,7 @@
 # Niet via ollama.com/install.sh: dat installeert zelf cuda-drivers als het de GPU niet herkent.
 # Opnieuw draaien na elke wijziging aan llm/, bin/llm of config/llm.conf.
 # Draai als: sudo bash /home/claude/homelab/scripts/17-llm.sh
+# homelab-rerun: root bin/llm llm config/llm.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"

@@ -25,6 +25,8 @@ zin of alles in orde is, wat er nu draait en welke job hierna komt. De tabs **Ta
   - tijd bespaard: de `minutes` uit het job-bestand, voor elke gelukte run (ok of PR), per soort job. Een job zonder
     `minutes` telt niet mee. De waarde wordt bij het starten van een run vastgelegd.
   Het echte verbruik van je Claude-abonnement kan de box niet lezen; de pagina telt alleen de runs van de box zelf.
+- **Services**: the address of every service on the box (from `config/services.conf`: `name | address | what it is`;
+  http(s) addresses are links, SSH commands are shown as code) and how to start the designer (`docs/briefs.md`).
 - **Gezondheid** (alleen lezen, uit F-020): de checks die niet in orde zijn, alle checks onder "Alle checks", de
   deploys en de laatste backup.
 

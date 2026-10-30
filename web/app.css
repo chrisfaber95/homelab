@@ -108,11 +108,11 @@ code { font: 0.9em var(--font-mono); overflow-wrap: anywhere; color: var(--ink-2
 .grid { display: grid; gap: 18px; margin-top: 32px; }
 .grid > div { display: grid; gap: 18px; align-content: start; }
 @media (min-width: 980px) { .grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); } }
-/* Eén kolom: eerst wat nu speelt, dan de week en de gezondheid, de wijzigingen als laatste. */
+/* One column: first what is running now, then the week, health and the services, the changes last. */
 @media (max-width: 979px) {
   .grid > div { display: contents; }
   .sec-live { order: 1; } .sec-jobs { order: 2; } .sec-week { order: 3; } .sec-health { order: 4; }
-  .sec-changes { order: 5; }
+  .sec-services { order: 5; } .sec-changes { order: 6; }
 }
 .grid section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-panel);
   padding: 18px 20px 20px; min-width: 0; }

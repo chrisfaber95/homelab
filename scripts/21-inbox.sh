@@ -8,7 +8,7 @@
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
-# homelab-rerun: root bin/homelab-inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
+# homelab-rerun: root bin/homelab-inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/services.conf config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -112,7 +112,7 @@ install -d -m 755 "$DEST/bin" "$DEST/config"
 for f in homelab-inbox homelab-inbox-task homelab-admin homelab-health; do
   install -m 755 "$REPO/bin/$f" "$DEST/bin/$f"
 done
-for f in inbox.conf admin.conf deploy.conf llm.conf backup.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
+for f in inbox.conf services.conf admin.conf deploy.conf llm.conf backup.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
 # De pagina (F-024): stijl, script en lettertypen.
 install -d -m 755 "$DEST/web" "$DEST/web/fonts"
 install -m 644 "$REPO"/web/app.css "$REPO"/web/app.js "$DEST/web/"

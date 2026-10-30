@@ -147,7 +147,8 @@ def settle_routed():
         by_id = {k["id"]: k for k in kids}
         for k in kids:
             pre = by_id.get(k["after_task"])
-            if k["status"] == "queued" and pre and pre["status"] not in ACTIVE + ("waiting", "answered", "pr_open",
+            # A task with rounds was retried by the user (retry_task): leave it, or the next pass cancels it again.
+            if k["status"] == "queued" and not k["rounds"] and pre and pre["status"] not in ACTIVE + ("waiting", "answered", "pr_open",
                                                                                   "merged"):
                 update(k["id"], status="cancelled", ended=now(),
                        note=f"niet gestart: de voorgaande taak #{pre['id']} was {STATUS_NL[pre['status']]}")

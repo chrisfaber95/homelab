@@ -4,8 +4,8 @@ The old desktop (i7-4790K, 16 GB, GTX 1080 8 GB) as a headless Ubuntu box for a 
 For now it runs on the old laptop (7th gen i7, 24 GB, GTX 1050 Mobile 2 GB) while the desktop's PSU is broken; after
 that the SSD (250 GB) moves to the desktop.
 
-The why and what are in the briefs: `~/homelab-product/` (VISION, ROADMAP, briefs F-016 to F-024, research). That is a
-copy; the original lives in `team-hq` on the Windows PC and is updated there.
+The why and what are in the briefs: the private repo `chrisfaber95/product`, folder `homelab/` (VISION, ROADMAP, briefs
+F-016 to F-024 and H-NNN, research), cloned at `~/dev/product`. New features are designed there (`docs/briefs.md`).
 
 Current state, next work and things the user still has to test: `STATUS.md` (and `CHECKLIST.md`). Testing tips per
 part load automatically from `.claude/rules/` when you work on that part.
@@ -63,6 +63,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-022 jobs and skills | `bin/homelab-inbox` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab-inbox` | `config/inbox.conf` | `docs/memory.md` |
 | F-024 homelab page | `bin/homelab-inbox`, `web/` | | `docs/dashboard.md` |
+| H-001 briefs: build, review, handoff | `bin/homelab-inbox` | `config/inbox.conf` | `docs/briefs.md` |
 | Claude's skills, agents, plugins, global CLAUDE.md | `scripts/18-claude.sh`, `claude/agents/`, `claude/CLAUDE.md` | `config/claude.conf` | `STATUS.md` |
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`

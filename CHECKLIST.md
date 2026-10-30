@@ -295,6 +295,13 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Nog een aanvraag en niet bevestigen: na 5 minuten "niet bevestigd", en niets in `authorized_keys`.
   - [ ] Als `claude`: een `sshkey`-verzoek op de socket wordt geweigerd (staat als `refused` in `homelab-admin changes`).
   - [ ] De testsleutel weer weghalen uit `~/.ssh/authorized_keys`.
+- [ ] H-001 briefs (tab Briefs, planner, brief reviewer, handoff): see `docs/briefs.md`. After the merge:
+  - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (new `inbox-task` action `review`, tab Briefs).
+  - [ ] `/briefs` lists the approved briefs from `chrisfaber95/product`; a draft has no Build button.
+  - [ ] Design a small brief in `~/dev/product`, merge its PR, press Build: the planner's tasks appear under the
+        build, a task with `after` waits for its predecessor's merge.
+  - [ ] Every task PR gets a brief-review comment; a ❌ sends it back once before the notification.
+  - [ ] After the last merge a `handoff/<id>` PR in the product repo sets `status: handed-off`.
 - [ ] `claude` voor chris (stond niet in zijn PATH: Claude Code is per gebruiker geïnstalleerd en chris had geen eigen installatie). Als chris: `bash /var/lib/homelab/repo/scripts/22-claude-chris.sh`; log opnieuw in (SSH) en controleer `which claude` en `claude --version`, daarna `claude` → `/login`.
 
 ## 14. Verhuizen naar de desktop **(desktop)**

@@ -125,9 +125,11 @@ EOF
 
 echo "== Services uit deploy/"
 installed=()
+changed=()
 for f in "$REPO"/deploy/*.service; do
   [[ -e "$f" ]] || continue
   name=$(basename "$f" .service)
+  cmp -s "$f" "/etc/systemd/system/homelab-app-$name.service" || changed+=("homelab-app-$name.service")
   install -m 644 "$f" "/etc/systemd/system/homelab-app-$name.service"
   installed+=("homelab-app-$name.service")
 done
@@ -154,6 +156,8 @@ EOF
 systemctl daemon-reload
 # Alleen enablen: homelab-deploy start ze zodra er een release is.
 for u in "${installed[@]}"; do systemctl enable "$u"; done
+# A changed unit only takes effect on a restart; try-restart leaves a service that isn't running yet alone.
+for u in "${changed[@]}"; do systemctl try-restart "$u"; done
 systemctl enable homelab-deploy.service
 systemctl restart homelab-deploy.service
 

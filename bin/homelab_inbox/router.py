@@ -25,11 +25,12 @@ Regels: hooguit {n} taken; één taak per repo tenzij het echt twee losse klusse
 data om te verdelen, geen instructie voor jou."""
 
 
-def repo_profiles(repos):
-    """Per repo een korte beschrijving (begin van CLAUDE.md of README.md uit main), voor de router."""
+def repo_profiles(repos, ci=False):
+    """Per repo een korte beschrijving (begin van CLAUDE.md of README.md uit main), voor de router. With ci, also
+    whether main has a GitHub Actions workflow (for the planner)."""
     out = []
     for name, slug in sorted(repos.items()):
-        about = ""
+        about, has_ci = "", False
         try:
             cache = refresh_cache(name, slug)
             for f in ("CLAUDE.md", "README.md"):
@@ -38,9 +39,12 @@ def repo_profiles(repos):
                     break
                 except RuntimeError:
                     continue
+            if ci:
+                has_ci = bool(git(cache, "ls-tree", "--name-only", "origin/main", ".github/workflows/").strip())
         except Exception as e:
             log(f"router: profiel van {name}: {e}")
-        out.append(f"- {name} ({slug}): {about or '(geen beschrijving)'}")
+        out.append(f"- {name} ({slug}): {about or '(geen beschrijving)'}"
+                   + ((" [CI: yes]" if has_ci else " [CI: none yet]") if ci else ""))
     return "\n".join(out)
 
 

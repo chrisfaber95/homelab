@@ -58,6 +58,10 @@ Nothing starts without one of those buttons.
   `PLAN_MAX_TASKS` tasks, each with its own acceptance criteria and optionally `after`. Criteria only you can check
   (hardware, a browser check) are listed on the build as "Needs you". If the brief is unclear, it asks one question
   on the page, like any inbox task.
+- **CI first**: each repo's profile says whether its main has a GitHub Actions workflow. A repo without one (a new
+  project always) gets CI in its first task, usually the scaffold: a workflow that runs lint, typecheck, tests and
+  build on every pull request, with that as one of the task's criteria. The repo's other tasks come `after` it, so
+  their PRs are checked by CI and 🧪 criteria don't have to wait for you. That first task is reviewed like any other.
 - Each task is a normal inbox task: same queue, limits, auto mode and PR. It gets the full brief as context; its PR
   shows only the task and criteria (the product repo is private, the target repo may be public).
 - A task with `after` starts only when its predecessor's PR is **merged**, so it builds on that code. If the
@@ -66,7 +70,9 @@ Nothing starts without one of those buttons.
 ## 3. Review
 
 After every push of a brief task, the **brief reviewer** (Claude without tools) reads the task's criteria and the PR's
-diff (up to `REVIEW_MAX_DIFF` characters) and comments on the PR with ✅/❌/❔ per criterion.
+diff (up to `REVIEW_MAX_DIFF` characters) and comments on the PR with ✅/❌/❔ per criterion. The diff leaves out
+lockfiles, generated files and fixture data (it lists their names), and puts code, tests and config before docs, so a
+large scaffold PR is still reviewed on its code.
 
 - A ❌ in the first review sends the task back once (`REVIEW_REWORK_ROUNDS`) before you hear about it.
 - After that, or when everything passes, you get the notification with the verdict. The verdict is also on the task

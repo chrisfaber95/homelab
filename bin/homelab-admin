@@ -583,12 +583,15 @@ def tree_hash(paths):
 def script_command(script, account):
     if account == "root":
         # SUDO_USER as if the user ran it with sudo: the scripts check things as that user at the end.
-        return ["bash", str(script)], {"PATH": RUN_PATH, "HOME": "/root", "SUDO_USER": CONF["SSH_KEY_USER"]}
+        # HOMELAB_RERUN: the script must not restart homelab-admin (that kills the run); see restart_if_updated().
+        return ["bash", str(script)], {"PATH": RUN_PATH, "HOME": "/root", "SUDO_USER": CONF["SSH_KEY_USER"],
+                                       "HOMELAB_RERUN": "1"}
     pw = pwd.getpwnam(account)
     run_dir = f"/run/user/{pw.pw_uid}"
     return ["runuser", "-u", account, "--", "env", f"HOME={pw.pw_dir}", f"USER={account}", f"LOGNAME={account}",
             f"PATH={pw.pw_dir}/.local/bin:{RUN_PATH}", f"XDG_RUNTIME_DIR={run_dir}",
-            f"DBUS_SESSION_BUS_ADDRESS=unix:path={run_dir}/bus", "bash", str(script)], {"PATH": RUN_PATH}
+            f"DBUS_SESSION_BUS_ADDRESS=unix:path={run_dir}/bus", "HOMELAB_RERUN=1", "bash", str(script)], \
+        {"PATH": RUN_PATH}
 
 
 def rerun_scripts(pending):
@@ -597,6 +600,15 @@ def rerun_scripts(pending):
     if pending:
         return  # a confirmation is open: nothing new until it is settled
     seen = state("scripts", {})
+    for name, item in seen.items():
+        if item.get("running"):
+            # Still marked as running: homelab-admin stopped during that run. Not again until its inputs change.
+            item.update(running=False, ok=False)
+            record(kind="script", change=f"script-{Path(name).stem}", summary=f"{name} was interrupted", ok=False,
+                   result="homelab-admin stopped during the run; run it yourself or change it again")
+            notify(f"{name} was interrupted", f"homelab-admin stopped while it ran.\nsudo bash {REPO / 'scripts' / name}",
+                   priority=4)
+            save_state("scripts", seen)
     for script in sorted((REPO / "scripts").glob("[0-9]*.sh")):
         spec = rerun_spec(script)
         if not spec:
@@ -621,6 +633,8 @@ def rerun_scripts(pending):
         else:
             cid = f"script-{script.stem}"
             cmd, env = script_command(script, account)
+            seen[script.name] = {**entry, "ok": False, "running": True}
+            save_state("scripts", seen)
             with _lock:
                 ok = guarded(cid, "script", f"{script.name} again after a merge (as {account})", cmd, pending,
                              None, env)
@@ -632,6 +646,19 @@ def rerun_scripts(pending):
         save_state("scripts", seen)
         if pending:
             break  # confirm this one first
+
+
+SELF = Path(__file__).resolve()
+SELF_HASH = file_hash(SELF)
+
+
+def restart_if_updated():
+    """An install script (20-monitor.sh, 21-inbox.sh) may have replaced this program. Exit, and systemd
+    (Restart=always) starts the new version. All state is on disk, open confirmations included."""
+    if FAKE or not SELF.is_file() or file_hash(SELF) == SELF_HASH:
+        return
+    say("new version of homelab-admin installed; restarting")
+    os._exit(0)
 
 
 def github_get(path):
@@ -724,6 +751,7 @@ def apply_loop():
         except Exception as e:
             say(f"ronde mislukt: {e}")
         save_state("loop", {"at": now()})
+        restart_if_updated()
         for _ in range(int(CONF["POLL_SECONDS"])):
             time.sleep(1)
             check_deadlines()
@@ -919,7 +947,9 @@ def status_text():
         if not item.get("ok"):
             lines.append(f"MISLUKT: {cid} op {item['at']} (zie homelab-admin changes)")
     for name, item in state("scripts", {}).items():
-        if not item.get("ok"):
+        if item.get("running"):
+            lines.append(f"Script {name} draait sinds {item['at']}")
+        elif not item.get("ok"):
             lines.append(f"MISLUKT: script {name} op {item['at']} (zie homelab-admin changes)")
     prs = state("prs", {})
     if prs.get("error"):

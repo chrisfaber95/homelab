@@ -6,9 +6,9 @@
 # - Drie tokens: Claude Code voor inbox (claude setup-token), GitHub voor inbox-runner, ntfy voor inbox-runner.
 # - Jobs en skills (F-022) zitten in dezelfde dienst; jobs en geheugen (F-023) staan op de branches jobs en memory
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
-# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
+# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab_inbox/ (de modules), bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
-# homelab-rerun: root bin/homelab-inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/services.conf config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
+# homelab-rerun: root bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/services.conf config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -117,6 +117,9 @@ for f in inbox.conf services.conf admin.conf deploy.conf llm.conf backup.conf; d
 install -d -m 755 "$DEST/web" "$DEST/web/fonts"
 install -m 644 "$REPO"/web/app.css "$REPO"/web/app.js "$DEST/web/"
 install -m 644 "$REPO"/web/fonts/* "$DEST/web/fonts/"
+# The modules of homelab-inbox next to the script (it imports them); --delete drops a module that left the repo.
+install -d -m 755 "$DEST/bin/homelab_inbox"
+rsync -rtp --delete --exclude=__pycache__ --chmod=D755,F644 "$REPO/bin/homelab_inbox/" "$DEST/bin/homelab_inbox/"
 ln -sfn "$DEST/bin/homelab-inbox" /usr/local/bin/homelab-inbox
 
 echo "== sudo: inbox-runner mag alleen homelab-inbox-task als inbox draaien"

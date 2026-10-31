@@ -18,6 +18,8 @@
 /var/lib/ntfy/user.db
 # claude-dashboard: gekoppelde apparaten, certificaat, commands.log.
 /home/claude/.local/share/claude-dashboard
+# Home Assistant (H-008): devices, scenes, automations, users and its own secrets. Not in git, a rebuild cannot recreate it.
+/srv/homelab/data/homeassistant/config
 # Obsidian second brain: notes, sources and their git history; also holds its own scripts and systemd units.
 # Not /srv/obsidian/code-map: bin/code-map.sh regenerates it from the repos.
 /srv/obsidian/second-brain

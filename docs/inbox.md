@@ -116,7 +116,7 @@ hebben een token en worden alleen vanaf de pagina zelf geaccepteerd (tegen CSRF)
   herstart; een taak die liep tijdens een herstart, staat daarna op "mislukt" (verstuur hem opnieuw).
 - Grenzen en aantallen: `config/inbox.conf` (PR, daarna `scripts/21-inbox.sh`).
 - Tokens: `/etc/homelab/inbox-claude-token` (Claude Code voor `inbox`, van `claude setup-token`),
-  `/etc/homelab/inbox-github-token` (GitHub voor `inbox-runner`: Contents en Pull requests read/write),
+  `/etc/homelab/inbox-github-token` (GitHub voor `inbox-runner`: Contents en Pull requests read/write; Checks, Commit statuses en Actions read-only),
   `/etc/homelab/inbox-ntfy-token`. Verloopt er een, draai dan `scripts/21-inbox.sh` opnieuw: het vraagt opnieuw.
 - Code: `bin/homelab-inbox` is the entry point; the parts are modules in `bin/homelab_inbox/` (map in `CLAUDE.md`).
   `scripts/21-inbox.sh` installs them next to it.

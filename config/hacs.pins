@@ -1,0 +1,7 @@
+# homelab: HACS (H-008) and the custom integrations installed through it, each pinned to one release.
+# scripts/23-hacs.sh installs exactly these into <Home Assistant config>/custom_components and checks the sha256.
+# No secrets here: only public release URLs. Columns (whitespace separated):
+#   name   domain   url   sha256-of-the-zip   path-in-zip ("." = the zip root is the integration)
+# Upgrade: change version, url and sha256 together in a PR (curl -sL <url> | sha256sum), then rerun the script.
+hacs        hacs         https://github.com/hacs/integration/releases/download/2.0.5/hacs.zip                         97be6b824a4f38e683728cc6dd72367f6b8bad0a43428b1b3b987a3087adf413  .
+tuya-local  tuya_local   https://github.com/make-all/tuya-local/archive/refs/tags/2026.10.0.zip                       96cbcad24b9236f2395a2c38ea7a9671fe3c13d82d6dfd391bb7da3e52b2b36b  tuya-local-2026.10.0/custom_components/tuya_local

@@ -344,6 +344,8 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] `http://homelab:8110` opens over Tailscale (phone app too) and not from the LAN (`http://<box LAN ip>:8110`).
 - [ ] Create the owner account, a scene and an automation; `homelab-admin service restart` is not needed: reboot the
       box and check they are still there. `/srv/homelab/data/homeassistant/config` is in the next backup.
+- [ ] HACS (H-008): `scripts/23-hacs.sh` runs after the merge (config/hacs.pins). Restart Home Assistant once, add HACS
+      and log in to GitHub with your own account (`docs/projects.md`, "HACS and pinned custom integrations").
 - [ ] Copy `docs/ci/pull-request.yml` to `.github/workflows/ci.yml` (the inbox cannot push workflow files).
 
 ## 14. Verhuizen naar de desktop **(desktop)**

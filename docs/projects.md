@@ -190,4 +190,24 @@ in the rootless Docker of `deploy` like any compose project (`restart: unless-st
   No secret is in the repo; keep tokens (for example the f1-dashboard's long-lived token) under `/etc/homelab`.
 - **Check**: `bin/homelab-exposure` (`--static` for just the definition) asserts that every published port is on the
   Tailscale address in 8100-8199, that nothing listens on another address, and that the LAN address refuses the port.
-- Not done yet (rest of H-008): HACS, the Tuya Local integration, the bulbs, the token and the setup guide.
+- Not done yet (rest of H-008): the bulbs, the access token and the setup guide.
+
+### HACS and pinned custom integrations (H-008)
+
+`config/hacs.pins` lists HACS and every integration installed through it, each with release URL, version and sha256
+(start: HACS 2.0.5, Tuya Local 2026.10.0). `scripts/23-hacs.sh` (root; rerun automatically when the file changes)
+downloads exactly those zips, verifies the sha256 and copies them into `custom_components/` of the config volume.
+Already installed pins are skipped. To add or upgrade an integration: change the line in a PR (version, URL and sha256
+together), merge, then restart Home Assistant once. Do not update from inside HACS: that would drift from the pins.
+
+- **GitHub token**: HACS needs a GitHub login. This is a **one-time manual step**, and the account is Chris's choice
+  (the repo never picks one): Settings > Devices > Add integration > HACS, then approve the device code on
+  github.com/login/device. HACS keeps the resulting token in `.storage/` of the config volume (in the backup, not in
+  git). A public-repo-only token is enough; use an account you do not mind giving HACS.
+- **Download token (optional)**: `scripts/23-hacs.sh` reads a token from `/etc/homelab/hacs-github-token` (first line,
+  root 0600; override with `HACS_GITHUB_TOKEN_FILE`) only to avoid GitHub's anonymous rate limit. It is passed to curl on
+  stdin, never printed or logged. The names `hacs-github-token` and `*.token` are in `.gitignore`.
+- **Rotate**: create a new token on GitHub, write it to the file (`sudo install -m 600 /dev/stdin
+  /etc/homelab/hacs-github-token`, paste, Ctrl-D), then revoke the old one on GitHub. For HACS' own login: in Home
+  Assistant remove the HACS integration, add it again and approve a new device code, then revoke the old authorisation
+  at github.com/settings/applications.

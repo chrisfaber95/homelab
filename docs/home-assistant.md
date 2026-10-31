@@ -83,9 +83,13 @@ number says whether it fits next to it.
 
 | What | How | Target | Result | Date |
 |---|---|---|---|---|
-| Idle memory of the `homeassistant` container | `bash scripts/ha-memory.sh` | fits next to the LLM (note `free -h`) | _TBD_ | _TBD_ |
-| Colour change, API call until HA has confirmed | `bash scripts/ha-colour-latency.sh light.<name> 255 0 0` (3 runs) | < 1 s | _TBD_ | _TBD_ |
-| Colour change, seen on the bulb (phone over Tailscale, UI) | slow-motion video or stopwatch, 3 runs | < 1 s | _TBD_ | _TBD_ |
+| Idle memory of the `homeassistant` container | `bash scripts/ha-memory.sh` | fits next to the LLM (note `free -h`) | about 354 MiB; box had 19 GiB available, `llama3.1:8b` is 4.9 GB on disk: fits | 2026-10-31 |
+| Colour change, API call until HA has confirmed | `bash scripts/ha-colour-latency.sh light.<name> 255 0 0` (3 runs) | < 1 s | 219, 109, 100 ms (LED strip) | 2026-10-31 |
+| Colour change, seen on the bulb (phone over Tailscale, UI) | slow-motion video or stopwatch, 3 runs | < 1 s | by eye, no slow-motion video: delay not really noticeable (LED strip) | 2026-10-31 |
+
+The memory result was not taken with `scripts/ha-memory.sh`: it comes from the container's cgroup (`memory.current`
+minus `inactive_file`, the calculation `docker stats` is understood to use), one reading after about 22 minutes of
+uptime, with no strip added yet and the LLM not loaded. The fit is arithmetic, not a test with both running.
 
 `scripts/ha-colour-latency.sh` reads a long-lived token (HA profile page > Security > Long-lived access tokens) from
 `/etc/homelab/ha-token` (override: `HA_TOKEN_FILE`), passes it to curl on stdin and never prints it. Create that file

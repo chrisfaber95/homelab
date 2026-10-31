@@ -4,7 +4,7 @@
 #   lint       shellcheck on the shell scripts, py_compile on the Python (also catches syntax errors = "typecheck")
 #   validate   docker compose config on compose.yaml, and the exposure check on its definition
 #   tests      python3 -m unittest discover -s tests
-#   build      nothing to build; the compose image is pulled on the box, the config validation above is the build check
+#   build      docker compose pull of the pinned image (CI, or CI_BUILD=1): proves the image tag exists
 set -euo pipefail
 cd "$(dirname "$(dirname "$(readlink -f "$0")")")"
 
@@ -12,7 +12,9 @@ echo "== shellcheck"
 if command -v shellcheck >/dev/null; then
   shellcheck -S error scripts/*.sh bin/homelab-health bin/homelab-inbox-task bin/homelab-exposure changes/*/*.sh
 else
-  echo "shellcheck is not installed: skipped" >&2
+  # In CI (CI=true, set by GitHub Actions) a missing shellcheck is a failure, never a silent skip.
+  [[ ${CI:-} == true ]] && { echo "shellcheck is not installed" >&2; exit 1; }
+  echo "shellcheck is not installed: skipped (CI would fail here)" >&2
 fi
 
 echo "== python syntax"
@@ -29,6 +31,15 @@ PY
 echo "== compose config and exposure"
 docker compose -f compose.yaml config --quiet
 bin/homelab-exposure --static
+
+echo "== build"
+# The only thing built from this repo is the pinned image reference: pulling it proves the tag exists.
+# Needs the network and a Docker daemon, so it runs in CI (CI=true) or with CI_BUILD=1, not on every local run.
+if [[ ${CI:-} == true || ${CI_BUILD:-} == 1 ]]; then
+  docker compose -f compose.yaml pull --quiet
+else
+  echo "skipped locally (set CI_BUILD=1 to pull the image)"
+fi
 
 echo "== tests"
 python3 -m unittest discover -s tests

@@ -1,0 +1,30 @@
+# homelab: f1-dashboard (F-018), the live F1 timing page. Personal use, tailnet only.
+# Binds the Tailscale address on port 8109 (ufw allows 8100-8199 only via tailscale0); the server refuses 0.0.0.0.
+# The F1TV token stays outside the repo: /etc/f1-dashboard/token (root, 0600) arrives as a systemd credential.
+# /etc/f1-dashboard/env (optional, no secrets) may override HOST, PORT, F1_SOURCE (changes/0004).
+[Unit]
+Description=f1-dashboard (homelab, F-018)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+RuntimeDirectory=f1-dashboard
+WorkingDirectory=/srv/homelab/releases/f1-dashboard/current
+Environment=HOST=100.85.70.34
+Environment=PORT=8109
+Environment=HOME=/run/f1-dashboard
+Environment=NODE_ENV=production
+Environment=F1_TOKEN_FILE=%d/f1-token
+EnvironmentFile=-/etc/f1-dashboard/env
+LoadCredential=f1-token:/etc/f1-dashboard/token
+ExecStart=/usr/bin/npm start --silent
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

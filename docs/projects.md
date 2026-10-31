@@ -27,7 +27,7 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 - `compose`: publiceer poorten in de reeks **8100-8199**. Die laat ufw alleen via `tailscale0` door, en rootless
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
-  8106-8108 visualshopping. Kijk bij twijfel met `ss -ltn`.
+  8106-8108 visualshopping, 8109 f1-dashboard. Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
   merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
@@ -150,3 +150,18 @@ database gezet door `changes/0003-visualshopping-demo`).
 2. `sudo bash /home/claude/homelab/scripts/18-projects.sh` (vraagt om het read-only token).
 3. Als `claude`: `bash /home/claude/homelab/scripts/18-claude.sh`.
 4. `homelab-deploy status`: alle repo's uit de lijst staan er binnen een paar minuten, en de dashboard draait.
+
+## f1-dashboard
+
+Live F1 timing page for Chris alone. `service` repo (`chrisfaber95/f1-dashboard`): the box runs `npm ci`, `npm run build`
+and then `homelab-app-f1-dashboard.service` (`deploy/f1-dashboard.service`, `DynamicUser`, `npm start`). It listens on the
+Tailscale address only, port 8109: **`http://homelab:8109`** (the server refuses `0.0.0.0`; ufw allows 8100-8199 only via
+`tailscale0`). Starts on boot like every service.
+
+- `/etc/f1-dashboard/env` (root, 0600) holds `F1_SOURCE=replay`: the service plays the fixture and needs no login.
+  `changes/0004-f1-dashboard-config` creates it, and an empty `/etc/f1-dashboard/token`, because the unit always loads the
+  credential `LoadCredential=f1-token:/etc/f1-dashboard/token`. It never overwrites existing files.
+- Going live: put the F1TV token in `/etc/f1-dashboard/token` (`docs/feed-authentication.md` in the app repo), remove
+  `F1_SOURCE=replay` from the env file and restart `homelab-app-f1-dashboard`.
+- Assumption: the app starts with `npm start` and reads `HOST`/`PORT` (as in its own `docs/deployment.md`). If the
+  status says the unit keeps failing, check the start script.

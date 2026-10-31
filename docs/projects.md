@@ -165,3 +165,6 @@ Tailscale address only, port 8109: **`http://homelab:8109`** (the server refuses
   `F1_SOURCE=replay` from the env file and restart `homelab-app-f1-dashboard`.
 - Assumption: the app starts with `npm start` and reads `HOST`/`PORT` (as in its own `docs/deployment.md`). If the
   status says the unit keeps failing, check the start script.
+- Token from the page: the token dialog saves a pasted token in `/var/lib/f1-dashboard/token`
+  (`F1_TOKEN_UPLOAD_FILE`, service-private). It wins over `/etc/f1-dashboard/token` until it expires, and needs no
+  restart. The form only works with `F1_SOURCE=live`.

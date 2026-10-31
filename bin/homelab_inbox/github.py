@@ -1,6 +1,7 @@
 """GitHub polling: PR state, review comments, conflicts, CI and the inbox merging its own PRs."""
 import os
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -51,10 +52,15 @@ def pr_closed(t, merged):
 
 def auto_merge(t, slug, pr):
     sha = (pr.get("head") or {}).get("sha")
-    state = ci_state(slug, sha, t["ended"] or t["created"])
+    try:
+        state = ci_state(slug, sha, t["ended"] or t["created"])
+    except urllib.error.HTTPError as e:  # e.g. a token without permission to read checks: say so, don't stay silent
+        state = "unreadable"
+        unreadable = f"GitHub refused to show the CI status ({e.code} on {e.url.split('api.github.com')[-1][:80]})"
     if state == "pending":
         return
-    why = "CI failed or didn't finish in 30 minutes" if state == "failed" else \
+    why = unreadable if state == "unreadable" else \
+        "CI failed or didn't finish in 30 minutes" if state == "failed" else \
         "a criterion can only be confirmed by CI (🧪) and this repo has none" if state == "none" and t["review_ok"] == 2 \
         else "the PR is a draft" if pr.get("draft") else None
     if not why:

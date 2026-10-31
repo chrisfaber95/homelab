@@ -27,7 +27,7 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 - `compose`: publiceer poorten in de reeks **8100-8199**. Die laat ufw alleen via `tailscale0` door, en rootless
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
-  8106-8108 visualshopping, 8109 f1-dashboard. Kijk bij twijfel met `ss -ltn`.
+  8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant. Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
   merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
@@ -169,3 +169,25 @@ Tailscale address only, port 8109: **`http://homelab:8109`** (the server refuses
 - Token from the page: the token dialog saves a pasted token in `/var/lib/f1-dashboard/token`
   (`F1_TOKEN_UPLOAD_FILE`, service-private). It wins over `/etc/f1-dashboard/token` until it expires, and needs no
   restart. The form only works with `F1_SOURCE=live`.
+
+## Home Assistant (H-008)
+
+Home Assistant Container, pinned (`ghcr.io/home-assistant/home-assistant:2026.10.4`), defined in `compose.yaml` in the
+root of this repo. `config/repos.conf` lists this repo a second time as `homeassistant ... compose`, so the box runs it
+in the rootless Docker of `deploy` like any compose project (`restart: unless-stopped`; after a reboot
+`homelab-deploy` runs `compose up` again). Upgrade by changing the tag in a PR; take a backup first.
+
+- **Address**: `http://homelab:8110`, published as `100.85.70.34:8110` only (never `0.0.0.0`), so only the tailnet
+  reaches it. No proxy in front, so no `trusted_proxies`. The phone app uses the same URL over Tailscale.
+- **Network**: bridge. In rootless Docker `network_mode: host` is not the box's network, so it gives no extra LAN
+  reach, and it would drop the per-port bind. A bridge NATs outgoing traffic onto the LAN: local control of the bulbs
+  (unicast, e.g. Tuya TCP 6668) works, discovery by broadcast does not. Give each bulb a fixed IP and add it by hand.
+- **State**: `/srv/homelab/data/homeassistant/config` (owned by `deploy`, 0700, created by `scripts/18-projects.sh`).
+  It is outside the repo and the releases, so redeploys keep it, and it is in `config/backup.list`: the devices,
+  scenes, automations, users and Home Assistant's own secrets cannot be rebuilt from git. Restore with
+  `homelab-backup restore`, then the deploy brings the container back.
+- **First start**: open the page and create the owner account (Home Assistant stores it in the config volume).
+  No secret is in the repo; keep tokens (for example the f1-dashboard's long-lived token) under `/etc/homelab`.
+- **Check**: `bin/homelab-exposure` (`--static` for just the definition) asserts that every published port is on the
+  Tailscale address in 8100-8199, that nothing listens on another address, and that the LAN address refuses the port.
+- Not done yet (rest of H-008): HACS, the Tuya Local integration, the bulbs, the token and the setup guide.

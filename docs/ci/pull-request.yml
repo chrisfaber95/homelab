@@ -1,0 +1,14 @@
+# Copy to .github/workflows/ci.yml: runs the repo's checks on every pull request (scripts/ci.sh).
+# It is kept here because the inbox token has no `workflow` scope and cannot push files under .github/workflows.
+name: ci
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y shellcheck jq
+      - run: bash scripts/ci.sh

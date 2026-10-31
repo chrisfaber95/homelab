@@ -103,6 +103,8 @@ install -m 755 "$REPO/bin/homelab-deploy" "$DEST/bin/homelab-deploy"
 install -m 644 "$REPO/config/deploy.conf" "$DEST/config/deploy.conf"
 ln -sfn "$DEST/bin/homelab-deploy" /usr/local/bin/homelab-deploy
 install -d -m 755 -o deploy -g deploy "$DEPLOY_ROOT" "$DEPLOY_ROOT/repos" "$DEPLOY_ROOT/releases" "$DEPLOY_ROOT/state"
+# State of compose projects that a rebuild cannot recreate (config/backup.list lists it), outside every release.
+install -d -m 700 -o deploy -g deploy "$DEPLOY_ROOT/data" "$DEPLOY_ROOT/data/homeassistant"
 
 cat > /etc/systemd/system/homelab-deploy.service <<EOF
 [Unit]

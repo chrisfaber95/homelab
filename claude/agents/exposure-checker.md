@@ -16,6 +16,8 @@ Homelab network rules (`~/homelab/CLAUDE.md`, `docs/admin.md`, `docs/projects.md
   that is not rootless, is a finding.
 - Ports in use are listed in `docs/projects.md` (when in doubt, `ss -ltn`); a new port must not clash with them.
 
+Run `bin/homelab-exposure` (`--static` off the box) first: it checks the compose ports and, on the box, the real listeners.
+
 You are read-only. Approach:
 1. Find everything that listens in the diff (`git diff origin/main...`, or the files you were given): `ports:` in
    compose files, `listen`/`bind`/`host`/`--host` in code and units, `ExecStart` arguments, ufw rules.

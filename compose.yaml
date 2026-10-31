@@ -1,0 +1,35 @@
+# homelab: Home Assistant (H-008). Runs in the rootless Docker of `deploy` as the compose project `homeassistant`
+# (config/repos.conf: this repo a second time, kind compose). Only this file is used; the rest of the repo is ignored.
+#
+# Network: bridge, not `network_mode: host`. In rootless Docker "host" is the network namespace of rootlesskit, not
+# the box's, so it gives no extra LAN reach (and no broadcast/mDNS). A bridge reaches the bulbs anyway: outgoing
+# unicast traffic (Tuya local control, TCP 6668) is NATed onto the LAN, so give every bulb a fixed IP and enter it by
+# hand (UDP broadcast discovery does not work). The bridge also lets us publish the web port on ONE address, the
+# Tailscale one: it is never on 0.0.0.0, the LAN or the internet. Needed: Tailscale up before this container starts;
+# otherwise homelab-deploy starts it again after boot (ensure_running) and `restart` covers later failures.
+#
+# Ports: 8110 is Home Assistant's own port (8100-8199 is open only via tailscale0 in ufw; docs/projects.md).
+# No reverse proxy: you open http://homelab:8110 directly, so no trusted_proxies is needed. Add
+# `http: use_x_forwarded_for` and `trusted_proxies` to configuration.yaml only if one is put in front of it.
+#
+# State: /srv/homelab/data/homeassistant/config (outside the repo and the releases; created by
+# scripts/18-projects.sh; in config/backup.list). It holds the devices, scenes, automations and Home Assistant's own
+# secrets, so none of it is in git.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    container_name: homeassistant
+    restart: unless-stopped
+    ports:
+      - "100.85.70.34:8110:8123"
+    volumes:
+      - /srv/homelab/data/homeassistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: Europe/Amsterdam
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8123/manifest.json', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s

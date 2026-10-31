@@ -336,6 +336,16 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
         time, device, session and command. Anything that fails: a task in the inbox (repo `claude-dashboard`).
 - [ ] `claude` voor chris (stond niet in zijn PATH: Claude Code is per gebruiker geïnstalleerd en chris had geen eigen installatie). Als chris: `bash /var/lib/homelab/repo/scripts/22-claude-chris.sh`; log opnieuw in (SSH) en controleer `which claude` en `claude --version`, daarna `claude` → `/login`.
 
+## 13b. Home Assistant (H-008)
+
+- [ ] After the merge, root runs `scripts/18-projects.sh` (creates `/srv/homelab/data/homeassistant`); within a minute
+      `homelab-deploy status` shows `homeassistant` running. If it started before Tailscale was up, it retries itself.
+- [ ] `bin/homelab-exposure` passes on the box (port 8110 only on `100.85.70.34`, LAN address refuses).
+- [ ] `http://homelab:8110` opens over Tailscale (phone app too) and not from the LAN (`http://<box LAN ip>:8110`).
+- [ ] Create the owner account, a scene and an automation; `homelab-admin service restart` is not needed: reboot the
+      box and check they are still there. `/srv/homelab/data/homeassistant/config` is in the next backup.
+- [ ] Copy `docs/ci/pull-request.yml` to `.github/workflows/ci.yml` (the inbox cannot push workflow files).
+
 ## 14. Verhuizen naar de desktop **(desktop)**
 
 - [ ] Nieuwe PSU erin. BIOS/UEFI van de desktop:

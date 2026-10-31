@@ -59,8 +59,14 @@ def auto_merge(t, slug, pr):
         unreadable = f"GitHub refused to show the CI status ({e.code} on {e.url.split('api.github.com')[-1][:80]})"
     if state == "pending":
         return
-    why = unreadable if state == "unreadable" else \
-        "CI failed or didn't finish in 30 minutes" if state == "failed" else \
+    if state == "unreadable":  # can pass by itself (a token that gets the permission): try again, and say so only once
+        if unreadable not in (t["review"] or ""):
+            update(t["id"], review=f"Not merged yet: {unreadable}. {t['review'] or ''}"[:2000])  # first: the cap keeps it
+            log_line(f"t{t['id']}", "info", f"build without me: not merged yet: {unreadable}")
+            notify(f"{label(t)}: PR #{t['pr_number']} waits for you",
+                   f"Build without me: {unreadable}. The inbox keeps trying; you can also merge it yourself.", t["pr_url"])
+        return
+    why = "CI failed or didn't finish in 30 minutes" if state == "failed" else \
         "a criterion can only be confirmed by CI (🧪) and this repo has none" if state == "none" and t["review_ok"] == 2 \
         else "the PR is a draft" if pr.get("draft") else None
     if not why:

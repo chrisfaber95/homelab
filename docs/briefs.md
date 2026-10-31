@@ -87,7 +87,8 @@ which turns it into a normal build from then on.
 
 - The inbox merges a task PR itself (`merge`, as its own token) when the last brief review found **every** criterion
   met and CI on the PR's head commit is green, or the repo has no CI. CI that hasn't finished after 30 minutes counts
-  as failed. Your own PR comments still send the task back first.
+  as failed. Your own PR comments still send the task back first. If GitHub refuses to show the CI status (a token
+  without the permissions in `docs/inbox.md`), you get one notification and the inbox keeps trying on every poll.
 - Verdicts: ✅ met, ❌ missed, 🧪 only running it shows (tests, lint, typecheck, build pass): CI decides, so the PR
   waits for you if the repo has no CI; ❔ can't be judged from the diff (behaviour on the box, in a browser): counts
   as not met, the notification names it.

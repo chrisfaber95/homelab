@@ -158,10 +158,11 @@ and then `homelab-app-f1-dashboard.service` (`deploy/f1-dashboard.service`, `Dyn
 Tailscale address only, port 8109: **`http://homelab:8109`** (the server refuses `0.0.0.0`; ufw allows 8100-8199 only via
 `tailscale0`). Starts on boot like every service.
 
-- `/etc/f1-dashboard/env` (root, 0600) holds `F1_SOURCE=replay`: the service plays the fixture and needs no login.
+- `/etc/f1-dashboard/env` (root, 0600) holds `F1_SOURCE=live` on a fresh box: the service connects to the live feed and needs a token.
   `changes/0004-f1-dashboard-config` creates it, and an empty `/etc/f1-dashboard/token`, because the unit always loads the
   credential `LoadCredential=f1-token:/etc/f1-dashboard/token`. It never overwrites existing files.
-- Going live: put the F1TV token in `/etc/f1-dashboard/token` (`docs/feed-authentication.md` in the app repo), remove
-  `F1_SOURCE=replay` from the env file and restart `homelab-app-f1-dashboard`.
+- Token: put the F1TV token in `/etc/f1-dashboard/token` (`docs/feed-authentication.md` in the app repo) and restart
+  `homelab-app-f1-dashboard`. Until then the feed keeps reconnecting with reason `auth`. To play the fixture without a
+  login, set `F1_SOURCE=replay` in the env file and restart.
 - Assumption: the app starts with `npm start` and reads `HOST`/`PORT` (as in its own `docs/deployment.md`). If the
   status says the unit keeps failing, check the start script.

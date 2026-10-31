@@ -65,7 +65,8 @@ Nothing starts without one of those buttons.
 - Each task is a normal inbox task: same queue, limits, auto mode and PR. It gets the full brief as context; its PR
   shows only the task and criteria (the product repo is private, the target repo may be public).
 - A task with `after` starts only when its predecessor's PR is **merged**, so it builds on that code. If the
-  predecessor fails, is refused or its PR is closed, the task doesn't start.
+  predecessor fails, is refused or its PR is closed, the task doesn't start, until you merge that PR anyway or mark
+  the predecessor as fine (`docs/inbox.md`).
 
 ## 3. Review
 

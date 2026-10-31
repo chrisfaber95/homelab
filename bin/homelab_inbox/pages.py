@@ -11,12 +11,12 @@ import time
 from datetime import datetime, timezone
 
 from .briefs import builds, live_build, load_briefs, split_frontmatter
-from .config import ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
+from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
-from .router import blocked_by, children
+from .router import blocked_by, blocked_followups, children
 from .storage import db, log, tasks
 
 
@@ -203,10 +203,16 @@ def task_page(t):
     if t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
         pre = blocked_by(t)
         if pre:  # a retry would be cancelled again on the next pass of the scheduler
-            parts.append(f'<p class="muted">Waits for <a href="/task/{pre["id"]}">#{pre["id"]}</a>: continue or '
-                         'retry that task first; this one then comes back in the queue by itself.</p>')
+            parts.append(f'<p class="muted">Waits for <a href="/task/{pre["id"]}">#{pre["id"]}</a>: continue, '
+                         'retry or mark that task as fine first; this one then comes back in the queue by itself.</p>')
         else:
             parts.append(form(f'/task/{t["id"]}/retry', "", "Continue" if t["status"] == "capped" else "Retry"))
+    if t["accepted"]:
+        parts.append('<p class="muted">You marked this task as fine; its follow-ups may run.</p>')
+    elif t["status"] in ACCEPTABLE and blocked_followups(t):
+        pr = f'PR #{t["pr_number"]} is not merged as far as the inbox knows. ' if t["pr_number"] else ""
+        parts.append(f'<p class="muted">{pr}Follow-ups start from main, so work of this task that is not merged will '
+                     'not be in them.</p>' + form(f'/task/{t["id"]}/accept', "", "Mark as fine, continue follow-ups"))
     parts.append(log_html(f"t{t['id']}"))
     return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] == "queued")
 

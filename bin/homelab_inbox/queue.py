@@ -9,7 +9,7 @@ from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page
 from .jobs import propose_skill, split_skill
 from .memory import after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
-from .router import children, route_task, settle_routed
+from .router import revive_followups, route_task, settle_routed
 from .storage import db, get, log, now, tasks, update
 
 
@@ -222,28 +222,10 @@ def retry_task(t):
             hint = (f"Your working copy was cleaned up: this is a fresh copy of main on inbox/{t['id']}, so work "
                     "from earlier rounds that isn't on main is gone. Do the task again and end with KLAAR: (or "
                     "VRAAG:/GEWEIGERD:).")
-        update(t["id"], status="queued", ended=None, note=None, restarts=0, reprepare=int(fresh),
+        update(t["id"], status="queued", ended=None, note=None, restarts=0, accepted=0, reprepare=int(fresh),
                pending_input=f"This task stopped before it was finished ({why}) and the user asked to "
                              f"{'continue' if t['status'] == 'capped' else 'retry'} it. " + hint)
     else:
-        update(t["id"], status="queued", ended=None, note=None)
+        update(t["id"], status="queued", ended=None, note=None, accepted=0)
     log_line(f"t{t['id']}", "info", "retried on the page: back in the queue")
-    parent = get(t["parent"]) if t["parent"] else None
-    if not parent or parent["status"] != "routed":
-        return
-    revived, kids = {t["id"]}, children(parent["id"])
-    while True:
-        # also a task with rounds: the user retried it, and settle_routed cancelled it again before it could start
-        more = [k for k in kids if k["id"] not in revived and k["status"] == "cancelled"
-                and k["after_task"] in revived and (k["note"] or "").startswith("niet gestart: de voorgaande taak")]
-        if not more:
-            break
-        for k in more:
-            if k["rounds"]:  # it ran before: resume its session, in a working copy rebuilt if that was cleaned up
-                update(k["id"], reprepare=int(k["reprepare"] or task_cmd("has", k["id"])[0] != 0),
-                       pending_input=k["pending_input"] or "The task before this one stopped early and the user "
-                       "continued it, so this task is back in the queue. Check `git status` and `git log` first, "
-                       "then continue where you left off and end with KLAAR: (or VRAAG:/GEWEIGERD:).")
-            update(k["id"], status="queued", ended=None, note=None)
-            revived.add(k["id"])
-    update(parent["id"], ended=None)  # the build or message isn't finished any more
+    revive_followups(t)

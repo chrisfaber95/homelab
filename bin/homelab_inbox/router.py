@@ -5,7 +5,7 @@ import re
 import shutil
 import uuid
 
-from .config import ACTIVE, CONF, HOME, STATUS_NL, _cancel, _lock
+from .config import ACCEPTABLE, ACTIVE, CONF, HOME, STATUS_NL, _cancel, _lock
 from .helpers import first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
 from .memory import remember_task
 from .storage import db, get, log, now, update
@@ -139,12 +139,60 @@ def children(task_id):
 
 
 PRE_OK = ACTIVE + ("waiting", "answered", "pr_open", "merged")  # a follow-up task may run after these
+FOLLOWUP_NOTE = "niet gestart: de voorgaande taak"  # live data: the note on a follow-up that settle_routed cancelled
+
+
+def pre_fine(pre):
+    return pre["status"] in PRE_OK or bool(pre["accepted"])
 
 
 def blocked_by(t):
     """The predecessor that stops this follow-up task from running (settle_routed cancels it), or None."""
     pre = get(t["after_task"]) if t["after_task"] else None
-    return pre if pre and pre["status"] not in PRE_OK else None
+    return pre if pre and not pre_fine(pre) else None
+
+
+def blocked_followups(t, automatic=False):
+    """The follow-ups cancelled because this task didn't end well. automatic: only those a merge may restart."""
+    parent = get(t["parent"]) if t["parent"] else None
+    if not parent or parent["status"] != "routed":
+        return []
+    return [k for k in children(parent["id"]) if k["status"] == "cancelled" and k["after_task"] == t["id"]
+            and (k["note"] or "").startswith(FOLLOWUP_NOTE) and not (automatic and k["no_auto_revive"])]
+
+
+def revive_followups(t, automatic=False):
+    """Back in the queue, in their order: the follow-ups cancelled because of this task. Returns how many."""
+    parent = get(t["parent"]) if t["parent"] else None
+    if not parent or parent["status"] != "routed":
+        return 0
+    revived, kids = {t["id"]}, children(parent["id"])
+    while True:
+        # also a task with rounds: the user retried it, and settle_routed cancelled it again before it could start
+        more = [k for k in kids if k["id"] not in revived and k["status"] == "cancelled"
+                and k["after_task"] in revived and (k["note"] or "").startswith(FOLLOWUP_NOTE)
+                and not (automatic and k["no_auto_revive"])]
+        if not more:
+            break
+        for k in more:
+            if k["rounds"]:  # it ran before: resume its session, in a working copy rebuilt if that was cleaned up
+                update(k["id"], reprepare=int(k["reprepare"] or task_cmd("has", k["id"])[0] != 0),
+                       pending_input=k["pending_input"] or "The task before this one stopped early and the user "
+                       "continued it, so this task is back in the queue. Check `git status` and `git log` first, "
+                       "then continue where you left off and end with KLAAR: (or VRAAG:/GEWEIGERD:).")
+            update(k["id"], status="queued", ended=None, note=None)
+            revived.add(k["id"])
+    update(parent["id"], ended=None)  # the build or message isn't finished any more
+    return len(revived) - 1
+
+
+def accept_task(t):
+    """The user says this task is fine: it isn't run again, and its follow-ups go back in the queue."""
+    if t["status"] not in ACCEPTABLE or t["accepted"] or not blocked_followups(t):
+        return 0
+    update(t["id"], accepted=1)
+    log_line(f"t{t['id']}", "info", "marked as fine on the page: follow-ups back in the queue")
+    return revive_followups(get(t["id"]))
 
 
 def settle_routed():
@@ -156,9 +204,9 @@ def settle_routed():
         by_id = {k["id"]: k for k in kids}
         for k in kids:
             pre = by_id.get(k["after_task"])
-            if k["status"] == "queued" and pre and pre["status"] not in PRE_OK:
+            if k["status"] == "queued" and pre and not pre_fine(pre):
                 update(k["id"], status="cancelled", ended=now(),
-                       note=f"niet gestart: de voorgaande taak #{pre['id']} was {STATUS_NL[pre['status']]}")
+                       note=f"{FOLLOWUP_NOTE} #{pre['id']} was {STATUS_NL[pre['status']]}")
         kids = children(p["id"])
         # H-001: a brief task whose PR the reviewer hasn't checked yet still counts as busy
         if any(k["status"] in ACTIVE + ("waiting",) or (k["brief"] and k["status"] == "pr_open" and not k["review"])

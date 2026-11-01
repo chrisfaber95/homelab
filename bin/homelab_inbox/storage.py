@@ -30,15 +30,21 @@ def db():
                       ("reason", "TEXT"), ("brief", "TEXT"), ("criteria", "TEXT"), ("reviews", "INTEGER DEFAULT 0"),
                       ("review", "TEXT"), ("handoff", "TEXT"), ("unattended", "INTEGER DEFAULT 0"),
                       ("review_ok", "INTEGER"), ("conflicts", "INTEGER DEFAULT 0"), ("conflict_sha", "TEXT"),
-                      ("restarts", "INTEGER DEFAULT 0")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
+                      ("restarts", "INTEGER DEFAULT 0"), ("accepted", "INTEGER DEFAULT 0"),
+                      ("no_auto_revive", "INTEGER DEFAULT 0")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
         # H-001: brief = the brief id (build parent and its children), criteria = JSON list for a child, reviews =
         # automatic rework rounds used, review = the reviewer's last verdict, handoff = the handed-off PR (or error)
         # Build without me: unattended = on a build, the inbox merges its PRs; review_ok = 1 when every criterion of
         # the last review passed
         # Merge conflicts: conflicts = automatic conflict rounds used, conflict_sha = the PR head last handled
         # restarts = rounds in a row cut off by a restart of the inbox (recover puts the task back in the queue)
+        # accepted = the user marked this task as fine, so its follow-ups may run
+        # no_auto_revive = cancelled before follow-ups could come back by themselves: a merge doesn't restart it
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
+            if col == "no_auto_revive":  # the user may have replaced these by hand; don't run them a second time
+                conn.execute("UPDATE tasks SET no_auto_revive=1 WHERE status='cancelled' AND note LIKE ?",
+                             ("niet gestart: de voorgaande taak%",))
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS job_runs (id INTEGER PRIMARY KEY, job TEXT NOT NULL, kind TEXT, model TEXT,
             due TEXT, created TEXT NOT NULL, started TEXT, ended TEXT, dispatched TEXT, status TEXT NOT NULL,

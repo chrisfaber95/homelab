@@ -6,10 +6,14 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from .config import CONF
-from .helpers import gh, label, log_line, merges_itself, notify, refresh_cache, repo_list, repo_lock, task_cmd, title_of
+from .helpers import gh, label, log_line, merges_itself, notify, page_url, refresh_cache, repo_list, repo_lock, task_cmd, title_of
 from .memory import LEARN_HINT, remember_task
 from .rounds import push_branch
-from .storage import log, now, tasks, update
+from .router import blocked_followups, revive_followups
+from .storage import get, log, now, tasks, update
+
+
+MERGE_WATCHED = ("refused", "failed", "capped", "cancelled")  # a merged PR of these still counts: see check_blocking_pr
 
 
 def poll_github():
@@ -19,6 +23,11 @@ def poll_github():
         for t in [t for t in tasks() if t["status"] == "pr_open" and t["pr_number"]]:
             try:
                 check_pr(t, merged)
+            except Exception as e:
+                log(f"PR van taak {t['id']}: {e}")
+        for t in [t for t in tasks() if t["status"] in MERGE_WATCHED and t["pr_number"] and blocked_followups(t, True)]:
+            try:
+                check_blocking_pr(t)
             except Exception as e:
                 log(f"PR van taak {t['id']}: {e}")
 
@@ -48,6 +57,18 @@ def pr_closed(t, merged):
     update(t["id"], status="merged" if merged else "closed", ended=now())
     task_cmd("cleanup", t["id"])
     remember_task(t["id"])
+
+
+def check_blocking_pr(t):
+    """A task that ended badly but whose PR the user merged anyway is fine: its follow-ups go back in the queue."""
+    slug = repo_list().get(t["repo"])
+    pr = gh("GET", f"/repos/{slug}/pulls/{t['pr_number']}") if slug else None
+    if not (isinstance(pr, dict) and pr.get("state") == "closed" and pr.get("merged")):
+        return
+    pr_closed(t, True)
+    n = revive_followups(get(t["id"]), automatic=True)
+    log_line(f"t{t['id']}", "info", f"PR #{t['pr_number']} merged: {n} follow-up(s) back in the queue")
+    notify(f"{label(t)}: PR #{t['pr_number']} merged", f"{n} follow-up(s) back in the queue", page_url(t["id"]))
 
 
 def auto_merge(t, slug, pr):

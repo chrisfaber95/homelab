@@ -52,6 +52,16 @@ and working copy if that still exists, otherwise in a fresh copy of main (the ta
 Tasks of the same build or message that were cancelled because of it ("niet gestart: de voorgaande taak ...") come
 back too, in their order, and the build or message counts as running again.
 
+**Follow-ups of a task that ended badly**: a follow-up doesn't start when its predecessor failed, was refused, was
+cancelled, stopped at the limit or had its PR closed. Two things bring it back, in order, without running the
+predecessor again:
+
+- **Merge the predecessor's PR anyway.** The inbox sees the merge within a poll, sets the task to merged and requeues
+  its follow-ups. Follow-ups cancelled before this feature existed don't come back this way.
+- **Mark as fine, continue follow-ups** on the predecessor's page, when you don't need its work. The task keeps its
+  status, so a build with such a task gets no automatic handoff. Follow-ups start from main: unmerged work of the
+  predecessor isn't in them. Retry on that task clears the mark.
+
 **Conflicts with main**: tasks on one repo run in parallel, so a PR can conflict with main once another one is merged.
 When GitHub reports that, the inbox merges main into `inbox/<id>` in the task's working copy (`homelab-inbox-task
 sync`). Without conflicts it pushes the merge right away. With conflicts the merge stays in progress and the task goes

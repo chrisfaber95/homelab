@@ -243,7 +243,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 
 - [ ] F-021 (task inbox): zie `docs/inbox.md`.
   - [ ] `claude setup-token` (op Windows of als `claude` op de box) voor een token van Claude Code.
-  - [ ] Op GitHub een fine-grained token voor de inbox: All repositories, Contents en Pull requests: Read and write.
+  - [ ] Op GitHub een fine-grained token voor de inbox: All repositories, Contents and Pull requests: Read and write; Checks, Commit statuses and Actions: Read-only (the inbox reads CI before it merges a build without me).
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (vraagt om beide tokens).
   - [ ] `http://homelab.tail4eb878.ts.net:8105` op de telefoon: een vraag-taak geeft een antwoord, een code-taak een PR.
 - [ ] F-022 (jobs en skills): zie `docs/jobs.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.

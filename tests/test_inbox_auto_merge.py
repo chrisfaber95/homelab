@@ -48,13 +48,22 @@ class AutoMerge(unittest.TestCase):
         self.assertIn("PUT", self.calls)
         self.assertEqual(storage.get(42)["status"], "merged")
 
-    def test_unreadable_ci_is_reported_not_silent(self):
+    def test_unreadable_ci_is_reported_once_and_retried(self):
+        sent = []
+        github.notify, notify = lambda *a: sent.append(a), github.notify
+        self.addCleanup(setattr, github, "notify", notify)
         self.denied = True
+        github.check_pr(storage.get(42), set())
         github.check_pr(storage.get(42), set())
         t = storage.get(42)
         self.assertNotIn("PUT", self.calls)
-        self.assertEqual(t["review_ok"], 0)
+        self.assertEqual(t["review_ok"], 1)
         self.assertIn("403", t["review"])
+        self.assertEqual(len(sent), 1)
+        self.denied = False  # the token got the permission
+        github.check_pr(storage.get(42), set())
+        self.assertIn("PUT", self.calls)
+        self.assertEqual(storage.get(42)["status"], "merged")
 
 
 if __name__ == "__main__":

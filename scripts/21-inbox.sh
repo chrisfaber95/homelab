@@ -175,7 +175,7 @@ ask_token /etc/homelab/inbox-claude-token inbox \
   "Claude Code voor inbox: draai ergens (bijvoorbeeld op Windows, of als claude op de box) 'claude setup-token' en plak het token (begint met sk-ant-oat01-, ruim 100 tekens)." \
   claude_works
 ask_token /etc/homelab/inbox-github-token inbox-runner \
-  "GitHub voor de inbox: een fine-grained token, All repositories, Contents en Pull requests: Read and write." \
+  "GitHub voor de inbox: een fine-grained token, All repositories, Contents en Pull requests: Read and write; Checks, Commit statuses en Actions: Read-only." \
   github_works
 echo "== Privé repo voor jobs en geheugen ($DATA_REPO)"
 # Jobs en geheugen zijn persoonlijk: nooit in een public repo. Bestaat hij niet, maak hem dan (op Windows of als claude):

@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""llm-route: send an LLM request to the homelab router (H-012). Stdlib only; works on the box and on Windows.
+
+  llm-route ask --caller NAME --tier TIER [--system TEXT] [--job summarize|extract] [file ...]
+                                  the prompt comes from the files or from stdin; the answer goes to stdout
+  llm-route tiers                 the tier table (which tier goes to which backend)
+  llm-route usage [--days 7]      requests per caller and tier, share served locally, Claude runs avoided
+
+--caller and --tier are required: callers declare how hard the job is (docs/router.md).
+Environment: ROUTER_URL (default http://homelab:8018).
+Exit 0 on success, 1 when the request failed, 2 on a wrong call, 3 when the router is unreachable, 4 on a timeout.
+"""
+import argparse
+import http.client
+import json
+import os
+import socket
+import sys
+import urllib.parse
+
+CONNECT_TIMEOUT = 5
+EXIT_FAILED, EXIT_USAGE, EXIT_UNREACHABLE, EXIT_TIMEOUT = 1, 2, 3, 4
+
+
+def fail(code, message):
+    print(f"llm-route: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def call(url, method, path, body=None, timeout=60):
+    u = urllib.parse.urlsplit(url)
+    conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(u.hostname, u.port, timeout=CONNECT_TIMEOUT)
+    try:
+        conn.connect()
+    except (OSError, socket.timeout) as e:
+        fail(EXIT_UNREACHABLE, f"the router is unreachable ({u.netloc}): {e}")
+    conn.sock.settimeout(timeout)
+    try:
+        conn.request(method, path, body=json.dumps(body).encode() if body is not None else None,
+                     headers={"Content-Type": "application/json"} if body is not None else {})
+        resp = conn.getresponse()
+        raw = resp.read()
+    except (socket.timeout, TimeoutError):
+        fail(EXIT_TIMEOUT, f"no answer within {timeout:.0f} s (timeout)")
+    except OSError as e:
+        fail(EXIT_UNREACHABLE, f"the connection to the router dropped: {e}")
+    try:
+        result = json.loads(raw)
+    except ValueError:
+        fail(EXIT_FAILED, f"unexpected answer from the router (HTTP {resp.status})")
+    if resp.status != 200:
+        err = result.get("error") if isinstance(result, dict) else None
+        message = err.get("message") if isinstance(err, dict) else f"HTTP {resp.status}"
+        code = err.get("code") if isinstance(err, dict) else None
+        fail({"timeout": EXIT_TIMEOUT, "bad_request": EXIT_USAGE, "unknown_tier": EXIT_USAGE}.get(code, EXIT_FAILED),
+             message)
+    return result
+
+
+def read_prompt(files):
+    if not files:
+        if sys.stdin.isatty():
+            fail(EXIT_USAGE, "no prompt: give a file or send text on stdin")
+        return sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    parts = []
+    for name in files:
+        try:
+            with open(name, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+        except OSError as e:
+            fail(EXIT_USAGE, f"{name}: {e.strerror}")
+    return "\n\n".join(parts)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="llm-route", description="Send an LLM request to the homelab router.")
+    p.add_argument("--url", default=os.environ.get("ROUTER_URL", "http://homelab:8018"),
+                   help="router address (ROUTER_URL, default http://homelab:8018)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("ask", help="send a prompt")
+    a.add_argument("--caller", required=True, help="who is asking; shows in the usage log")
+    a.add_argument("--tier", required=True, help="how hard the job is: a tier from `llm-route tiers`")
+    a.add_argument("--system", help="system instruction")
+    a.add_argument("--job", choices=("summarize", "extract"), help="use an F-017 job prompt")
+    a.add_argument("--fields", default="", help="extract: name,date,amount:number")
+    a.add_argument("--labels", default="", help="extract: allowed labels")
+    a.add_argument("--timeout", type=float, help="seconds; default is the timeout of the tier")
+    a.add_argument("--json", action="store_true", help="print the whole result (backend, outcome, tokens)")
+    a.add_argument("files", nargs="*")
+
+    sub.add_parser("tiers", help="show the tier table")
+    u = sub.add_parser("usage", help="show the usage")
+    u.add_argument("--days", type=int, default=7)
+    args = p.parse_args()
+    sys.stdout.reconfigure(errors="replace")
+
+    if args.cmd == "tiers":
+        for name, t in call(args.url, "GET", "/v1/tiers", timeout=15)["tiers"].items():
+            print(f"{name:12} {t['backend']:7} timeout {t['timeout']} s, on failure: {t.get('on_failure', 'fail')}")
+        return
+    if args.cmd == "usage":
+        r = call(args.url, "GET", f"/v1/usage?days={args.days}", timeout=15)
+        share = "n/a" if r["share_local"] is None else f"{r['share_local'] * 100:.0f}%"
+        print(f"Last {r['days']} days: {r['total']} requests, {share} served locally, {r['escalations']} escalated, "
+              f"{r['claude_runs_avoided']} Claude runs avoided (estimate).")
+        print(f"  {'caller':24} {'tier':10} {'backend':8} {'outcome':10} {'n':>5} {'tokens in/out':>16}")
+        for g in r["groups"]:
+            print(f"  {g['caller']:24} {g['tier']:10} {g['backend']:8} {g['outcome']:10} {g['count']:>5} "
+                  f"{g['prompt_tokens']:>8}/{g['completion_tokens']:<7}")
+        return
+
+    prompt = read_prompt(args.files)
+    if not prompt.strip():
+        fail(EXIT_USAGE, "the prompt is empty")
+    body = {"caller": args.caller, "tier": args.tier, "prompt": prompt}
+    if args.system:
+        body["system"] = args.system
+    if args.job:
+        body["job"] = args.job
+    if args.job == "extract":
+        body["fields"] = [{"name": n.partition(":")[0], "type": n.partition(":")[2] or "string"}
+                          for n in args.fields.split(",") if n.strip()]
+        body["labels"] = [x.strip() for x in args.labels.split(",") if x.strip()]
+    if args.timeout:
+        body["timeout"] = args.timeout
+    # The router guards the timeout itself (twice when the tier escalates); wait a little longer for its message.
+    r = call(args.url, "POST", "/v1/route", body, timeout=(args.timeout or 300) * 2 + 15)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+    else:
+        if r["outcome"] == "escalated":
+            print(f"llm-route: escalated from {r['escalated_from']} to {r['backend']}", file=sys.stderr)
+        print(r["output"])
+
+
+if __name__ == "__main__":
+    main()

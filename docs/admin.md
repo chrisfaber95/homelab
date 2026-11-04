@@ -68,7 +68,7 @@ script in `scripts/` names its account and inputs in a header line:
 | Script | Runs as | Inputs (besides the script) |
 | --- | --- | --- |
 | `13-health-check.sh` | root | `bin/homelab-health`, `config/health.conf` |
-| `17-llm.sh` | root | `bin/llm`, `llm/`, `config/llm.conf` |
+| `17-llm.sh` | root | `bin/llm`, `bin/llm-route`, `llm/`, `config/llm.conf`, `config/router.json` |
 | `18-projects.sh` | root | `bin/homelab-deploy`, `config/deploy.conf`, `deploy/` (new or changed units) |
 | `18-claude.sh` | claude | `claude/`, `config/claude.conf` |
 | `20-monitor.sh` | root | the `bin/` and `config/` files it installs |

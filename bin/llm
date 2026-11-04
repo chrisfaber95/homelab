@@ -6,7 +6,7 @@
                                          JSON met precies die velden
   llm usage [--days 7]                   gebruik per caller en per job
 
-Omgeving: LLM_URL (standaard http://homelab:8017), LLM_CALLER (standaard unknown).
+Omgeving: LLM_URL (standaard http://homelab:8017), LLM_CALLER (standaard f017-legacy).
 Exit 0 bij succes, 1 bij een fout van de job, 2 bij een verkeerde aanroep, 3 als de homelab onbereikbaar is,
 4 bij een timeout.
 """
@@ -89,8 +89,8 @@ def main():
     p = argparse.ArgumentParser(prog="llm", description="Jobs op het lokale model van de homelab.")
     p.add_argument("--url", default=os.environ.get("LLM_URL", "http://homelab:8017"),
                    help="adres van de helper (LLM_URL, standaard http://homelab:8017)")
-    p.add_argument("--caller", default=os.environ.get("LLM_CALLER", "unknown"),
-                   help="naam in het usage-log (LLM_CALLER, standaard unknown)")
+    p.add_argument("--caller", default=os.environ.get("LLM_CALLER", "f017-legacy"),
+                   help="naam in het usage-log (LLM_CALLER, standaard f017-legacy)")
     p.add_argument("--timeout", type=float, default=60, help="seconden voor de job (standaard 60)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

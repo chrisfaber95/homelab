@@ -60,7 +60,8 @@ part load automatically from `.claude/rules/` when you work on that part.
 | Part | Code | Config | Docs |
 |---|---|---|---|
 | F-016 base box, health check | `scripts/05-09-base.sh`, `bin/homelab-health` (`scripts/13-health-check.sh`) | `config/health.conf` | `CHECKLIST.md` |
-| F-017 LLM helper (OpenAI API, port 8017) | `llm/helper.py`, `bin/llm`, `scripts/17-llm.sh` | `config/llm.conf` | `docs/llm.md` |
+| F-017 LLM helper (OpenAI API, port 8017) | `llm/helper.py`, `llm/jobs.py`, `bin/llm`, `scripts/17-llm.sh` | `config/llm.conf` | `docs/llm.md` |
+| H-012 LLM router (port 8018) | `llm/router.py`, `bin/llm-route`, `scripts/17-llm.sh` | `config/router.json` | `docs/router.md` |
 | F-018 projects and deploy | `bin/homelab-deploy`, `deploy/`, `scripts/18-projects.sh` | `config/repos.conf`, `config/deploy.conf` | `docs/projects.md` |
 | F-019 root changes, ntfy | `bin/homelab-admin`, `changes/`, `scripts/19-admin.sh` | `config/machine.conf`, `config/admin.conf` | `docs/admin.md` |
 | F-020 monitor, overview, backups | `bin/homelab-monitor`, `bin/homelab-backup`, `scripts/20-monitor.sh` | `config/backup.conf`, `config/backup.list` | `docs/monitor.md` |

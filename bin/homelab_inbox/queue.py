@@ -206,9 +206,15 @@ def pushed(t):
         return False
 
 
-def retry_task(t):
+def retry_task(t, note=""):
     """Retry on the page: the task goes back in the queue (its own session, in its working copy if that's still
-    there), with the tasks of its build or message that were cancelled because of it."""
+    there), with the tasks of its build or message that were cancelled because of it. note: what the user added for
+    Claude on the page (optional), for example why a refused task is fine to do after all."""
+    note = note.strip()[:8000]
+    extra = f"\n\nNote from the user with this retry:\n\n{note}" if note else ""
+    if t["status"] == "refused":
+        extra = (f"\n\nYou refused it earlier with this reason:\n\n{t['summary'] or '(none given)'}\n\nDon't refuse "
+                 "again for the same reason unless the user's note or the task gives you a new one." + extra)
     if t["rounds"]:
         code, _ = task_cmd("has", t["id"])
         fresh = code != 0
@@ -223,9 +229,11 @@ def retry_task(t):
                     "from earlier rounds that isn't on main is gone. Do the task again and end with KLAAR: (or "
                     "VRAAG:/GEWEIGERD:).")
         update(t["id"], status="queued", ended=None, note=None, restarts=0, accepted=0, reprepare=int(fresh),
+               summary=None if t["status"] == "refused" else t["summary"],
                pending_input=f"This task stopped before it was finished ({why}) and the user asked to "
-                             f"{'continue' if t['status'] == 'capped' else 'retry'} it. " + hint)
+                             f"{'continue' if t['status'] == 'capped' else 'retry'} it. " + hint + extra)
     else:
-        update(t["id"], status="queued", ended=None, note=None, accepted=0)
+        # never started: its first round reads the task text, not pending_input
+        update(t["id"], status="queued", ended=None, note=None, accepted=0, text=t["text"] + extra)
     log_line(f"t{t['id']}", "info", "retried on the page: back in the queue")
     revive_followups(t)

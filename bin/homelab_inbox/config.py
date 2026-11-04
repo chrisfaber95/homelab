@@ -86,7 +86,7 @@ SETUP_PATHS = re.compile(r"(CLAUDE\.md|\.claude/kit\.md|\.claude/agents/[\w.-]+\
 
 
 ACTIVE = ("queued", "running")
-RETRYABLE = ("failed", "cancelled", "capped")  # the Retry (Continue, for capped) button on a task page
+RETRYABLE = ("failed", "cancelled", "capped", "refused")  # the Retry (Continue, for capped) button on a task page
 ACCEPTABLE = RETRYABLE + ("refused", "closed")  # the user may mark these as fine, so their follow-ups can run
 
 

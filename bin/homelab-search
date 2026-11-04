@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""homelab: the search index (H-012, index side). docs/search.md.
+
+  homelab-search sync [--source NAME]   re-index what changed, forget what is gone (the nightly job)
+  homelab-search rebuild                build the whole index again from the sources and swap it in
+  homelab-search status [--json]        chunks per source, type and project; last sync
+  homelab-search query TEXT [--project P] [--type T] [-k N] [--json]   nearest chunks (to check the index)
+
+Reads the sources, never writes to them. Config: config/search.json (SEARCH_CONFIG to override).
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve()
+for d in (HERE.parent.parent / "search", HERE.parent.parent / "lib" / "search", Path("/usr/local/lib/homelab/search")):
+    if (d / "index.py").exists():
+        sys.path.insert(0, str(d))
+        break
+import index  # noqa: E402
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("sync")
+    p.add_argument("--source")
+    sub.add_parser("rebuild")
+    p = sub.add_parser("status")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("query")
+    p.add_argument("text")
+    p.add_argument("--project")
+    p.add_argument("--type")
+    p.add_argument("-k", type=int, default=5)
+    p.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+    conf = index.load_config()
+    quiet = lambda *_: None  # noqa: E731
+    try:
+        if args.cmd == "rebuild":
+            print(json.dumps(index.rebuild(conf)))
+            return 0
+        idx = index.Index(conf)
+        if args.cmd == "sync":
+            print(json.dumps(idx.sync(only=args.source, log=print)))
+        elif args.cmd == "status":
+            st = idx.status()
+            print(json.dumps(st, indent=2) if args.json else
+                  f"{st['chunks']} chunks, last sync {st['last_sync']}\n" +
+                  "\n".join(f"  {k}: {v}" for part in ("by_source", "by_type", "by_project") for k, v in st[part].items()))
+        else:
+            hits = idx.query(args.text, k=args.k, project=args.project, type=args.type)
+            if args.json:
+                print(json.dumps(hits, indent=2))
+            for h in hits if not args.json else []:
+                print(f"{h['score']:.3f}  [{h['type']}] {h['project']} · {h['path']} · {h['location']} · {h['date']}")
+                print("   " + h["text"][:200].replace("\n", " "))
+        return 0
+    except index.FingerprintMismatch as e:
+        print(f"homelab-search: {e}", file=sys.stderr)
+        return 3
+    except Exception as e:  # noqa: BLE001  one clear line for the timer's journal, non-zero exit
+        print(f"homelab-search: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

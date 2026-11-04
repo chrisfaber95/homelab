@@ -1,0 +1,19 @@
+[Unit]
+Description=homelab: search index sync (H-012): re-index the sources that changed
+After=ollama.service
+
+[Service]
+Type=oneshot
+User=claude
+Group=claude
+StateDirectory=homelab-search
+ExecStart=/usr/local/bin/homelab-search sync
+Nice=10
+# The indexer only reads its sources; the one thing it writes is its own index under /var/lib/homelab-search.
+ProtectSystem=strict
+# The memory clone is fetched (remote-tracking ref only) so the nightly sync sees new memory.
+ReadWritePaths=/var/lib/homelab-search -/home/claude/dev/homelab-data
+ReadOnlyPaths=/srv /var/lib/inbox-sessions
+NoNewPrivileges=yes
+PrivateTmp=yes
+TimeoutStartSec=2h

@@ -23,7 +23,7 @@ import ast, pathlib
 files = [p for p in pathlib.Path(".").rglob("*.py") if ".git" not in p.parts]
 files += [pathlib.Path(f) for f in ("bin/homelab-admin", "bin/homelab-backup", "bin/homelab-deploy",
                                     "bin/homelab-inbox", "bin/homelab-monitor", "bin/llm",
-                                    "bin/llm-route")]
+                                    "bin/llm-route", "bin/homelab-search")]
 for p in files:
     ast.parse(p.read_text(), str(p))
 print(f"{len(files)} files parse")

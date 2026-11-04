@@ -47,7 +47,9 @@ dpkg -s acl >/dev/null 2>&1 || apt-get install -y -qq acl
 for d in "$TASK_HOME/.claude" "$TASK_HOME/.claude/sessions"; do
   [[ -d $d ]] || install -d -m 700 -o inbox -g inbox "$d"
 done
-install -d -m 2750 -o inbox -g claude "$SESSIONS_COPY" "$SESSIONS_COPY/sessions"
+# H-012: the search index reads the inbox transcripts (projects/*/*.jsonl) from the same copy. Text only; the indexer
+# scrubs secrets from every chunk, and the copy is as private as the session files (group claude, 0640).
+install -d -m 2750 -o inbox -g claude "$SESSIONS_COPY" "$SESSIONS_COPY/sessions" "$SESSIONS_COPY/projects"
 # The ACLs of the first attempt (homelab#49): claude no longer needs to pass through $TASK_HOME.
 for p in "$TASK_HOME" "$TASK_HOME/.claude" "$TASK_HOME/.claude/sessions" "$TASK_HOME"/.claude/sessions/*.json; do
   [[ -e $p ]] || continue
@@ -64,6 +66,7 @@ User=inbox
 Group=inbox
 UMask=0027
 ExecStart=/usr/bin/rsync -rt --delete --chmod=F640 --include=*.json --exclude=* $TASK_HOME/.claude/sessions/ $SESSIONS_COPY/sessions/
+ExecStart=/usr/bin/rsync -rt --delete --prune-empty-dirs --chmod=D2750,F640 --include=*/ --include=*.jsonl --exclude=* $TASK_HOME/.claude/projects/ $SESSIONS_COPY/projects/
 EOF
 cat > /etc/systemd/system/homelab-inbox-sessions.path <<EOF
 [Unit]

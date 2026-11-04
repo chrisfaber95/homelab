@@ -1,0 +1,10 @@
+[Unit]
+Description=homelab: search index sync every night at 03:15 (H-012)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

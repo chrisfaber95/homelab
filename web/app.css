@@ -273,3 +273,25 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* Briefs: a row of buttons (Approve & build, without me, Park). */
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .actions form { margin: 0; }
+
+/* Search tab: one column, touch-sized controls */
+.search label { display: block; margin: 12px 0 4px; }
+.search textarea { min-height: 5em; font-size: 16px; }
+.search select { min-height: 44px; font-size: 16px; }
+.search-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.search .check { display: flex; gap: 12px; align-items: center; min-height: 44px; margin: 14px 0 4px; }
+.search .check input { width: 24px; height: 24px; flex: none; margin: 0; }
+.search .check small { display: block; }
+.search-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.search-actions button { min-height: 44px; margin: 0; }
+#sanswer { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-panel); padding: 6px 18px 16px; margin-top: 18px; }
+.answer-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16.5px; }
+.cite { padding: 0 2px; font-weight: 600; }
+.cites { margin: 8px 0 0; padding-left: 28px; font-size: 14px; }
+.cites li { margin: 4px 0; overflow-wrap: anywhere; }
+.cites .uncited { opacity: 0.7; }
+.answer-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 14px; }
+.answer-foot button { min-height: 44px; margin: 0; }
+.snippet { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 440px) { .search-filters { grid-template-columns: 1fr; } .search-actions button { flex: 1 1 100%; } }

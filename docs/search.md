@@ -2,8 +2,8 @@
 
 A private, local index over everything written down: the second brain, the product repo, session transcripts, repo
 docs and code, and the F-023 memory. The index side builds and keeps the index; the query side
-(ranked results, cited answers, MCP tool; below) reads it. The Search tab of the homelab page and the claude-dashboard
-panel are later tasks and use the HTTP API described here. Code: `search/` (`chunkers.py`, `scrub.py`, `index.py`,
+(ranked results, cited answers, MCP tool; below) reads it. The Search tab of the homelab page (below) uses the HTTP API described here; the
+claude-dashboard panel is a later task. Code: `search/` (`chunkers.py`, `scrub.py`, `index.py`,
 `answer.py`, `server.py`), CLI `bin/homelab-search`, MCP server `bin/homelab-search-mcp`, config `config/search.json`,
 units `systemd/homelab-search-sync.{service,timer}` and `systemd/homelab-search-api.service`, installer
 `scripts/24-search.sh`. Tests: `tests/test_search_index.py`, `tests/test_search_query.py`.
@@ -221,5 +221,41 @@ Install notes:
 3. In sessions with a permission prompt the first call asks for `mcp__homelab-search__search` / `__ask`; allow them
    (both are read-only). Whether inbox rounds see user-scope MCP servers depends on the account they run as; not verified here.
 
-Other clients: the Search tab on the homelab page and the claude-dashboard panel call the same `/v1/*` endpoints (not part
-of this change).
+### Search tab on the homelab page
+
+`http://homelab.tail4eb878.ts.net:8105/search` (tab **Search**), built for a phone: one column, 44 px controls, 16 px
+text so iOS does not zoom. It has a question box, a **Hard question** switch (tier `hard`, Claude, uses allowance), the
+project and source-type filters (filled from `/v1/filters`), **Ask** (answer and sources) and **Only list sources**
+(no router call). The answer shows `[n]` as links to the source, the list of citations, and **Bad answer**
+(thumbs-down). Below it the raw results: path (a link when the source has one), type, location, date, project,
+source, snippet. Without JavaScript the tab shows only the form.
+
+The browser talks to the inbox only. The inbox (behind the same tailnet-owner check as every page) forwards to the
+loopback services, so the tab adds **no port, no CORS and no ufw rule**:
+
+| Inbox route | Goes to |
+| --- | --- |
+| `GET /api/search/filters` | search API `GET /v1/filters` |
+| `GET /api/search/results?q=&project=&type=` | search API `GET /v1/search` |
+| `POST /api/search/ask` (`question`, `hard`, `project`, `type`) | search API `POST /v1/ask` |
+| `POST /api/search/feedback` (`request_id`, `note`) | router `POST /v1/feedback` |
+
+POSTs carry the page's CSRF token and need the page's `Origin`, like every form (asking is a POST because `hard` spends
+allowance and must not be triggerable by a link). The thumbs-down posts the `request_id` of the answer; the router
+looks up the caller (`search`), tier and backend of that request and stores them, so it shows in the usage view
+(`docs/router.md`) at once. The button is hidden when there is no request id (the "nothing relevant" answer never
+called the router). A second click on the same answer returns the first feedback. A search service that is down gives
+a visible error with status 502, not an empty list. Settings: `SEARCH_URL` and `ROUTER_URL` in `config/inbox.conf`
+(loopback). Code: `bin/homelab_inbox/search.py`, `search_page()` in `pages.py`, the Search part of `web/app.js` and
+`web/app.css`. Tests: `tests/test_inbox_search.py`.
+
+### Exposure check
+
+`bin/homelab-exposure` covers the search API (8019), the router (8018) and the homelab page (8105), which listen on all
+addresses and rely on ufw plus their own client filter. `--static` checks that every `ufw allow` in `scripts/` is on
+`tailscale0` (SSH from the LAN excepted), that the router and search scripts open their port on `tailscale0` only, that
+both servers refuse clients outside loopback and `100.64.0.0/10`, that `SEARCH_URL`/`ROUTER_URL` are loopback and that
+the inbox guard is in place. On the box it also checks that the ports listen and that a request to the box's own LAN
+address is refused or answered 403. (It cannot read ufw without root; run `sudo ufw status` to see the rules.)
+
+Other client: the claude-dashboard panel calls the same `/v1/*` endpoints (not part of this change).

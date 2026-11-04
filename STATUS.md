@@ -56,6 +56,11 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
   pinned in `config/claude.conf` via a local marketplace `homelab-pinned`; installed by `scripts/18-claude.sh`. Only
   plugins without hooks or scripts; no security-guidance or claude-security (they call the Claude API themselves; the
   user's choice).
+- H-013 sdlc-studio deploy (2026-11-04, this PR): `sdlc-studio` in `config/repos.conf`, `deploy/sdlc-studio.service`
+  on 127.0.0.1:8112, `changes/0005-sdlc-studio-serve` publishes it on the tailnet as `http://homelab:8111`, link in
+  `config/services.conf`. Needs sdlc-studio PR #8 merged first (serves the UI, real router API). Not yet seen for real:
+  the unit running, serve's `Tailscale-User-Login` header making Chris the owner, and a visitor on another tailnet
+  login seeing only the examples. New skill `skills/deploy-on-the-box` and a deploy rule in the planner prompt.
 
 ## Next work
 

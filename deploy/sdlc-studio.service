@@ -1,0 +1,43 @@
+# homelab: sdlc-studio (H-013), idea-to-scaffold generator and portfolio demo. Tailnet only.
+# Listens on loopback 127.0.0.1:8112 only. `tailscale serve` (changes/0005-sdlc-studio-serve) publishes it on the
+# tailnet as http://homelab:8111 and adds the Tailscale-User-Login header: the app trusts that header from loopback
+# only, so Chris (SDLC_OWNER_IDENTITIES) is the owner and other tailnet users are read-only visitors.
+# Generation goes through the LLM router on loopback (H-012); the app has no Claude API key.
+# Optional /etc/sdlc-studio/env (root, 0600): SDLC_OWNER_TOKEN for the /new-project skill and scripts.
+[Unit]
+Description=sdlc-studio (homelab, H-013)
+After=network-online.target llm-router.service
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=sdlc-studio
+StateDirectoryMode=0700
+WorkingDirectory=/srv/homelab/releases/sdlc-studio/current
+Environment=NODE_ENV=production
+Environment=SDLC_HOST=127.0.0.1
+Environment=SDLC_PORT=8112
+Environment=SDLC_ROUTER_URL=http://127.0.0.1:8018
+Environment=SDLC_OWNER_IDENTITIES=chrisfaber95@github
+Environment=SDLC_DB_PATH=%S/sdlc-studio/sdlc-studio.db
+EnvironmentFile=-/etc/sdlc-studio/env
+ExecStart=/usr/bin/node backend/dist/main.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# It only talks to tailscaled and the router, both on loopback.
+IPAddressAllow=localhost
+IPAddressDeny=any
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

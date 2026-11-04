@@ -1,5 +1,5 @@
 {
-  "_comment": "Search index (H-012), docs/search.md. Read by bin/homelab-search. Sources are a list: each entry can be switched off with \"enabled\": false (its chunks leave the index at the next sync). kind: markdown (chunk per heading), transcript (per turn), code (per function-sized block), memory (markdown from a git branch). paths: folders (globs allowed; ~ is the service user's home). include/exclude: patterns on the path inside the folder (exclude also matches a folder name). project: name, {root} = folder name; project_rules (first match wins) override it. Indexing only ever reads these sources.",
+  "_comment": "Search index (H-012), docs/search.md. Read by bin/homelab-search. Sources are a list: each entry can be switched off with \"enabled\": false (its chunks leave the index at the next sync). kind: markdown (chunk per heading), transcript (per turn), code (per function-sized block), memory (markdown from a git branch). paths: folders (globs allowed; ~ is the service user's home). include/exclude: patterns on the path inside the folder (exclude also matches a folder name). project: name, {root} = folder name; project_rules (first match wins) override it. Indexing only ever reads these sources. query: the query and answer side (docs/search.md): min_score is the cosine similarity a chunk needs for `ask` to use it; links: URL template per source name ({path}, {path_noext}, {repo}, {rest}); a source without a template has no link.",
   "db": "/var/lib/homelab-search/index.db",
   "embedding": {
     "model": "nomic-embed-text",
@@ -10,6 +10,26 @@
     "timeout": 120,
     "doc_prefix": "search_document: ",
     "query_prefix": "search_query: "
+  },
+  "query": {
+    "k": 8,
+    "min_score": 0.5,
+    "ask_k": 6,
+    "chunk_chars": 1500,
+    "snippet_chars": 300,
+    "router_url": "http://127.0.0.1:8018",
+    "caller": "search",
+    "tier": "easy",
+    "hard_tier": "hard",
+    "router_timeout": 330,
+    "port": 8019,
+    "links": {
+      "second-brain": "obsidian://open?vault=second-brain&file={path_noext}",
+      "product": "https://github.com/chrisfaber95/product/blob/main/{path}",
+      "repo-docs": "https://github.com/chrisfaber95/{repo}/blob/main/{rest}",
+      "repo-code": "https://github.com/chrisfaber95/{repo}/blob/main/{rest}",
+      "memory": "https://github.com/chrisfaber95/homelab-data/blob/memory/{path}"
+    }
   },
   "sources": [
     {

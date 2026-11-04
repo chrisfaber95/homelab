@@ -4,7 +4,10 @@
   homelab-search sync [--source NAME]   re-index what changed, forget what is gone (the nightly job)
   homelab-search rebuild                build the whole index again from the sources and swap it in
   homelab-search status [--json]        chunks per source, type and project; last sync
-  homelab-search query TEXT [--project P] [--type T] [-k N] [--json]   nearest chunks (to check the index)
+  homelab-search query TEXT [--project P] [--type T] [--source S] [-k N] [--json]
+                                        ranked results: source, location, date, project, link (read-only)
+  homelab-search ask TEXT [--hard] [--project P] [--type T] [--source S] [--json]
+                                        one question, one cited answer written by the router (tier easy; --hard: hard)
 
 Reads the sources, never writes to them. Config: config/search.json (SEARCH_CONFIG to override).
 """
@@ -18,6 +21,7 @@ for d in (HERE.parent.parent / "search", HERE.parent.parent / "lib" / "search", 
     if (d / "index.py").exists():
         sys.path.insert(0, str(d))
         break
+import answer  # noqa: E402
 import index  # noqa: E402
 
 
@@ -33,7 +37,15 @@ def main(argv=None):
     p.add_argument("text")
     p.add_argument("--project")
     p.add_argument("--type")
+    p.add_argument("--source")
     p.add_argument("-k", type=int, default=5)
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("ask")
+    p.add_argument("text")
+    p.add_argument("--hard", action="store_true", help="mark the question hard: the router uses the hard tier")
+    p.add_argument("--project")
+    p.add_argument("--type")
+    p.add_argument("--source")
     p.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     conf = index.load_config()
@@ -42,25 +54,46 @@ def main(argv=None):
         if args.cmd == "rebuild":
             print(json.dumps(index.rebuild(conf)))
             return 0
+        if args.cmd in ("query", "ask"):  # read-only: the index is opened without write access
+            idx = index.Index(conf, readonly=True)
+            filters = {"project": args.project, "type": args.type, "source": args.source}
+            if args.cmd == "query":
+                hits = answer.search(idx, conf, args.text, k=args.k, **filters)
+                if args.json:
+                    print(json.dumps(hits, ensure_ascii=False, indent=2))
+                for h in [] if args.json else hits:
+                    print(f"{h['score']:.3f}  [{h['type']}] {h['project']} · {h['path']} · {h['location']} · {h['date']}")
+                    print("   " + h["snippet"][:200].replace("\n", " "))
+                    if h["link"]:
+                        print("   " + h["link"])
+                return 0
+            r = answer.ask(idx, conf, args.text, hard=args.hard, **filters)
+            if args.json:
+                print(json.dumps(r, ensure_ascii=False, indent=2))
+                return 0
+            print(r["answer"])
+            for c in r["citations"]:
+                print(f"  [{c['n']}] {c['project']} · {c['path']} · {c['location']} · {c['date']}"
+                      + (f"\n      {c['link']}" if c["link"] else ""))
+            if r["request_id"]:
+                print(f"(tier {r['tier']}, {r['backend']}; request id {r['request_id']}; "
+                      f"thumbs-down: llm-route feedback {r['request_id']})")
+            return 0
         idx = index.Index(conf)
         if args.cmd == "sync":
             print(json.dumps(idx.sync(only=args.source, log=print)))
-        elif args.cmd == "status":
+        else:
             st = idx.status()
             print(json.dumps(st, indent=2) if args.json else
                   f"{st['chunks']} chunks, last sync {st['last_sync']}\n" +
                   "\n".join(f"  {k}: {v}" for part in ("by_source", "by_type", "by_project") for k, v in st[part].items()))
-        else:
-            hits = idx.query(args.text, k=args.k, project=args.project, type=args.type)
-            if args.json:
-                print(json.dumps(hits, indent=2))
-            for h in hits if not args.json else []:
-                print(f"{h['score']:.3f}  [{h['type']}] {h['project']} · {h['path']} · {h['location']} · {h['date']}")
-                print("   " + h["text"][:200].replace("\n", " "))
         return 0
     except index.FingerprintMismatch as e:
         print(f"homelab-search: {e}", file=sys.stderr)
         return 3
+    except answer.AskError as e:
+        print(f"homelab-search: {e}" + (f" (request id {e.request_id})" if e.request_id else ""), file=sys.stderr)
+        return 1
     except Exception as e:  # noqa: BLE001  one clear line for the timer's journal, non-zero exit
         print(f"homelab-search: {type(e).__name__}: {e}", file=sys.stderr)
         return 1

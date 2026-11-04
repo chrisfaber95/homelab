@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""homelab: MCP server (stdio) that gives a Claude session on the box read-only access to the private search (H-012).
+
+Tools: `search` (ranked chunks with source, location, date, project, link) and `ask` (one short answer with
+citations, written by the router; `hard` marks the question hard). It only calls the search API
+(bin/homelab-search-mcp -> http://127.0.0.1:8019); it has no access to the index file, the sources or the router.
+Register: `claude mcp add --scope user homelab-search -- /usr/local/bin/homelab-search-mcp` (scripts/24-search.sh
+does this for the user `claude`). Environment: SEARCH_URL. Stdlib only, newline-delimited JSON-RPC on stdin/stdout.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+URL = os.environ.get("SEARCH_URL", "http://127.0.0.1:8019").rstrip("/")
+PROTOCOL = "2025-06-18"
+FILTERS = {
+    "project": {"type": "string", "description": "only this project, e.g. homelab, claude-dashboard, box"},
+    "type": {"type": "string", "description": "only this source type: wiki, product, transcript, repo-doc, "
+                                              "repo-code or memory"},
+    "source": {"type": "string", "description": "only this source name, e.g. second-brain or memory"},
+}
+TOOLS = [
+    {"name": "search",
+     "description": "Search Chris's private notes (second brain, briefs, session transcripts, repo docs and code, "
+                    "memory) by meaning. Returns ranked chunks with source, location, date, project and link. Use "
+                    "it BEFORE reading many files to find where something was decided or implemented.",
+     "inputSchema": {"type": "object", "required": ["query"], "properties": {
+         "query": {"type": "string", "description": "what to look for, as a sentence or keywords"},
+         "k": {"type": "integer", "description": "number of results (default 8, at most 50)"}, **FILTERS}},
+     "annotations": {"readOnlyHint": True, "openWorldHint": False}},
+    {"name": "ask",
+     "description": "Ask one question about Chris's notes and get a short answer with citations, written by the "
+                    "local model (or Claude when hard is true). Says so when nothing relevant is found. One "
+                    "question, one answer; no follow-ups.",
+     "inputSchema": {"type": "object", "required": ["question"], "properties": {
+         "question": {"type": "string"},
+         "hard": {"type": "boolean", "description": "true for a question that needs Claude (uses allowance)"},
+         **FILTERS}},
+     "annotations": {"readOnlyHint": True, "openWorldHint": False}},
+]
+
+
+def api(path, params):
+    qs = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    try:
+        with urllib.request.urlopen(f"{URL}{path}?{qs}", timeout=340) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.load(e)["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            msg = f"HTTP {e.code}"
+        raise RuntimeError(msg)
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"search API unreachable at {URL}: {getattr(e, 'reason', e)}")
+
+
+def fmt_hit(h):
+    head = f"{h['project']} · {h['type']} · {h['path']} · {h['location']} · {h['date']} (score {h['score']:.2f})"
+    return head + (f"\n{h['link']}" if h.get("link") else "") + f"\n{h['snippet']}"
+
+
+def call_tool(name, a):
+    filters = {k: a.get(k) for k in ("project", "type", "source")}
+    if name == "search":
+        r = api("/v1/search", {"q": a.get("query"), "k": a.get("k"), **filters})
+        return "\n\n".join(fmt_hit(h) for h in r["results"]) or "No results."
+    if name == "ask":
+        r = api("/v1/ask", {"q": a.get("question"), "hard": "1" if a.get("hard") else "", **filters})
+        lines = [r["answer"]]
+        lines += [f"[{c['n']}] {c['project']} · {c['path']} · {c['location']} · {c['date']}"
+                  + (f" {c['link']}" if c.get("link") else "") for c in r["citations"]]
+        if r.get("request_id"):
+            lines.append(f"(router request id {r['request_id']})")
+        return "\n".join(lines)
+    raise KeyError(name)
+
+
+def handle(msg):
+    method, mid = msg.get("method"), msg.get("id")
+    if mid is None:  # notification (initialized, cancelled): no answer
+        return None
+    if method == "initialize":
+        version = (msg.get("params") or {}).get("protocolVersion") or PROTOCOL
+        result = {"protocolVersion": version, "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "homelab-search", "version": "1"}}
+    elif method == "ping":
+        result = {}
+    elif method == "tools/list":
+        result = {"tools": TOOLS}
+    elif method == "tools/call":
+        p = msg.get("params") or {}
+        try:
+            result = {"content": [{"type": "text", "text": call_tool(p.get("name"), p.get("arguments") or {})}]}
+        except KeyError:
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Unknown tool {p.get('name')}"}}
+        except RuntimeError as e:
+            result = {"content": [{"type": "text", "text": str(e)}], "isError": True}
+    else:
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Unknown method {method}"}}
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def main():
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            reply = handle(json.loads(line))
+        except ValueError:
+            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
+        if reply is not None:
+            sys.stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

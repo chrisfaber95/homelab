@@ -378,3 +378,9 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] `homelab-search status` shows chunks for every source; `systemctl list-timers homelab-search-sync.timer` shows
       03:15; the day after, `journalctl -u homelab-search-sync` shows only changed files.
 - [ ] After the move to the GTX 1080: measure GPU memory and fill in the table in `docs/search.md`.
+- [ ] H-012 query side: re-run `sudo bash /var/lib/homelab/repo/scripts/24-search.sh` (service `homelab-search-api` on
+      port 8019, ufw only `tailscale0`, MCP tool registered for `claude`), then as `claude`
+      `bash /home/claude/homelab/scripts/18-claude.sh` for the session instruction. Check: `homelab-search query "router tiers"`,
+      `homelab-search ask "where is the router config?"` (answer with `[1]` links and a request id), a nonsense question
+      says nothing relevant was found, `claude mcp list` shows `homelab-search`, and from Windows with Tailscale **off**
+      `Test-NetConnection <lan-ip> -Port 8019` is `False`. Tune `query.min_score` in `config/search.json` (docs/search.md).

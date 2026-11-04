@@ -1,0 +1,22 @@
+[Unit]
+Description=homelab: search API (H-012): ranked results and cited answers, read-only, tailnet only
+After=ollama.service llm-router.service tailscaled.service
+Wants=ollama.service llm-router.service
+
+[Service]
+User=claude
+Group=claude
+ExecStart=/usr/bin/python3 /usr/local/lib/homelab/search/server.py
+Environment=SEARCH_CONFIG=/usr/local/lib/homelab/config/search.json
+Restart=always
+RestartSec=3
+# Read-only: the API opens the index read-only and talks to Ollama (embedding the question) and the router.
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/var/lib/homelab-search
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

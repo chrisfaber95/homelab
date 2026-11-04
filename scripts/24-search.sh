@@ -6,7 +6,9 @@
 # Rebuild the whole index from its sources (also after a rebuilt box, or after changing the model, the chunking rules
 # or the scrub patterns):  sudo bash /var/lib/homelab/repo/scripts/24-search.sh --rebuild
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/24-search.sh [--rebuild]
-# homelab-rerun: root bin/homelab-search search config/search.json systemd/homelab-search-sync.service systemd/homelab-search-sync.timer
+# Also the query side: the API service `homelab-search-api` (port 8019, ufw: only tailscale0), the CLI (`homelab-search
+# query|ask`) and the MCP tool for Claude sessions (`homelab-search-mcp`, registered for the user claude).
+# homelab-rerun: root bin/homelab-search bin/homelab-search-mcp search config/search.json systemd/homelab-search-sync.service systemd/homelab-search-sync.timer systemd/homelab-search-api.service
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -22,8 +24,11 @@ echo "== Programma's naar $DEST"
 install -d -m 755 "$DEST/bin" "$DEST/search" "$DEST/config"
 for f in "$REPO"/search/*.py; do install -m 644 "$f" "$DEST/search/$(basename "$f")"; done
 install -m 755 "$REPO/bin/homelab-search" "$DEST/bin/homelab-search"
+install -m 755 "$REPO/bin/homelab-search-mcp" "$DEST/bin/homelab-search-mcp"
 install -m 644 "$REPO/config/search.json" "$DEST/config/search.json"
 ln -sfn "$DEST/bin/homelab-search" /usr/local/bin/homelab-search
+ln -sfn "$DEST/bin/homelab-search-mcp" /usr/local/bin/homelab-search-mcp
+SEARCH_PORT=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1])).get('query',{}).get('port',8019))" "$REPO/config/search.json")
 
 echo "== Embeddingmodel"
 MODEL=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['embedding']['model'])" "$REPO/config/search.json")
@@ -49,3 +54,23 @@ else
 fi
 runuser -u "$SEARCH_USER" -- /usr/local/bin/homelab-search status
 systemctl is-enabled homelab-search-sync.timer
+
+echo "== Search API (port $SEARCH_PORT, tailnet only)"
+install -m 644 "$REPO/systemd/homelab-search-api.service" /etc/systemd/system/homelab-search-api.service
+systemctl daemon-reload
+systemctl enable homelab-search-api.service
+systemctl restart homelab-search-api.service
+ufw allow in on tailscale0 to any port "$SEARCH_PORT" proto tcp comment 'homelab-search-api tailnet'
+ufw status | grep -E "^$SEARCH_PORT/tcp on tailscale0 +ALLOW" >/dev/null
+for _ in $(seq 15); do curl -fsS "http://127.0.0.1:$SEARCH_PORT/health" >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS "http://127.0.0.1:$SEARCH_PORT/health"; echo
+echo "== MCP tool for Claude sessions of $SEARCH_USER"
+CLAUDE_BIN=$(runuser -u "$SEARCH_USER" -- bash -lc 'command -v claude' || true)
+if [[ -n $CLAUDE_BIN ]]; then
+  runuser -u "$SEARCH_USER" -- "$CLAUDE_BIN" mcp remove --scope user homelab-search >/dev/null 2>&1 || true
+  runuser -u "$SEARCH_USER" -- "$CLAUDE_BIN" mcp add --scope user homelab-search -- /usr/local/bin/homelab-search-mcp
+else
+  echo "WAARSCHUWING: claude niet gevonden voor $SEARCH_USER; registreer de MCP-tool later met:" >&2
+  echo "  claude mcp add --scope user homelab-search -- /usr/local/bin/homelab-search-mcp" >&2
+fi
+echo "The instruction for sessions is in claude/CLAUDE.md; install it with scripts/18-claude.sh (as claude)."

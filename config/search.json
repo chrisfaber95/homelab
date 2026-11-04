@@ -1,0 +1,86 @@
+{
+  "_comment": "Search index (H-012), docs/search.md. Read by bin/homelab-search. Sources are a list: each entry can be switched off with \"enabled\": false (its chunks leave the index at the next sync). kind: markdown (chunk per heading), transcript (per turn), code (per function-sized block), memory (markdown from a git branch). paths: folders (globs allowed; ~ is the service user's home). include/exclude: patterns on the path inside the folder (exclude also matches a folder name). project: name, {root} = folder name; project_rules (first match wins) override it. Indexing only ever reads these sources.",
+  "db": "/var/lib/homelab-search/index.db",
+  "embedding": {
+    "model": "nomic-embed-text",
+    "url": "http://127.0.0.1:11434",
+    "batch": 16,
+    "max_chars": 6000,
+    "keep_alive": "30s",
+    "timeout": 120,
+    "doc_prefix": "search_document: ",
+    "query_prefix": "search_query: "
+  },
+  "sources": [
+    {
+      "name": "second-brain", "type": "wiki", "kind": "markdown", "enabled": true,
+      "paths": ["/srv/obsidian/second-brain"],
+      "include": ["wiki/*.md", "index.md", "log.md"],
+      "exclude": [".git", ".obsidian", "raw"],
+      "project": "second-brain",
+      "project_rules": [{"match": "^wiki/projects/([^/]+)\\.md$", "project": "\\1"}]
+    },
+    {
+      "name": "product", "type": "product", "kind": "markdown", "enabled": true,
+      "paths": ["~/dev/product"],
+      "include": ["*.md"],
+      "exclude": [".git", "node_modules"],
+      "project": "product",
+      "project_rules": [{"match": "^([^/]+)/", "project": "\\1"}]
+    },
+    {
+      "name": "inbox-transcripts", "type": "transcript", "kind": "transcript", "enabled": true,
+      "paths": ["/var/lib/inbox-sessions/projects"],
+      "include": ["*.jsonl"],
+      "exclude": [],
+      "fallback_project": "inbox",
+      "project_rules": [{"transcript": true}]
+    },
+    {
+      "name": "claude-sessions", "type": "transcript", "kind": "transcript", "enabled": true,
+      "paths": ["~/.claude/projects"],
+      "include": ["*.jsonl"],
+      "exclude": [],
+      "fallback_project": "claude",
+      "project_rules": [{"transcript": true}]
+    },
+    {
+      "name": "repo-docs", "type": "repo-doc", "kind": "markdown", "enabled": true, "multi_root": true,
+      "paths": ["/srv/homelab/repos/*"],
+      "include": ["*.md"],
+      "exclude": [".git", "node_modules", "dist", "CHANGELOG.md"],
+      "project": "{root}"
+    },
+    {
+      "name": "repo-code", "type": "repo-code", "kind": "code", "enabled": true, "multi_root": true,
+      "paths": ["/srv/homelab/repos/*"],
+      "include": ["*.py", "*.sh", "*.js", "*.mjs", "*.ts", "*.vue", "*.service", "*.timer", "*.yaml", "*.yml", "bin/*"],
+      "exclude": [".git", "node_modules", "dist", "build", "*.min.js", "package-lock.json", "*.pem", "*.key", ".env*"],
+      "max_bytes": 300000,
+      "project": "{root}"
+    },
+    {
+      "name": "memory", "type": "memory", "kind": "memory", "enabled": true,
+      "paths": ["~/dev/homelab-data"],
+      "git_branch": "origin/memory", "fetch": true,
+      "include": ["*.md"],
+      "exclude": [],
+      "project": "homelab",
+      "project_rules": [{"frontmatter": "over"}]
+    }
+  ],
+  "scrub": [
+    {"name": "private-key", "regex": "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|\\Z)"},
+    {"name": "anthropic-key", "regex": "sk-ant-[A-Za-z0-9_\\-]{8,}"},
+    {"name": "api-key", "regex": "\\bsk-[A-Za-z0-9_\\-]{20,}"},
+    {"name": "github-token", "regex": "\\bgh[pousr]_[A-Za-z0-9]{20,}|\\bgithub_pat_[A-Za-z0-9_]{20,}"},
+    {"name": "aws-key", "regex": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b"},
+    {"name": "slack-token", "regex": "\\bxox[abprs]-[A-Za-z0-9-]{10,}"},
+    {"name": "jwt", "regex": "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}"},
+    {"name": "bearer", "regex": "(?i)\\bbearer\\s+([A-Za-z0-9._~+/=-]{16,})", "group": 1},
+    {"name": "url-credentials", "regex": "://[^/\\s:@]+:([^@\\s/]+)@", "group": 1},
+    {"name": "env-value", "regex": "(?im)^[ \\t]*(?:export[ \\t]+)?[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH)[A-Z0-9_]*[ \\t]*=[ \\t]*[\"']?([^\\s\"']+)", "group": 1},
+    {"name": "assigned-secret", "regex": "(?i)\\b(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|apikey|access[_-]?key|auth)[\"']?[ \\t]*[:=][ \\t]*[\"']?([^\\s\"',;]{6,})", "group": 1},
+    {"name": "spoken-password", "regex": "(?i)\\b(?:password|passphrase|passwd)[ \\t]+(?:is|was|=)[ \\t]+[\"']?([^\\s\"',;]{4,})", "group": 1}
+  ]
+}

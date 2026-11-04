@@ -14,6 +14,7 @@ request. Code: `llm/router.py` (service `llm-router`, port 8018), `llm/jobs.py` 
 
 **No Claude API key is used or stored anywhere.** The Claude backend only runs the CLI; the router removes
 `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the CLI's environment so it cannot fall back to API billing.
+The CLI runs with `--tools ""` (no Bash, no file access) in an empty temp directory, so a prompt can only produce text.
 The service runs as `ROUTER_USER` (`config/llm.conf`, default `claude`): the CLI must be logged in as that user.
 Change the user there if the subscription login lives under another account.
 

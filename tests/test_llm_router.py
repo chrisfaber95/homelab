@@ -216,7 +216,7 @@ class ClaudeCli(RouterCase):
         self.assertEqual((r["output"], r["backend"]), ("cli answer", "claude"))
         self.assertEqual(r["usage"], {"prompt_tokens": 105, "completion_tokens": 7})
         args = self.args_file.read_text()
-        self.assertIn("-p --output-format json --model sonnet", args)
+        self.assertIn("-p --output-format json --tools  --model sonnet", args)
         self.assertIn("key=unset", args)
         self.assertEqual(Path(str(self.args_file) + ".stdin").read_text(), "be brief\n\nquestion?")
         self.assertEqual(self.new_rows()[0]["prompt_tokens"], 105)

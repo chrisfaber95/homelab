@@ -178,7 +178,8 @@ def parse_claude_output(raw):
 def run_claude(req, timeout):
     conf = load_tiers()["claude"]
     prompt, schema = claude_prompt(req)
-    cmd = [conf["command"], "-p", "--output-format", "json"]
+    # --tools "": a request is text in, text out. Prompt injection must not reach tools (Bash, file access).
+    cmd = [conf["command"], "-p", "--output-format", "json", "--tools", ""]
     if conf.get("model"):
         cmd += ["--model", conf["model"]]
     cmd += list(conf.get("extra_args") or [])

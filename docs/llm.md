@@ -1,5 +1,8 @@
 # LLM-helper (F-017)
 
+> Sinds H-012 is de helper een dunne shim op de LLM-router: elke chat gaat als tier `easy` met caller `f017-legacy` (of de
+> opgegeven caller) door de router. Zie `docs/router.md`.
+
 Twee jobs op het lokale model van de homelab, voor scripts op je tailnet: **summarize** (tekst samenvatten) en
 **extract** (velden of een label uit tekst halen, als JSON). Via het commando `llm` of via een OpenAI-compatibele
 API op `http://homelab:8017/v1`. Geen sleutel nodig. Vanaf het LAN buiten Tailscale is de poort dicht.

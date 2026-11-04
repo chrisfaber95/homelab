@@ -214,6 +214,11 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       Op de laptop `llama3.1:8b`, bewust grotendeels op de CPU (zie `docs/llm.md`). Controle: `echo test | llm summarize`
       werkt, en vanaf Windows met Tailscale **uit** is `Test-NetConnection <lan-ip> -Port 8017` `False`.
       Zie `docs/llm.md` voor `llm` op Windows.
+- [ ] H-012 (LLM router, `llm-route`): installed by the same `17-llm.sh` (service `llm-router` on port 8018, ufw: only
+      `tailscale0`; runs as `ROUTER_USER`, where the `claude` CLI must be logged in). Check: `llm-route tiers`,
+      `echo test | llm-route ask --caller check --tier easy`, and from Windows with Tailscale **off**
+      `Test-NetConnection <lan-ip> -Port 8018` is `False`. Needs the `claude` login of that user for the `hard` tier
+      (`echo test | llm-route ask --caller check --tier hard`). See `docs/router.md`.
 - [ ] F-018 (projecten, rootless Docker, Node): zie `docs/projects.md`.
   - [ ] Op GitHub een fine-grained token: All repositories, Contents = Read-only.
   - [ ] `sudo bash /home/claude/homelab/scripts/18-projects.sh` (vraagt om het token; controleert dat het niet kan pushen).

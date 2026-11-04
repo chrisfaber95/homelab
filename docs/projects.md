@@ -193,6 +193,11 @@ and `npm run build` (backend and Vue frontend), then `homelab-app-sdlc-studio.se
 - **`/new-project` from a terminal**: needs an owner token. Put `SDLC_OWNER_TOKEN=<random>` in `/etc/sdlc-studio/env`
   (root, 0600), restart `homelab-app-sdlc-studio`, and give the skill `SDLC_URL=http://127.0.0.1:8112` and the same
   token.
+- **Publish to GitHub**: put `SDLC_GITHUB_TOKEN=<token>` (and `SDLC_GITHUB_OWNER=<org>` for an organisation) in
+  `/etc/sdlc-studio/env` and restart `homelab-app-sdlc-studio`. Without it the publish form says publishing is off.
+  Prefer a fine-grained token (repository create, contents write, workflows) over the `gh` token. The unit allows
+  outbound traffic for this (api.github.com). The token is not in this repo: after a rebuild without a restore, put
+  it back by hand.
 - **After a rebuild**: the serve config is in tailscaled's state, which `config/backup.list` keeps, so a restore
   brings it back. Rebuilt without a restore: rerun `changes/0005-sdlc-studio-serve` (change a comment line).
 - **Trust**: the app trusts the identity header from loopback, so any process on the box can act as the owner on

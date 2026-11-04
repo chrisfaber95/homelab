@@ -3,7 +3,8 @@
 # tailnet as http://homelab:8111 and adds the Tailscale-User-Login header: the app trusts that header from loopback
 # only, so Chris (SDLC_OWNER_IDENTITIES) is the owner and other tailnet users are read-only visitors.
 # Generation goes through the LLM router on loopback (H-012); the app has no Claude API key.
-# Optional /etc/sdlc-studio/env (root, 0600): SDLC_OWNER_TOKEN for the /new-project skill and scripts.
+# Optional /etc/sdlc-studio/env (root, 0600): SDLC_OWNER_TOKEN for the /new-project skill and scripts, and
+# SDLC_GITHUB_TOKEN (optionally SDLC_GITHUB_OWNER) to publish a project to a new private GitHub repo.
 [Unit]
 Description=sdlc-studio (homelab, H-013)
 After=network-online.target llm-router.service
@@ -28,9 +29,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-# It only talks to tailscaled and the router, both on loopback.
-IPAddressAllow=localhost
-IPAddressDeny=any
+# Outbound traffic is allowed: publishing a project calls api.github.com, and systemd can't filter on a hostname
+# (GitHub's IP ranges change). Inbound is unaffected: the app still listens on loopback only.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 CapabilityBoundingSet=
 PrivateDevices=yes

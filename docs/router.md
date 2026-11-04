@@ -22,6 +22,7 @@ Change the user there if the subscription login lives under another account.
 
 ```json
 {
+  "default_backend": "claude",
   "claude": {"command": "claude", "model": null, "extra_args": []},
   "tiers": {
     "easy": {"backend": "local",  "timeout": 120, "on_failure": "fail"},
@@ -41,6 +42,8 @@ Change the user there if the subscription login lives under another account.
   - `escalate`: the router tries the **other** backend once (local to claude, claude to local), again with the
     tier's timeout. A request the caller got wrong (`bad_request`) is never escalated; too long for the local
     context (`too_long`) is.
+- `default_backend` (default `claude`) and the optional per-tier `baseline`: what a caller would have used
+  without the router. Only used for "Claude runs avoided" (see "Usage log").
 - `claude`: `command` (path of the CLI), optional `model`, optional `extra_args`.
 
 Starting tiers: `easy` is local, `hard` is Claude, both `fail`. Escalating costs allowance silently, so it is
@@ -71,6 +74,8 @@ llm-route ask --caller x --tier easy --job extract --fields name,amount:number i
 llm-route ask --caller x --tier easy --json prompt.txt      # backend, outcome, tokens as JSON
 llm-route tiers
 llm-route usage --days 7
+llm-route ask --caller x --tier easy --show-id q.txt        # request id on stderr
+llm-route feedback 3f9a1c0b2d4e --note "wrong date"         # thumbs-down on that answer
 ```
 
 Exit codes: 0 ok, 1 request failed, 2 wrong call (including an unknown tier), 3 router unreachable, 4 timeout.
@@ -81,11 +86,17 @@ HTTP:
 ```
 POST /v1/route   {"caller": "nightly-digest", "tier": "easy", "prompt": "...",
                   "system": "...", "job": "summarize|extract", "messages": [...], "timeout": 60}
-  200 {"output", "caller", "tier", "backend", "outcome", "escalated_from", "duration_ms",
+  200 {"request_id", "output", "caller", "tier", "backend", "outcome", "escalated_from", "duration_ms",
        "usage": {"prompt_tokens", "completion_tokens"}}
-  4xx/5xx {"error": {"message", "code"}}
-GET /v1/tiers     GET /v1/usage?days=7     GET /health
+  4xx/5xx {"error": {"message", "code", "request_id"}}
+POST /v1/feedback {"request_id": "3f9a1c0b2d4e", "note": "optional, up to 1000 characters"}
+  200 {"ts", "request_id", "caller", "tier", "backend", "note"}   404 unknown_request, 400 no_answer
+GET /v1/tiers     GET /v1/usage?days=7     GET /usage?days=7 (HTML page)     GET /health
 ```
+
+Every response, success or error, carries the request id (`request_id` in the body, header `X-Request-Id`), also
+a request rejected as bad (that one is not logged, so it cannot get feedback). Pass the id on to whoever can judge
+the answer, so they can thumbs-down it.
 
 `prompt` or `messages` (chat format) is required. `job` reuses the F-017 prompts (`summarize`, `extract` with
 `fields`/`labels`/`response_format`), on either backend; extract answers are validated against the schema.
@@ -122,10 +133,25 @@ request:
 
 Bad requests (no caller, unknown tier, ...) are rejected with 400 before routing and are not logged.
 
-`llm-route usage` / `GET /v1/usage` give requests per caller, tier, backend and outcome, the share served locally, the number of
-escalations and "Claude runs avoided". That last number is an estimate: every request the local model answered
-is counted as a Claude run that did not happen, because the CLI reports no cost. A usage page on the homelab
-page, and thumbs-down on answers, are still to be built.
+## Usage view and thumbs-down
+
+`llm-route usage`, `GET /v1/usage` and the page `http://homelab:8018/usage?days=7` (phone-friendly; same tailnet-only
+port as the router, so no new port or ufw rule) show: requests per caller and tier (with how many went local, to
+Claude or failed), the share served locally, escalations, "Claude runs avoided" and the thumbs-down.
+
+**Claude runs avoided** is an estimate, because the CLI reports no cost. A request counts as avoided when the local
+backend answered it as the tier's own backend (`backend` local, `outcome` `ok`) **and** the tier's baseline is `claude`.
+The baseline is what the caller would have used without the router: `default_backend` in `config/router.json`
+(default `claude`), overridable per tier with `baseline`. Set a tier's `baseline` to `local` if its caller never
+would have used Claude. Escalated requests do not count (Claude was tried first). Tiers that are no longer in the
+table use the default.
+
+**Thumbs-down:** `llm-route feedback <request id>` or `POST /v1/feedback` stores a row in the `feedback` table of
+the same database with the request id and a copy of the request's caller, tier and backend (the backend that
+answered, so after an escalation that is the second one) and an optional note. One per request; repeating it
+changes nothing. A failed request has no answer and is refused (`no_answer`). The view groups them by caller, tier
+and backend and lists the latest 20 with their request ids, so a pattern of local misses shows up in the tier table.
+Requests logged before request ids existed have none and cannot be marked.
 
 ## Tests
 

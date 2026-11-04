@@ -8,7 +8,9 @@ escalate to the other backend. Every request is logged to an append-only SQLite 
 
   POST /v1/route     {"caller", "tier", "messages" | "prompt", "system"?, "job"?, "timeout"?}
   GET  /v1/tiers     the tier table
+  POST /v1/feedback  {"request_id", "note"?}   thumbs-down on a logged answer
   GET  /v1/usage?days=7
+  GET  /usage?days=7                           the same as a page (tailnet only, like the rest)
   GET  /health
 
 Only stdlib. Overridable for tests: ROUTER_CONFIG, ROUTER_DB, ROUTER_PORT.
@@ -22,7 +24,9 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
+from html import escape
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -40,9 +44,9 @@ API_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
 class RouterError(Exception):
-    def __init__(self, status, message, code):
+    def __init__(self, status, message, code, request_id=None):
         super().__init__(message)
-        self.status, self.code = status, code
+        self.status, self.code, self.request_id = status, code, request_id
 
 
 # --- Config: the tier table
@@ -73,7 +77,13 @@ def load_tiers():
             raise ValueError(f"router.json: tier {name}: on_failure must be one of {', '.join(ON_FAILURE)}")
         if not isinstance(t.get("timeout"), (int, float)) or not 0 < t["timeout"] <= jobs.MAX_TIMEOUT:
             raise ValueError(f"router.json: tier {name}: timeout must be a number of seconds, 1 to {jobs.MAX_TIMEOUT}")
-    conf = {"tiers": tiers, "claude": {"command": "claude", "model": None, "extra_args": []} | raw.get("claude", {})}
+    default = raw.get("default_backend", "claude")
+    if default not in OTHER:
+        raise ValueError(f"router.json: default_backend must be one of {', '.join(OTHER)}")
+    for name, t in tiers.items():
+        if t.get("baseline", default) not in OTHER:
+            raise ValueError(f"router.json: tier {name}: baseline must be one of {', '.join(OTHER)}")
+    conf = {"default_backend": default, "tiers": tiers, "claude": {"command": "claude", "model": None, "extra_args": []} | raw.get("claude", {})}
     _conf_cache.update(key=(str(path), mtime), conf=conf)
     return conf
 
@@ -90,9 +100,16 @@ def db_path():
 def db():
     conn = sqlite3.connect(db_path())
     conn.execute("""CREATE TABLE IF NOT EXISTS requests (
-        ts TEXT NOT NULL, caller TEXT NOT NULL, tier TEXT NOT NULL, backend TEXT NOT NULL,
+        id TEXT, ts TEXT NOT NULL, caller TEXT NOT NULL, tier TEXT NOT NULL, backend TEXT NOT NULL,
         escalated_from TEXT, outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'failed', 'escalated')),
         duration_ms INTEGER NOT NULL, error TEXT, prompt_tokens INTEGER, completion_tokens INTEGER)""")
+    if "id" not in {r[1] for r in conn.execute("PRAGMA table_info(requests)")}:  # log from before request ids
+        conn.execute("ALTER TABLE requests ADD COLUMN id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS requests_id ON requests (id)")
+    # A thumbs-down copies caller, tier and backend from the request, so it stays readable on its own.
+    conn.execute("""CREATE TABLE IF NOT EXISTS feedback (
+        ts TEXT NOT NULL, request_id TEXT NOT NULL UNIQUE, caller TEXT NOT NULL, tier TEXT NOT NULL,
+        backend TEXT NOT NULL, note TEXT)""")
     for verb in ("UPDATE", "DELETE"):
         conn.execute(f"""CREATE TRIGGER IF NOT EXISTS requests_no_{verb.lower()} BEFORE {verb} ON requests
                          BEGIN SELECT RAISE(ABORT, 'requests is append-only'); END""")
@@ -106,6 +123,26 @@ def log_request(**row):
                      list(row.values()))
 
 
+def add_feedback(request_id, note=None):
+    """Thumbs-down on a logged answer. Idempotent: a second one for the same request returns the first."""
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise RouterError(400, "request_id is verplicht.", "bad_request")
+    if note is not None and (not isinstance(note, str) or len(note) > 1000):
+        raise RouterError(400, "note moet tekst zijn, tot 1000 tekens.", "bad_request")
+    with _db_lock, db() as conn:
+        r = conn.execute("SELECT caller, tier, backend, outcome FROM requests WHERE id = ?", (request_id,)).fetchone()
+        if not r:
+            raise RouterError(404, f"Geen gelogd verzoek met id {request_id!r}.", "unknown_request")
+        if r[3] == "failed":
+            raise RouterError(400, "Dat verzoek gaf geen antwoord; er valt niets af te keuren.", "no_answer")
+        conn.execute("INSERT OR IGNORE INTO feedback (ts, request_id, caller, tier, backend, note) VALUES (?,?,?,?,?,?)",
+                     (datetime.now(timezone.utc).isoformat(timespec="seconds"), request_id, r[0], r[1], r[2],
+                      (note or "").strip() or None))
+        row = conn.execute("SELECT ts, request_id, caller, tier, backend, note FROM feedback WHERE request_id = ?",
+                           (request_id,)).fetchone()
+    return dict(zip(("ts", "request_id", "caller", "tier", "backend", "note"), row))
+
+
 def usage(days):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     with _db_lock, db() as conn:
@@ -113,16 +150,79 @@ def usage(days):
                                       COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0)
                                FROM requests WHERE ts >= ? GROUP BY caller, tier, backend, outcome
                                ORDER BY COUNT(*) DESC""", (since,)).fetchall()
+        bad = conn.execute("""SELECT caller, tier, backend, COUNT(*), MAX(ts) FROM feedback WHERE ts >= ?
+                              GROUP BY caller, tier, backend ORDER BY COUNT(*) DESC""", (since,)).fetchall()
+        recent = conn.execute("""SELECT ts, request_id, caller, tier, backend, note FROM feedback WHERE ts >= ?
+                                 ORDER BY ts DESC, rowid DESC LIMIT 20""", (since,)).fetchall()
     keys = ("caller", "tier", "backend", "outcome", "count", "duration_ms", "prompt_tokens", "completion_tokens")
     groups = [dict(zip(keys, r)) for r in rows]
     total = sum(g["count"] for g in groups)
     served = [g for g in groups if g["outcome"] != "failed"]
     local = sum(g["count"] for g in served if g["backend"] == "local")
+    try:
+        conf = load_tiers()
+    except (OSError, ValueError):  # the view must still work on a broken table
+        conf = {"default_backend": "claude", "tiers": {}}
+    default = conf["default_backend"]
+
+    def baseline(tier):  # what this tier would have used without the router; tiers gone from the table: the default
+        return conf["tiers"].get(tier, {}).get("baseline", default)
+
+    # Estimate (docs/router.md): a request the tier's own local backend answered, where the baseline is claude.
+    # Escalated ones do not count: claude was tried first.
+    avoided = sum(g["count"] for g in groups if g["backend"] == "local" and g["outcome"] == "ok"
+                  and baseline(g["tier"]) == "claude")
+    pairs = {}
+    for g in groups:
+        p = pairs.setdefault((g["caller"], g["tier"]), {"caller": g["caller"], "tier": g["tier"], "count": 0,
+                                                       "local": 0, "claude": 0, "failed": 0})
+        p["count"] += g["count"]
+        p["failed" if g["outcome"] == "failed" else g["backend"]] += g["count"]
+    fkeys = ("ts", "request_id", "caller", "tier", "backend", "note")
     return {"days": days, "since": since, "total": total, "groups": groups,
+            "by_caller_tier": sorted(pairs.values(), key=lambda p: -p["count"]),
             "served_locally": local, "share_local": round(local / sum(g["count"] for g in served), 3) if served else None,
             "escalations": sum(g["count"] for g in groups if g["outcome"] == "escalated"),
-            # Estimate: a request the local model answered is a Claude run that was not made.
-            "claude_runs_avoided": local}
+            "default_backend": default, "claude_runs_avoided": avoided,
+            "thumbs_down": {"total": sum(b[3] for b in bad),
+                            "groups": [dict(zip(("caller", "tier", "backend", "count", "last"), b)) for b in bad],
+                            "recent": [dict(zip(fkeys, r)) for r in recent]}}
+
+
+def usage_page(days):
+    u = usage(days)
+    e = escape
+    share = "n/a" if u["share_local"] is None else f"{u['share_local'] * 100:.0f}%"
+
+    def table(head, body):
+        th = "".join(f"<th>{e(h)}</th>" for h in head)
+        tr = "".join("<tr>" + "".join(f"<td>{e(str(c))}</td>" for c in r) + "</tr>" for r in body)
+        return f"<table><tr>{th}</tr>{tr}</table>" if body else "<p>None.</p>"
+
+    pairs = table(["caller", "tier", "requests", "local", "claude", "failed"],
+                  [[p["caller"], p["tier"], p["count"], p["local"], p["claude"], p["failed"]] for p in u["by_caller_tier"]])
+    bad = table(["caller", "tier", "backend", "thumbs-down", "last"],
+                [[b["caller"], b["tier"], b["backend"], b["count"], b["last"]] for b in u["thumbs_down"]["groups"]])
+    recent = table(["when", "request id", "caller", "tier", "backend", "note"],
+                   [[r[k] or "" for k in ("ts", "request_id", "caller", "tier", "backend", "note")]
+                    for r in u["thumbs_down"]["recent"]])
+    nav = " ".join(f'<a href="/usage?days={d}">{d} d</a>' for d in (1, 7, 30, 90))
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>LLM router usage</title>
+<style>body{{font:15px system-ui,sans-serif;margin:1rem;max-width:60rem}}table{{border-collapse:collapse;margin:.5rem 0}}
+td,th{{border:1px solid #8884;padding:.25rem .6rem;text-align:left}}.k{{font-size:1.4rem;font-weight:600}}
+.cards span{{display:inline-block;margin:0 1.5rem .5rem 0}}</style></head><body>
+<h1>LLM router usage</h1><p>Last {u['days']} days. {nav}</p>
+<div class="cards"><span><div class="k">{u['total']}</div>requests</span>
+<span><div class="k">{share}</div>served locally</span>
+<span><div class="k">{u['claude_runs_avoided']}</div>Claude runs avoided (estimate)</span>
+<span><div class="k">{u['escalations']}</div>escalated</span>
+<span><div class="k">{u['thumbs_down']['total']}</div>thumbs-down</span></div>
+<h2>Requests per caller and tier</h2>{pairs}
+<h2>Thumbs-down per caller, tier and backend</h2>{bad}
+<h2>Latest thumbs-down</h2>{recent}
+<p><small>Avoided = answered by the local backend on a tier whose baseline is claude (default_backend
+"{e(u['default_backend'])}" in config/router.json). See docs/router.md.</small></p></body></html>"""
 
 
 # --- Backends: (request, timeout) -> (text, prompt_tokens, completion_tokens); errors are jobs.JobError
@@ -229,7 +329,17 @@ def parse_request(req):
 
 
 def route(req):
-    """Run one request. Returns the result dict; raises RouterError (already logged, except bad requests)."""
+    """Run one request. Returns the result dict; raises RouterError (already logged, except bad requests).
+    Both carry a request id, the handle for feedback (bad requests get one too, but are not logged)."""
+    rid = uuid.uuid4().hex[:12]
+    try:
+        return {**_route(req, rid), "request_id": rid}
+    except RouterError as e:
+        e.request_id = rid
+        raise
+
+
+def _route(req, rid):
     caller, tier = parse_request(req)
     try:
         conf = load_tiers()
@@ -265,7 +375,7 @@ def route(req):
             continue
         break
 
-    row = {"caller": caller, "tier": tier, "backend": attempts[-1],
+    row = {"id": rid, "caller": caller, "tier": tier, "backend": attempts[-1],
            "escalated_from": attempts[0] if len(attempts) > 1 else None,
            "duration_ms": int((time.monotonic() - start) * 1000)}
     if result is None:
@@ -296,16 +406,21 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write(f"{self.client_address[0]} {fmt % args}\n")
 
-    def send_json(self, status, obj):
-        data = json.dumps(obj, ensure_ascii=False).encode()
+    def send_json(self, status, obj, content_type="application/json; charset=utf-8", request_id=None):
+        data = obj.encode() if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
+        if request_id:
+            self.send_header("X-Request-Id", request_id)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
-    def send_error_json(self, status, message, code, **extra):
-        self.send_json(status, {"error": {"message": message, "type": code, "code": code}, **extra})
+    def send_error_json(self, status, message, code, request_id=None):
+        error = {"message": message, "type": code, "code": code}
+        if request_id:
+            error["request_id"] = request_id
+        self.send_json(status, {"error": error}, request_id=request_id)
 
     def allowed(self):
         if netutil.client_allowed(self.client_address[0]):
@@ -323,13 +438,16 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError) as e:
                 return self.send_error_json(500, str(e), "bad_config")
             self.send_json(200, {"tiers": conf["tiers"]})
-        elif path == "/v1/usage":
+        elif path in ("/v1/usage", "/usage"):
             params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
             try:
                 days = min(90, max(1, int(params.get("days", 7))))
             except ValueError:
                 return self.send_error_json(400, "days moet een getal zijn.", "bad_request")
-            self.send_json(200, usage(days))
+            if path == "/usage":
+                self.send_json(200, usage_page(days), "text/html; charset=utf-8")
+            else:
+                self.send_json(200, usage(days))
         elif path == "/health":
             try:
                 self.send_json(200, {"ok": True, "tiers": list(load_tiers()["tiers"])})
@@ -341,7 +459,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed():
             return
-        if self.path.partition("?")[0] != "/v1/route":
+        path = self.path.partition("?")[0]
+        if path not in ("/v1/route", "/v1/feedback"):
             return self.send_error_json(404, f"Onbekend pad {self.path}.", "not_found")
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -351,9 +470,14 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(length) or b"{}")
             except ValueError:
                 raise RouterError(400, "De body is geen JSON.", "bad_request")
-            self.send_json(200, route(body))
+            if path == "/v1/feedback":
+                if not isinstance(body, dict):
+                    raise RouterError(400, "De body is geen JSON-object.", "bad_request")
+                return self.send_json(200, add_feedback(body.get("request_id"), body.get("note")))
+            result = route(body)
+            self.send_json(200, result, request_id=result["request_id"])
         except RouterError as e:
-            self.send_error_json(e.status, str(e), e.code)
+            self.send_error_json(e.status, str(e), e.code, e.request_id)
         except Exception as e:
             self.send_error_json(500, f"Interne fout: {e}", "internal")
 

@@ -184,6 +184,110 @@ class Log(RouterCase):
         self.assertEqual(self.new_rows()[0]["prompt_tokens"], None)
 
 
+class Feedback(RouterCase):
+    def test_every_response_has_a_request_id_and_the_log_stores_it(self):
+        r = router.route(req(caller="fb-a", tier="hard"))
+        self.assertEqual(self.new_rows()[0]["id"], r["request_id"])
+        self.assertNotEqual(router.route(req())["request_id"], r["request_id"])
+        self.local.error = jobs.JobError(504, "slow", "timeout")
+        with self.assertRaises(router.RouterError) as cm:
+            router.route(req())
+        self.assertEqual(self.new_rows()[-1]["id"], cm.exception.request_id)
+        with self.assertRaises(router.RouterError) as cm:
+            router.route({"tier": "easy"})  # bad request: not logged, still has an id
+        self.assertTrue(cm.exception.request_id)
+
+    def test_thumbs_down_is_stored_with_caller_tier_backend_and_shows_in_usage(self):
+        r = router.route(req(caller="fb-b", tier="hard"))
+        f = router.add_feedback(r["request_id"], "wrong date")
+        self.assertEqual((f["caller"], f["tier"], f["backend"], f["note"]), ("fb-b", "hard", "claude", "wrong date"))
+        self.assertEqual(router.add_feedback(r["request_id"])["note"], "wrong date")  # idempotent
+        td = router.usage(1)["thumbs_down"]
+        self.assertEqual([(g["caller"], g["tier"], g["backend"], g["count"]) for g in td["groups"]
+                          if g["caller"] == "fb-b"], [("fb-b", "hard", "claude", 1)])
+        self.assertIn(r["request_id"], [x["request_id"] for x in td["recent"]])
+
+    def test_feedback_uses_the_backend_that_answered_after_an_escalation(self):
+        self.local.error = jobs.JobError(502, "down", "ollama_unreachable")
+        r = router.route(req(caller="fb-c", tier="easy-esc"))
+        self.assertEqual(router.add_feedback(r["request_id"])["backend"], "claude")
+
+    def test_feedback_errors(self):
+        for rid, code in [("nope", "unknown_request"), ("", "bad_request"), (None, "bad_request")]:
+            with self.subTest(rid=rid), self.assertRaises(router.RouterError) as cm:
+                router.add_feedback(rid)
+            self.assertEqual(cm.exception.code, code)
+        self.local.error = jobs.JobError(504, "slow", "timeout")
+        with self.assertRaises(router.RouterError) as cm:
+            router.route(req(caller="fb-d"))
+        with self.assertRaises(router.RouterError) as cm2:
+            router.add_feedback(cm.exception.request_id)
+        self.assertEqual(cm2.exception.code, "no_answer")
+
+    def test_old_log_without_ids_is_migrated(self):
+        old = TMP / "old.db"
+        conn = sqlite3.connect(old)
+        conn.execute("""CREATE TABLE requests (ts TEXT NOT NULL, caller TEXT NOT NULL, tier TEXT NOT NULL,
+            backend TEXT NOT NULL, escalated_from TEXT, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+            error TEXT, prompt_tokens INTEGER, completion_tokens INTEGER)""")
+        conn.execute("INSERT INTO requests VALUES ('2026-01-01T00:00:00+00:00','a','easy','local',NULL,'ok',1,NULL,1,1)")
+        conn.commit()
+        conn.close()
+        saved = os.environ["ROUTER_DB"]
+        os.environ["ROUTER_DB"] = str(old)
+        try:
+            router.db().close()
+            conn = sqlite3.connect(old)
+            self.assertEqual(conn.execute("SELECT id FROM requests").fetchall(), [(None,)])
+            conn.close()
+            router.route(req())  # new rows get ids
+        finally:
+            os.environ["ROUTER_DB"] = saved
+
+
+class Avoided(RouterCase):
+    def fresh(self, table):
+        write_table(table)
+        saved = os.environ["ROUTER_DB"]
+        os.environ["ROUTER_DB"] = str(TMP / f"avoided-{len(os.listdir(TMP))}.db")
+        self.addCleanup(os.environ.__setitem__, "ROUTER_DB", saved)
+
+    def test_counts_local_answers_where_the_baseline_is_claude(self):
+        self.fresh({"tiers": {"easy": {"backend": "local", "timeout": 5}, "hard": {"backend": "claude", "timeout": 5},
+                              "loc": {"backend": "local", "timeout": 5, "baseline": "local"},
+                              "esc": {"backend": "claude", "timeout": 5, "on_failure": "escalate"}}})
+        router.route(req(tier="easy"))
+        router.route(req(tier="easy"))
+        router.route(req(tier="loc"))  # always local anyway: nothing avoided
+        router.route(req(tier="hard"))
+        self.claude.error = jobs.JobError(502, "x", "claude_error")
+        router.route(req(tier="esc"))  # claude failed, local answered: claude was tried, not avoided
+        u = router.usage(1)
+        self.assertEqual((u["total"], u["served_locally"], u["claude_runs_avoided"], u["escalations"]), (5, 4, 2, 1))
+        self.assertEqual(u["share_local"], 0.8)
+
+    def test_default_backend_local_means_nothing_is_avoided(self):
+        self.fresh({"default_backend": "local", "tiers": {"easy": {"backend": "local", "timeout": 5}}})
+        router.route(req())
+        self.assertEqual(router.usage(1)["claude_runs_avoided"], 0)
+
+    def test_per_caller_and_tier_totals(self):
+        self.fresh(TABLE)
+        for tier in ("easy", "easy", "hard"):
+            router.route(req(caller="pc", tier=tier))
+        self.local.error = jobs.JobError(504, "slow", "timeout")
+        with self.assertRaises(router.RouterError):
+            router.route(req(caller="pc", tier="easy"))
+        got = {(p["tier"]): p for p in router.usage(1)["by_caller_tier"] if p["caller"] == "pc"}
+        self.assertEqual((got["easy"]["count"], got["easy"]["local"], got["easy"]["failed"]), (3, 2, 1))
+        self.assertEqual((got["hard"]["count"], got["hard"]["claude"]), (1, 1))
+
+    def test_bad_default_backend_is_refused(self):
+        write_table({"default_backend": "gpt", "tiers": {"easy": {"backend": "local", "timeout": 5}}})
+        with self.assertRaises(ValueError):
+            router.load_tiers()
+
+
 class ClaudeCli(RouterCase):
     """The real run_claude against a fake `claude` script."""
 
@@ -323,6 +427,33 @@ class Http(RouterCase):
         for path, key in [("/v1/tiers", "tiers"), ("/v1/usage?days=1", "groups"), ("/health", "ok")]:
             with urllib.request.urlopen(self.url + path) as resp:
                 self.assertIn(key, json.load(resp))
+
+    def test_request_id_and_feedback_over_http(self):
+        status, body = self.post(req(caller="http-fb", tier="hard"))
+        self.assertTrue(body["request_id"])
+        status, fb = self.post({"request_id": body["request_id"], "note": "meh"}, "/v1/feedback")
+        self.assertEqual((status, fb["caller"], fb["tier"], fb["backend"]), (200, "http-fb", "hard", "claude"))
+        self.assertEqual(self.post({"request_id": "zzz"}, "/v1/feedback")[0], 404)
+        self.assertEqual(self.post([], "/v1/feedback")[0], 400)
+        status, err = self.post({"tier": "easy", "prompt": "x"})
+        self.assertTrue(err["error"]["request_id"])
+        self.local.error = jobs.JobError(504, "slow", "timeout")
+        r = urllib.request.Request(self.url + "/v1/route", data=json.dumps(req()).encode(), method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(r)
+        self.assertTrue(cm.exception.headers["X-Request-Id"])
+
+    def test_usage_page_shows_counts_and_thumbs_down_and_escapes(self):
+        _, body = self.post(req(caller="page-caller", tier="hard"))
+        self.post({"request_id": body["request_id"], "note": "<b>bad</b>"}, "/v1/feedback")
+        with urllib.request.urlopen(self.url + "/usage?days=1") as resp:
+            self.assertTrue(resp.headers["Content-Type"].startswith("text/html"))
+            html = resp.read().decode()
+        self.assertIn("Claude runs avoided", html)
+        self.assertIn("&lt;b&gt;bad&lt;/b&gt;", html)
+        self.assertNotIn("<b>bad</b>", html)
+        self.assertIn("page-caller", html)
+        self.assertIn(body["request_id"], html)
 
     def test_only_loopback_and_tailnet_clients(self):
         for ip, ok in [("127.0.0.1", True), ("100.85.70.34", True), ("::ffff:100.64.1.1", True),

@@ -4,7 +4,10 @@
   llm-route ask --caller NAME --tier TIER [--system TEXT] [--job summarize|extract] [file ...]
                                   the prompt comes from the files or from stdin; the answer goes to stdout
   llm-route tiers                 the tier table (which tier goes to which backend)
-  llm-route usage [--days 7]      requests per caller and tier, share served locally, Claude runs avoided
+  llm-route usage [--days 7]      requests per caller and tier, share served locally, Claude runs avoided, thumbs-down
+  llm-route feedback ID [--note TEXT]
+                                  mark the answer with this request id as bad (thumbs-down); `ask --json` or
+                                  `ask --show-id` gives the id
 
 --caller and --tier are required: callers declare how hard the job is (docs/router.md).
 Environment: ROUTER_URL (default http://homelab:8018).
@@ -52,8 +55,11 @@ def call(url, method, path, body=None, timeout=60):
     if resp.status != 200:
         err = result.get("error") if isinstance(result, dict) else None
         message = err.get("message") if isinstance(err, dict) else f"HTTP {resp.status}"
+        if isinstance(err, dict) and err.get("request_id"):
+            message += f" (request id {err['request_id']})"
         code = err.get("code") if isinstance(err, dict) else None
-        fail({"timeout": EXIT_TIMEOUT, "bad_request": EXIT_USAGE, "unknown_tier": EXIT_USAGE}.get(code, EXIT_FAILED),
+        fail({"timeout": EXIT_TIMEOUT, "bad_request": EXIT_USAGE, "unknown_tier": EXIT_USAGE,
+                 "unknown_request": EXIT_USAGE, "no_answer": EXIT_USAGE}.get(code, EXIT_FAILED),
              message)
     return result
 
@@ -87,18 +93,29 @@ def main():
     a.add_argument("--fields", default="", help="extract: name,date,amount:number")
     a.add_argument("--labels", default="", help="extract: allowed labels")
     a.add_argument("--timeout", type=float, help="seconds; default is the timeout of the tier")
+    a.add_argument("--show-id", action="store_true", help="print the request id on stderr (for `feedback`)")
     a.add_argument("--json", action="store_true", help="print the whole result (backend, outcome, tokens)")
     a.add_argument("files", nargs="*")
 
     sub.add_parser("tiers", help="show the tier table")
     u = sub.add_parser("usage", help="show the usage")
     u.add_argument("--days", type=int, default=7)
+    f = sub.add_parser("feedback", help="thumbs-down on an answer")
+    f.add_argument("request_id", help="the request id the router returned")
+    f.add_argument("--note", help="what was wrong (optional)")
     args = p.parse_args()
     sys.stdout.reconfigure(errors="replace")
 
     if args.cmd == "tiers":
         for name, t in call(args.url, "GET", "/v1/tiers", timeout=15)["tiers"].items():
             print(f"{name:12} {t['backend']:7} timeout {t['timeout']} s, on failure: {t.get('on_failure', 'fail')}")
+        return
+    if args.cmd == "feedback":
+        body = {"request_id": args.request_id}
+        if args.note:
+            body["note"] = args.note
+        r = call(args.url, "POST", "/v1/feedback", body, timeout=15)
+        print(f"Thumbs-down stored for {r['request_id']}: caller {r['caller']}, tier {r['tier']}, backend {r['backend']}.")
         return
     if args.cmd == "usage":
         r = call(args.url, "GET", f"/v1/usage?days={args.days}", timeout=15)
@@ -109,6 +126,10 @@ def main():
         for g in r["groups"]:
             print(f"  {g['caller']:24} {g['tier']:10} {g['backend']:8} {g['outcome']:10} {g['count']:>5} "
                   f"{g['prompt_tokens']:>8}/{g['completion_tokens']:<7}")
+        td = r["thumbs_down"]
+        print(f"Thumbs-down: {td['total']}")
+        for g in td["groups"]:
+            print(f"  {g['caller']:24} {g['tier']:10} {g['backend']:8} {g['count']:>5}")
         return
 
     prompt = read_prompt(args.files)
@@ -132,6 +153,8 @@ def main():
     else:
         if r["outcome"] == "escalated":
             print(f"llm-route: escalated from {r['escalated_from']} to {r['backend']}", file=sys.stderr)
+        if args.show_id:
+            print(f"llm-route: request id {r['request_id']}", file=sys.stderr)
         print(r["output"])
 
 

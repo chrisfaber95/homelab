@@ -1,5 +1,6 @@
 {
-  "_comment": "LLM router (H-012), docs/router.md. Callers declare a tier; this table decides the backend. Read again on every request: a change here needs no restart. backend: local (the F-017 model on this box) or claude (the claude CLI, Pro subscription; never an API key). on_failure: fail (return the error) or escalate (try the other backend once; the log shows it).",
+  "_comment": "LLM router (H-012), docs/router.md. Callers declare a tier; this table decides the backend. Read again on every request: a change here needs no restart. backend: local (the F-017 model on this box) or claude (the claude CLI, Pro subscription; never an API key). on_failure: fail (return the error) or escalate (try the other backend once; the log shows it). default_backend: what a caller would use without the router; a request the local backend answers on a tier whose baseline (default_backend, or the optional per-tier \"baseline\") is claude counts as a Claude run avoided.",
+  "default_backend": "claude",
   "claude": {"command": "claude", "model": null, "extra_args": []},
   "tiers": {
     "easy": {"backend": "local", "timeout": 120, "on_failure": "fail"},

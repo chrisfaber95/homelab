@@ -27,7 +27,8 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 - `compose`: publiceer poorten in de reeks **8100-8199**. Die laat ufw alleen via `tailscale0` door, en rootless
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
-  8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant. Kijk bij twijfel met `ss -ltn`.
+  8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
+  the app itself on 127.0.0.1:8112). Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
   merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
@@ -169,6 +170,33 @@ Tailscale address only, port 8109: **`http://homelab:8109`** (the server refuses
 - Token from the page: the token dialog saves a pasted token in `/var/lib/f1-dashboard/token`
   (`F1_TOKEN_UPLOAD_FILE`, service-private). It wins over `/etc/f1-dashboard/token` until it expires, and needs no
   restart. The form only works with `F1_SOURCE=live`.
+
+## sdlc-studio (H-013)
+
+Idea-to-scaffold generator and portfolio demo (`chrisfaber95/sdlc-studio`). `service` repo: the box runs `npm ci`
+and `npm run build` (backend and Vue frontend), then `homelab-app-sdlc-studio.service` (`deploy/sdlc-studio.service`,
+`DynamicUser`), which runs `node backend/dist/main.js`. One process serves the built UI and the API.
+
+- **Address**: **`http://homelab:8111`**. The app listens on `127.0.0.1:8112` only; `tailscale serve`
+  (`changes/0005-sdlc-studio-serve`) publishes it on the tailnet at 8111. Serve listens on the Tailscale addresses
+  only, and it is never `tailscale funnel` (the change refuses if any funnel is on). tailscaled answers serve ports
+  inside the tunnel, so ufw does not filter 8111 and `ss -ltn` never shows it; the Tailscale ACLs decide who reaches
+  it. The LAN can't: nothing listens there.
+- **Owner and visitors**: serve adds the `Tailscale-User-Login` header, and the app trusts it from loopback only.
+  `chrisfaber95@github` (`SDLC_OWNER_IDENTITIES` in the unit) is the owner and can generate. Anyone else on the tailnet
+  sees the example projects read-only; the server refuses their writes (403). Mark a project as an example in the
+  app to show it to visitors.
+- **Generation**: through the LLM router on `127.0.0.1:8018` (caller `sdlc-studio`; idea and requirements on tier
+  `easy`, the rest on `hard`, i.e. Claude allowance). No API key.
+- **State**: SQLite in `/var/lib/sdlc-studio` (the `StateDirectory`, `DynamicUser` keeps it in
+  `/var/lib/private/sdlc-studio`), in `config/backup.list`.
+- **`/new-project` from a terminal**: needs an owner token. Put `SDLC_OWNER_TOKEN=<random>` in `/etc/sdlc-studio/env`
+  (root, 0600), restart `homelab-app-sdlc-studio`, and give the skill `SDLC_URL=http://127.0.0.1:8112` and the same
+  token.
+- **After a rebuild**: the serve config is in tailscaled's state, which `config/backup.list` keeps, so a restore
+  brings it back. Rebuilt without a restore: rerun `changes/0005-sdlc-studio-serve` (change a comment line).
+- **Trust**: the app trusts the identity header from loopback, so any process on the box can act as the owner on
+  `127.0.0.1:8112` (like the "this PC" exemption of claude-dashboard). Fine while every account on the box is trusted.
 
 ## Home Assistant (H-008)
 

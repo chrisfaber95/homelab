@@ -28,3 +28,5 @@
 /var/log/homelab/changes.jsonl
 /var/lib/homelab/admin/applied.json
 /var/lib/homelab/admin/machine.json
+# sdlc-studio (H-013): generated projects and their artifact versions (DynamicUser state).
+/var/lib/private/sdlc-studio/*.db

@@ -178,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 cancel_task(t)
         elif m.group(2) == "retry" and t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF) and not blocked_by(t):
-            retry_task(t)
+            retry_task(t, form.get("note", ""))
         elif m.group(2) == "accept":
             accept_task(t)
         elif m.group(2) == "attended" and t["repo"] == BRIEF and t["unattended"]:

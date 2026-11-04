@@ -78,6 +78,8 @@ Still for the user to test (also in `CHECKLIST.md`):
   conflict round.
 - Inbox restarts and Retry (2026-10-30): a restart requeues running tasks instead of failing them; Retry on a failed
   or cancelled task. Tested without root; still to see live: a task resuming after a restart.
+- Inbox Retry on a refused task (2026-11-04): Retry with an optional note; the session gets its refusal reason
+  and the note. Tested without root (unit tests); still to see live: retry task 97 with a note.
 - Brief review diff and CI rule (2026-10-30): the reviewer's diff skips lockfiles, generated files and fixtures
   (code first, REVIEW_MAX_DIFF 150000); the planner gives a repo without CI a CI task first.
 - After the move to the desktop: BIOS, `EXPECTED_GPU` to the GTX 1080, reboot and power test, the rebuild drill.

@@ -30,7 +30,7 @@ telefoon ──tailnet──> homelab-inbox (inbox-runner) ── wachtrij ─�
 | PR open | code-taak klaar: PR met samenvatting en commits; melding met de link |
 | beantwoord | een vraag ("waarom ...", "wat doet ..."): antwoord op de pagina, geen commit, branch of PR; je kunt er op de pagina op reageren, dan gaat dezelfde sessie verder (nieuwe werkkopie) |
 | wacht op jou | Claude vond de taak te onduidelijk en stelde één vraag; antwoord op de pagina, dan gaat dezelfde taak verder |
-| geweigerd | mag niet (bijvoorbeeld iets wat F-019 verbiedt); de reden staat op de pagina |
+| geweigerd | mag niet (bijvoorbeeld iets wat F-019 verbiedt); de reden staat op de pagina. **Retry** puts it back in the queue (see below) |
 | gestopt bij limiet | 80 beurten of 30 minuten per ronde (`config/inbox.conf`); de commits staan op `inbox/<id>`, zonder PR |
 | geannuleerd | jij annuleerde hem (knop op de pagina); daarna geen commits of pushes meer |
 | mislukt | iets anders ging mis; de reden staat op de pagina. **Retry** on the task page puts it back in the queue (see below) |
@@ -47,7 +47,9 @@ same working copy, with a message that the last turn was cut off. The router and
 off by `RESTART_ROUNDS` (2) restarts in a row fails ("onderbroken door een herstart"). A brief task whose PR review
 was cut off is reviewed again.
 
-**Retry**: a failed or cancelled task has a Retry button on its page. It goes back in the queue: in its own session
+**Retry**: a failed, cancelled or refused task has a Retry button on its page, with an optional note for Claude.
+For a refused task, the session gets its own refusal reason and your note (say why it is fine after all, or what
+to do differently) and is told not to refuse again for the same reason. It goes back in the queue: in its own session
 and working copy if that still exists, otherwise in a fresh copy of main (the task is told its earlier work is gone).
 Tasks of the same build or message that were cancelled because of it ("niet gestart: de voorgaande taak ...") come
 back too, in their order, and the build or message counts as running again.

@@ -206,7 +206,11 @@ def task_page(t):
             parts.append(f'<p class="muted">Waits for <a href="/task/{pre["id"]}">#{pre["id"]}</a>: continue, '
                          'retry or mark that task as fine first; this one then comes back in the queue by itself.</p>')
         else:
-            parts.append(form(f'/task/{t["id"]}/retry', "", "Continue" if t["status"] == "capped" else "Retry"))
+            hint = ("Why it is fine to do after all, or what to do differently (optional)" if t["status"] == "refused"
+                    else "Note for Claude (optional)")
+            parts.append(form(f'/task/{t["id"]}/retry', f'<label for="note">{hint}</label>'
+                              '<textarea name="note" id="note"></textarea>',
+                              "Continue" if t["status"] == "capped" else "Retry"))
     if t["accepted"]:
         parts.append('<p class="muted">You marked this task as fine; its follow-ups may run.</p>')
     elif t["status"] in ACCEPTABLE and blocked_followups(t):

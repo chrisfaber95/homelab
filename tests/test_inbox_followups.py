@@ -80,6 +80,25 @@ class Followups(unittest.TestCase):
         queue.retry_task(storage.get(74))
         self.assertFalse(storage.get(74)["accepted"])
 
+    def test_retry_a_refused_task(self):
+        storage.update(74, rounds=1, summary="mag niet: F-019")
+        queue.task_cmd, tc = lambda *a: (1, ""), queue.task_cmd  # its working copy was cleaned up
+        queue.pushed, pu = lambda t: False, queue.pushed
+        try:
+            queue.retry_task(storage.get(74), "  it is fine: Chris said so  ")
+        finally:
+            queue.task_cmd, queue.pushed = tc, pu
+        t = storage.get(74)
+        self.assertEqual((t["status"], t["reprepare"], t["summary"]), ("queued", 1, None))
+        self.assertIn("mag niet: F-019", t["pending_input"])
+        self.assertIn("it is fine: Chris said so", t["pending_input"])
+        self.assertEqual([self.status(i) for i in (75, 76)], ["queued", "queued"])
+
+    def test_retry_note_of_a_task_that_never_ran_goes_in_its_text(self):
+        storage.update(74, status="failed")
+        queue.retry_task(storage.get(74), "try again")
+        self.assertTrue(storage.get(74)["text"].endswith("try again"))
+
     def test_migration_flags_only_existing_followups(self):
         conn = storage.db()
         conn.execute("ALTER TABLE tasks DROP COLUMN no_auto_revive")

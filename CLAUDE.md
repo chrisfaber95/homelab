@@ -68,7 +68,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
 | F-022 jobs and skills | `bin/homelab_inbox/jobs.py` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
-| H-012 search index (index side) | `search/`, `bin/homelab-search`, `scripts/24-search.sh`, `systemd/homelab-search-sync.*` | `config/search.json` | `docs/search.md` |
+| H-012 search (index, query and answer, MCP tool) | `search/`, `bin/homelab-search`, `bin/homelab-search-mcp`, `scripts/24-search.sh`, `systemd/homelab-search-*` | `config/search.json` | `docs/search.md` |
 | F-024 homelab page | `bin/homelab_inbox/{overview,pages,server}.py`, `web/` | | `docs/dashboard.md` |
 | H-001 briefs: build, review, handoff | `bin/homelab_inbox/briefs.py` | `config/inbox.conf` | `docs/briefs.md` |
 | Claude's skills, agents, plugins, global CLAUDE.md | `scripts/18-claude.sh`, `claude/agents/`, `claude/CLAUDE.md` | `config/claude.conf` | `STATUS.md` |

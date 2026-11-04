@@ -240,11 +240,17 @@ class FingerprintMismatch(Exception):
 
 
 class Index:
-    def __init__(self, conf, embedder=None, db=None):
+    def __init__(self, conf, embedder=None, db=None, readonly=False):
         self.conf = conf
+        self.readonly = readonly
         self.scrubber = Scrubber(conf["scrub"])
         self.embedder = embedder or Embedder(conf["embedding"])
         self.path = db or conf["db"]
+        if readonly:  # the query side: never creates, migrates or writes the index
+            if not os.path.exists(self.path):
+                raise FileNotFoundError(f"no search index at {self.path}: run `homelab-search rebuild`")
+            self.db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+            return
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         self.db = sqlite3.connect(self.path)
         self.db.executescript(SCHEMA)
@@ -349,6 +355,8 @@ class Index:
 
     def query(self, text, k=8, project=None, type=None, source=None):
         """The k chunks closest to `text`, best first, optionally filtered by project, source type or source name."""
+        if self.readonly:  # vectors from another model or prefix would rank nonsense
+            self._check_fingerprint()
         where, args = [], []
         for col, val in (("project", project), ("type", type), ("source", source)):
             if val:

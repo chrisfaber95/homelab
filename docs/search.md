@@ -1,16 +1,19 @@
 # Search index (H-012, index side)
 
 A private, local index over everything written down: the second brain, the product repo, session transcripts, repo
-docs and code, and the F-023 memory. This part builds and keeps the index; the query side (router answers, Search
-tab, MCP tool) is a later task. Code: `search/` (`chunkers.py`, `scrub.py`, `index.py`), CLI `bin/homelab-search`,
-config `config/search.json`, nightly unit `systemd/homelab-search-sync.{service,timer}`, installer
-`scripts/24-search.sh`. Tests: `tests/test_search_index.py`.
+docs and code, and the F-023 memory. The index side builds and keeps the index; the query side
+(ranked results, cited answers, MCP tool; below) reads it. The Search tab of the homelab page and the claude-dashboard
+panel are later tasks and use the HTTP API described here. Code: `search/` (`chunkers.py`, `scrub.py`, `index.py`,
+`answer.py`, `server.py`), CLI `bin/homelab-search`, MCP server `bin/homelab-search-mcp`, config `config/search.json`,
+units `systemd/homelab-search-sync.{service,timer}` and `systemd/homelab-search-api.service`, installer
+`scripts/24-search.sh`. Tests: `tests/test_search_index.py`, `tests/test_search_query.py`.
 
 ```
 homelab-search sync [--source NAME]    re-index what changed, forget what is gone (the nightly job)
 homelab-search rebuild                 build the whole index again from the sources and swap it in
 homelab-search status [--json]         chunks per source, type and project; last sync
-homelab-search query TEXT [--project P] [--type T] [-k N]   nearest chunks (to check the index)
+homelab-search query TEXT [--project P] [--type T] [--source S] [-k N] [--json]   ranked results
+homelab-search ask TEXT [--hard] [--project P] [--type T] [--source S] [--json]    one cited answer
 ```
 
 ## Read-only on sources
@@ -138,3 +141,85 @@ no vector extension on the box (no `sqlite-vec`, no numpy), so a query pre-filte
 and ranks the remaining vectors by cosine similarity in Python: fine for tens of thousands of chunks (0.6 s measured at
 8,400). Beyond that, swap the ranking in `Index.query` for `sqlite-vec` or an ANN index; the stored data stays
 the same.
+
+## Query and answer (H-012, query side)
+
+Everything here is **read-only**: the index is opened with SQLite `mode=ro` (a missing index is an error, never created),
+sources are never opened, and the only thing written anywhere is the router's own usage log. A query against an index
+built with another model, chunker version or scrub patterns is refused (as `sync` is): run `rebuild`.
+
+### Results
+
+`homelab-search query "where did we decide on sqlite?" --project homelab --type product` prints, per result, the score,
+`[type] project · path · location · date`, a snippet and a link. `--json` gives the same as objects. The HTTP and MCP
+variants return the same fields: `score`, `source`, `type`, `path`, `location` (heading path or `turn N (role)`), `date`,
+`project`, `link`, `snippet`. Filters: `project`, `type` (`wiki`, `product`, `transcript`, `repo-doc`, `repo-code`,
+`memory`), `source` (a config entry name).
+
+Links come from `query.links` in `config/search.json`: one URL template per source name with `{path}`, `{path_noext}`,
+`{repo}` (first folder) and `{rest}`. Wiki notes link to `obsidian://open?vault=second-brain&file=...`, product, repo and
+memory chunks to GitHub on the branch the index reads (the repos are private: you need to be logged in). **Transcript
+turns have no link** (there is no page for a session file yet); they show path and turn. A source without a template just
+has no link.
+
+### Ask
+
+`homelab-search ask "why did we choose a local embedding model?"` retrieves the `query.ask_k` (6) best chunks, keeps those
+with cosine similarity >= `query.min_score` and asks the router to write at most five sentences from them, citing
+`[n]`. One question, one answer: nothing is kept between calls.
+
+- **Tier**: caller `search`, tier `easy` (local model) by default; `--hard` (`hard: true`, `hard=1`) uses tier `hard`
+  (Claude through the CLI, so it spends allowance). Which backend each tier means is the router's table
+  (`config/router.json`), and its escalation rule applies as for any caller. Tier names are `query.tier` and
+  `query.hard_tier`.
+- **Nothing relevant**: when no chunk reaches `min_score` (or the filters match nothing) the answer is
+  "Nothing relevant was found in the search index for this question, so there is no answer.", `found` is `false`,
+  `request_id` is `null` and **the router is not called**. `best_score` tells how close the best chunk came.
+- **Citations**: `citations` lists the excerpts the answer refers to (`n`, source, location, date, project, `link`,
+  `cited`). `answer_markdown` turns each `[n]` into a link when the source has one. If the model cites no valid number,
+  all excerpts it was given are listed with `cited: false`; a number it invents is ignored.
+- **Feedback**: the router's `request_id` is returned (CLI prints it). A bad answer: `llm-route feedback <request_id>`
+  (or `POST /v1/feedback` on the router); it shows in the router usage view under caller `search`.
+- The excerpts are put in the prompt as data and the model is told to ignore instructions in them. The question is run
+  through the same secret scrubbing as the index before it is embedded or sent.
+
+**`min_score` is not calibrated yet.** The default 0.5 is a starting value for `nomic-embed-text`; the index was not
+available while this was built. After the first sync, try a few questions you know the answer to and some nonsense with
+`homelab-search ask --json` (`best_score`) and set `query.min_score` just below the former and above the latter. Too high:
+real questions get "nothing found"; too low: weak chunks reach the model.
+
+### HTTP API (service `homelab-search-api`, port 8019)
+
+Tailnet only: ufw `allow in on tailscale0 to any port 8019`, no LAN rule, and the server itself refuses clients outside
+loopback and `100.64.0.0/10` (like the router). The log holds the path, not the query string.
+
+```
+GET  /v1/search?q=TEXT[&project=P][&type=T][&source=S][&k=N]
+GET  /v1/ask?q=TEXT[&hard=1][&project=P][&type=T][&source=S]      (or POST {"question", "hard", "project", ...})
+GET  /v1/filters     projects, types, sources, chunk count, last sync (for a filter dropdown)
+GET  /health
+```
+
+Errors are `{"error": {"message", "request_id"?}}`: 400 empty or bad input, 413 question over 2000 characters, 502 router
+unreachable or failed (with its request id), 503 index missing or stale. The service runs as `claude` with the file
+system read-only (`ProtectSystem=strict`, `ReadOnlyPaths=/var/lib/homelab-search`, `ProtectHome`). It needs Ollama
+(embedding the question) and, for `ask`, the router on `127.0.0.1:8018` (`query.router_url`).
+
+### Claude tool (MCP) and the instruction
+
+`bin/homelab-search-mcp` is an MCP server over stdio (stdlib only, no SDK: the box has no `mcp` package) with two
+read-only tools, `search` and `ask` (arguments as above; `hard` is an optional boolean). It only calls the HTTP API
+(`SEARCH_URL`, default `http://127.0.0.1:8019`), so it needs the service running and has no access to the index or sources.
+
+Install notes:
+1. `sudo bash /var/lib/homelab/repo/scripts/24-search.sh` installs the programs, the service and the ufw rule, and
+   registers the tool for the user `claude` (`claude mcp add --scope user homelab-search -- /usr/local/bin/homelab-search-mcp`;
+   the script prints the command when it cannot find `claude`). Check as `claude`: `claude mcp list`.
+2. As `claude`: `bash /home/claude/homelab/scripts/18-claude.sh` (or the clone you use) installs `claude/CLAUDE.md` as
+   `~/.claude/CLAUDE.md`, whose section **Private search** tells every session to query search before reading many files,
+   with the CLI as fallback. Edit that text in the repo, not in `~/.claude`.
+3. In sessions with a permission prompt the first call asks for `mcp__homelab-search__search` / `__ask`; allow them
+   (both are read-only). Whether inbox rounds see user-scope MCP servers depends on the account they run as; not verified here.
+
+Other clients: the Search tab on the homelab page and the claude-dashboard panel call the same `/v1/*` endpoints (not part
+of this change).

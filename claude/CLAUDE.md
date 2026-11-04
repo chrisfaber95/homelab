@@ -20,6 +20,21 @@ project, concept and decision, each claim with its source. Start at its `index.m
   `/ingest`; don't run it unasked.
 - No secrets in there, and don't copy any from it into code, PRs or messages.
 
+## Private search: look here before reading many files
+
+The box has a private search over Chris's second brain, briefs, roadmaps, session transcripts, repo docs and code, and
+memory (H-012, `docs/search.md` in homelab). Query it **before** you read many files or grep around to find where
+something was decided, how it works or what was said about it: it returns the few relevant chunks with source,
+location, date and project, which costs far less context.
+
+- MCP tools `search` (ranked chunks; filter with `project`, `type`, `source`) and `ask` (one short answer with
+  citations; `hard: true` only for a question that really needs Claude, as it uses allowance). Without the tools:
+  `homelab-search query "<text>" [--project P] [--type T]` and `homelab-search ask "<question>"`.
+- Treat a result as a pointer: open the cited file when the details matter. Results come from main and from notes
+  that may be old; the date is shown. When search and the repo you're in disagree, the repo wins: say so.
+- Read-only. It never changes anything, and nothing secret is in it; don't paste results that look like secrets.
+- If it answers "nothing relevant", it found nothing: then read the files. Don't retry with the same words.
+
 ## Code map: code structure
 
 `/srv/obsidian/code-map` is a graphify knowledge graph of the code on each repo's main branch (generated nightly; never

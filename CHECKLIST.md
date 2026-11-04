@@ -369,3 +369,12 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       `homelab-deploy status` toont alle diensten draaiend.
 - [ ] F-017: in `config/llm.conf` `LLM_NUM_CTX=8192` (het model `llama3.1:8b` blijft; commit en push), dan
       `sudo bash /home/claude/homelab/scripts/17-llm.sh`; `ollama ps` en `llm usage` tonen 100% GPU.
+
+## H-012: search index (index side)
+
+- [ ] After the merge: `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (copies the inbox transcripts to
+      `/var/lib/inbox-sessions/projects`), then `sudo bash /var/lib/homelab/repo/scripts/24-search.sh`. As `claude`,
+      first `gh repo clone chrisfaber95/homelab-data ~/dev/homelab-data` if it is not there (memory source).
+- [ ] `homelab-search status` shows chunks for every source; `systemctl list-timers homelab-search-sync.timer` shows
+      03:15; the day after, `journalctl -u homelab-search-sync` shows only changed files.
+- [ ] After the move to the GTX 1080: measure GPU memory and fill in the table in `docs/search.md`.

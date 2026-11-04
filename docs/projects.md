@@ -190,6 +190,7 @@ in the rootless Docker of `deploy` like any compose project (`restart: unless-st
   No secret is in the repo; keep tokens (for example the f1-dashboard's long-lived token) under `/etc/homelab`.
 - **Check**: `bin/homelab-exposure` (`--static` for just the definition) asserts that every published port is on the
   Tailscale address in 8100-8199, that nothing listens on another address, and that the LAN address refuses the port.
+  It also covers the router, search API and homelab page (see `docs/search.md`, "Exposure check").
 - Setup guide for the bulbs (Tuya Local, scenes, automations, measurements): `docs/home-assistant.md`.
 - Not done yet (rest of H-008): the bulbs themselves and the access token for the f1-dashboard.
 

@@ -70,7 +70,7 @@ WEB = ROOT / "web"
 
 
 TABS = (("overzicht", "/", "Overzicht"), ("taken", "/taken", "Taken"), ("briefs", "/briefs", "Briefs"), ("jobs", "/jobs", "Jobs"),
-        ("geheugen", "/memory", "Geheugen"), ("skills", "/skills", "Skills"), ("ssh", "/ssh", "SSH"))
+        ("search", "/search", "Search"), ("geheugen", "/memory", "Geheugen"), ("skills", "/skills", "Skills"), ("ssh", "/ssh", "SSH"))
 
 
 def local(iso):
@@ -91,7 +91,7 @@ def asset(name):
 def tab_of(title):
     if title.startswith(("job", "concept", "run")):
         return "jobs"
-    if title.startswith(("geheugen", "skills", "ssh", "briefs")):
+    if title.startswith(("geheugen", "search", "skills", "ssh", "briefs")):
         return title.split()[0]
     return "overzicht" if title == "homelab" else "taken"
 
@@ -485,7 +485,7 @@ def overview_page():
             f'{usage_html()}</section>'
             f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'
             f'</div></div>')
-    return page("homelab", body, narrow=False)
+    return page("homelab", body)
 
 
 def job_facts(job):
@@ -754,3 +754,26 @@ def entry_page(m, error=None, text=None):
                       '</textarea>', "Opslaan"))
     parts.append(form(f"/memory/e/{e(m['id'])}/delete", "", "Wissen", ghost=True))
     return page(f"geheugen {m['name']}", "".join(parts))
+
+
+def search_page():
+    """Search tab (H-012): the question box, filters, cited answer, raw results and the thumbs-down. The script in
+    app.js does the work; filters are filled from the index."""
+    return page("search", f"""<h1>Search</h1>
+<p class="muted">Ask about anything written down: the second brain, briefs, sessions, repo docs and memory. Private,
+answered on the box.</p>
+<form id="search-form" class="search" data-csrf="{csrf_token()}" role="search">
+<label for="sq">Question</label>
+<textarea id="sq" name="q" rows="2" maxlength="2000" required placeholder="Where did we decide on sqlite?"></textarea>
+<div class="search-filters">
+<div><label for="sproject">Project</label><select id="sproject" name="project"><option value="">All projects</option></select></div>
+<div><label for="stype">Source type</label><select id="stype" name="type"><option value="">All types</option></select></div>
+</div>
+<label class="check" for="shard"><input type="checkbox" id="shard" name="hard" value="1"><span>Hard question
+<small class="muted">answered by Claude, uses allowance</small></span></label>
+<div class="search-actions"><button type="submit" id="sask">Ask</button>
+<button type="button" class="quiet" id="ssearch">Only list sources</button></div>
+</form>
+<p id="sstatus" class="muted" role="status" aria-live="polite"></p>
+<section id="sanswer" hidden aria-live="polite"></section>
+<section id="sresults" hidden></section>""")

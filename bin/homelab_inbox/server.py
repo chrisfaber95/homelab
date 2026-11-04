@@ -14,7 +14,8 @@ from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, update_draft, update_run
 from .memory import LEARN_HINT, MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, skills_page, ssh_page, task_page, tasks_page
+from . import search
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, now, update
@@ -42,6 +43,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", location)
         self.end_headers()
         self.wfile.write(data)
+
+    def send_upstream(self, status, obj):
+        self.send(status, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
 
     def guard(self):
         ok, who = Access.allowed(self.client_address[0].removeprefix("::ffff:"))
@@ -78,6 +82,13 @@ class Handler(BaseHTTPRequestHandler):
             more = read_log(f"{m.group(1)}{m.group(2)}", nxt, 1)[0]
             return self.send(200, json.dumps({"lines": lines, "next": nxt, "done": done and not more}),
                              "application/json")
+        if url.path == "/search":
+            return self.send(200, search_page())
+        if url.path == "/api/search/filters":
+            return self.send_upstream(*search.filters())
+        if url.path == "/api/search/results":
+            params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+            return self.send_upstream(*search.results(params.get("q", ""), params))
         if url.path == "/taken":
             return self.send(200, tasks_page())
         if url.path == "/ssh":
@@ -121,6 +132,10 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
         if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
             return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
+        if self.path == "/api/search/ask":
+            return self.send_upstream(*search.ask(form))
+        if self.path == "/api/search/feedback":
+            return self.send_upstream(*search.feedback(form))
         if self.path == "/tasks":
             repo, text = form.get("repo", ""), form.get("text", "").strip()
             if (repo not in repo_list() and repo != AUTO) or not text:

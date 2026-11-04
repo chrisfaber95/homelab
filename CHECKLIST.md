@@ -384,3 +384,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       `homelab-search ask "where is the router config?"` (answer with `[1]` links and a request id), a nonsense question
       says nothing relevant was found, `claude mcp list` shows `homelab-search`, and from Windows with Tailscale **off**
       `Test-NetConnection <lan-ip> -Port 8019` is `False`. Tune `query.min_score` in `config/search.json` (docs/search.md).
+- [ ] H-012 Search tab: after the merge root re-runs `21-inbox.sh`. On the phone (Tailscale on) open
+      `http://homelab.tail4eb878.ts.net:8105/search`: ask a question, tick **Hard question** once, filter on a project,
+      tap a citation, tap **Bad answer** and see it under caller `search` in `llm-route usage`. `bin/homelab-exposure`
+      passes on the box (now with the router, search API and page); `Test-NetConnection <lan-ip> -Port 8105` is `False`.

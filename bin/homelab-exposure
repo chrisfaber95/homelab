@@ -2,6 +2,11 @@
 # homelab: exposure check (H-008). Home Assistant and every other published compose port must stay on the tailnet.
 #   homelab-exposure --static   only the definition: compose.yaml publishes to the Tailscale address, in 8100-8199
 #   homelab-exposure            also the real box: who listens, and that the LAN address refuses the port
+# Also covers the H-012 services that listen on all addresses and rely on ufw plus their own client filter: the LLM
+# router (8018), the search API (8019) and the homelab page (8105, with the Search tab). Static: every ufw allow rule in
+# scripts/ is tailnet-only (SSH from the LAN excepted), each service opens its port on tailscale0 only, refuses clients
+# outside loopback and the tailnet, and the inbox reaches them on loopback. Live: they listen, and a request from the
+# box to its own LAN address is refused or answered 403.
 # Output: one line per check, <OK|FAIL> <name> <text>. Exit 0 all OK, 1 at least one FAIL, 2 cannot run.
 # Runs without root. Needs docker (compose config, no daemon) and jq; the live part needs ss and ip.
 set -uo pipefail
@@ -20,6 +25,50 @@ failed=0
 report() { printf '%-4s  %-22s %s\n' "$1" "$2" "$3"; [[ $1 == FAIL ]] && failed=1; return 0; }
 
 ports=()
+# --- H-012 services (router, search API, homelab page): not in compose.yaml, so checked from the repo and live ---
+cfg_port() { jq -r "$2" "$REPO/config/$1" 2>/dev/null; }
+router_port=$(sed -n 's/^ROUTER_PORT=//p' "$REPO/config/llm.conf" 2>/dev/null | tr -d '"'); router_port=${router_port:-8018}
+search_port=$(cfg_port search.json '.query.port // 8019'); search_port=${search_port:-8019}
+inbox_port=$(sed -n 's/^INBOX_PORT=//p' "$REPO/config/inbox.conf" 2>/dev/null | tr -d '"'); inbox_port=${inbox_port:-8105}
+
+bad_rules=$(grep -hnE '^[[:space:]]*ufw[[:space:]]+(allow|limit)' "$REPO"/scripts/*.sh \
+  | grep -vE 'in on tailscale0' | grep -vE 'from "\$LAN_SUBNET" to any port 22 ' || true)
+if [[ -n $bad_rules ]]; then
+  report FAIL "exposure:ufw-rules" "ufw rule not limited to tailscale0: $(head -n1 <<<"$bad_rules")"
+else
+  report OK "exposure:ufw-rules" "every ufw allow in scripts/ is on tailscale0 (SSH from the LAN excepted)"
+fi
+check_service() {  # name port script server-file
+  local name=$1 port=$2 script=$3 server=$4
+  if grep -E 'ufw allow in on tailscale0 to any port' "$REPO/scripts/$script" | grep -qE "port \"?(\\\$[A-Z_]+|$port)\"? "; then
+    report OK "exposure:$name:ufw" "scripts/$script opens the port on tailscale0 only"
+  else
+    report FAIL "exposure:$name:ufw" "scripts/$script has no 'ufw allow in on tailscale0 to any port' rule for it"
+  fi
+  if grep -q '100\.64\.0\.0/10' "$REPO/$server"; then
+    report OK "exposure:$name:filter" "$server refuses clients outside loopback and 100.64.0.0/10"
+  else
+    report FAIL "exposure:$name:filter" "$server has no tailnet-only client filter"
+  fi
+}
+check_service router "$router_port" 17-llm.sh llm/netutil.py
+check_service search "$search_port" 24-search.sh search/server.py
+for key in SEARCH_URL ROUTER_URL; do
+  url=$(sed -n "s/^$key=//p" "$REPO/config/inbox.conf" | tr -d '"')
+  if [[ $url =~ ^http://(127\.0\.0\.1|localhost)(:|/|$) ]]; then
+    report OK "exposure:inbox:$key" "the page reaches it on loopback ($url)"
+  else
+    report FAIL "exposure:inbox:$key" "'$url' is not a loopback address; the Search tab must not call out to another host"
+  fi
+done
+if grep -qE 'Access\.allowed|def allowed' "$REPO/bin/homelab_inbox/server.py" "$REPO/bin/homelab_inbox/pages.py" \
+   && grep -q 'self.guard()' "$REPO/bin/homelab_inbox/server.py"; then
+  report OK "exposure:inbox:guard" "every page and /api/search route sits behind the tailnet owner check"
+else
+  report FAIL "exposure:inbox:guard" "the inbox handler has no guard() owner check"
+fi
+svc_ports=("$router_port" "$search_port" "$inbox_port")
+
 while IFS="|" read -r svc ip port; do
   name="exposure:$svc:$port"
   if [[ $ip == "$TS_IP" && $port =~ ^81[0-9][0-9]$ ]]; then
@@ -54,6 +103,22 @@ if (( live )); then
       else
         report OK "exposure:lan:$port" "$lan:$port (LAN address) refuses connections"
       fi
+    fi
+  done
+fi
+
+if (( live )) && [[ -n ${lan:-} && $lan != "$TS_IP" ]]; then
+  command -v curl >/dev/null || report FAIL "exposure:live:curl" "curl is missing, cannot probe the LAN address"
+  for port in "${svc_ports[@]}"; do
+    if [[ -z $(ss -Htln "sport = :$port" | awk '{print $4}') ]]; then
+      report FAIL "exposure:live:$port" "nothing listens on $port (is the service running?)"
+      continue
+    fi
+    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://$lan:$port/" 2>/dev/null || true)
+    if [[ $code == 000 || $code == 403 ]]; then
+      report OK "exposure:lan:$port" "$lan:$port (LAN address) is refused (${code/000/no connection})"
+    else
+      report FAIL "exposure:lan:$port" "$lan:$port (LAN address) answered HTTP $code to a request from the LAN"
     fi
   done
 fi

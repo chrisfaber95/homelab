@@ -81,3 +81,14 @@ Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://
 (8104 redirects there); ntfy on port 8102 (topic `homelab`); claude-dashboard on `https://homelab:8101`.
 Deploy clones live in `/srv/homelab/repos`, your own dev clones in `~/dev`. You can't read system service journals
 (no `adm` group): look in `/srv/homelab/state/`.
+
+## Build kit
+
+Agents and skills added for brief H-012 (LLM router and local search); full list with sources and refs in `.claude/kit.md`.
+- `backend-developer` (agent): server-side work, endpoints, service hardening. Skills `build-endpoint`, `harden-service`.
+- `code-simplifier`, `comment-analyzer`, `pr-test-analyzer`, `silent-failure-hunter`, `type-design-analyzer` (agents, pr-review-toolkit): review a PR before it is opened.
+- `webapp-testing`, `frontend-design` (skills): test a local web UI with Playwright; design the Search panel/tab.
+- `mcp-builder` (skill): build the MCP tool Claude sessions call for search. Its `npx` runs (MCP inspector, `@modelcontextprotocol/codemod`) need Chris's go-ahead first; do not run them on your own.
+- `router-tiers` (skill, written for H-012): tiers, backends, escalation, usage log, how callers declare a tier.
+- `search-corpus` (skill, written for H-012): chunking, metadata, secret scrubbing, incremental re-indexing.
+- `test-automator`, `documentation-engineer`, `code-reviewer` (agents) with skills `write-tests`, `coverage-gaps`, `fix-flaky-tests`, `write-docs`, `sync-docs`: tests, docs and review.

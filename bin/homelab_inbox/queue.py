@@ -13,6 +13,43 @@ from .router import revive_followups, route_task, settle_routed
 from .storage import db, get, log, now, tasks, update
 
 
+MERGE_MAIN_BY_HAND = ("    git -c safe.directory='*' fetch --upload-pack=\"git -c safe.directory='*' upload-pack\" "
+                      "origin main\n    git merge origin/main")
+
+
+def catch_up_main(t):
+    """Merge main into the branch of a task that is about to continue without a PR.
+
+    A task with a PR is covered: GitHub reports the conflict and github.on_conflict merges main in, with its own
+    round limit. Without a PR nothing noticed, so a task that is retried or continued after its push failed carries
+    on from the main it started with and conflicts with everything that landed since. The task itself cannot fix it:
+    its origin is the service's copy, owned by another account, so a plain git fetch is refused.
+    """
+    if t["pr_number"]:
+        return ""
+    with repo_lock(t["repo"]):  # the copy of the service is read here and written by refresh_cache
+        code, out = task_cmd("behind", t["id"])
+        if code != 0:
+            return ""  # 1: the branch already has main. 2: no working copy, so prepare made a fresh one from main.
+        code, out = task_cmd("sync", t["id"])
+    if code == 0:
+        log_line(f"t{t['id']}", "info", f"merged main into inbox/{t['id']} before this round")
+        return ("\n\nMain moved on since your last round and has been merged into your branch, so work of other "
+                "tasks is in your working copy now. Build on it instead of doing it again.")
+    if code == 4:
+        files = [f for f in out.splitlines() if f.strip()]
+        log_line(f"t{t['id']}", "info", f"main conflicts with inbox/{t['id']} in {len(files)} file(s)")
+        return ("\n\nMain moved on since your last round, and `git merge origin/main` is in progress in your working "
+                "copy with conflicts in:\n\n" + "\n".join(f"- {f}" for f in files)
+                + "\n\nResolve them so that both your work and the work on main keep working, commit the merge on "
+                  "the same branch, and then do what is asked above.")
+    why = out.strip()[-200:] or f"exit {code}"
+    log_line(f"t{t['id']}", "error", f"could not merge main into inbox/{t['id']}: {why}")
+    return (f"\n\nMain moved on since your last round and merging it in here failed ({why}), so your working copy is "
+            "older than main. Your origin is the service's copy and git refuses a repository of another account, so "
+            "a plain git fetch does not work. Merge main yourself with:\n\n" + MERGE_MAIN_BY_HAND)
+
+
 def run_round(task_id):
     t = get(task_id)
     repos = repo_list()
@@ -37,6 +74,9 @@ def run_round(task_id):
             prompt = f"Taak voor de repo {t['repo']}:\n\n{t['text']}"
         else:
             prompt = t["pending_input"]
+            extra = catch_up_main(t)
+            if extra:
+                prompt = (prompt or "") + extra
         write_prompt(t, prompt)
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None,
                reprepare=0)

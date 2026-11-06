@@ -53,6 +53,17 @@ Deploying a new project on the box still takes a line in `config/repos.conf` (an
 
 Nothing starts without one of those buttons.
 
+**A brief that changes during a build** doesn't reach that build: the planner reads the brief once, and the setup PRs
+are merged when the build starts. So a designer session that edits the brief or its `build.kit` while the build runs
+changes nothing in it (and its new setup PR stays open). Want those changes built: cancel the build, then start it
+again, which plans the brief as it then stands on main.
+
+**Cancel and start again**: Cancel on the build stops it and the tasks under it (a build itself has no Retry button;
+its tasks do). As soon as nothing of a build is left - it was cancelled or failed, or every task was cancelled,
+failed, refused, stopped at the limit or had its PR closed - the brief gets its Build button back on the Briefs tab,
+and the build's own page links to the brief. Setup PRs that the cancelled build already merged stay merged: the build
+kit is in the repo and a new build doesn't add it twice.
+
 - The **planner** is Claude without tools (the same route as the router of "auto"). It gets the brief and the
   profiles of the brief's `repos` (only those in `config/repos.conf` plus `homelab`) and returns up to
   `PLAN_MAX_TASKS` tasks, each with its own acceptance criteria and optionally `after`. Criteria only you can check

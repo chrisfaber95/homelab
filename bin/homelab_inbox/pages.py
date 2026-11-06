@@ -10,7 +10,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from .briefs import builds, live_build, load_briefs, split_frontmatter
+from .briefs import build_left_nothing, builds, live_build, load_briefs, split_frontmatter
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
@@ -185,6 +185,11 @@ def task_page(t):
                      + form(f'/task/{t["id"]}/attended', "", "Stop: I merge the rest myself", cls="small quiet"))
     elif t["repo"] == BRIEF and t["brief"]:
         parts.append('<p class="muted">You merge the PRs of this build yourself.</p>')
+    if t["repo"] == BRIEF and t["brief"] and build_left_nothing(t):
+        parts.append('<p class="muted">Nothing of this build is left: no task of it is still running or merged. '
+                     f'A build has no Retry; start it again on the brief itself '
+                     f'(<a href="/briefs/{e(t["brief"])}">{e(t["brief"])}</a>), as long as it is still approved. '
+                     'A new build plans the brief as it stands on main then.</p>')
     if t["repo"] == BRIEF and t["handoff"]:
         parts.append(f'<h2>Handoff</h2><p>' + (f'<a href="{e(t["handoff"])}">{e(t["handoff"])}</a>'
                                               if t["handoff"].startswith("http") else e(t["handoff"])) + '</p>')

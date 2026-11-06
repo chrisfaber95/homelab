@@ -10,7 +10,7 @@ import uuid
 
 import yaml
 
-from .config import BRIEF, CONF, HOME, NEW_REPOS, SETUP_PATHS, _cancel, _lock
+from .config import ACCEPTABLE, BRIEF, CONF, HOME, NEW_REPOS, SETUP_PATHS, _cancel, _lock
 from .helpers import NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, task_cmd
 from .router import children, repo_profiles
 from .storage import db, get, log, now, update
@@ -107,9 +107,20 @@ def builds(bid=None):
         return c.execute("SELECT * FROM tasks WHERE repo=? ORDER BY id DESC", (BRIEF,)).fetchall()
 
 
+def build_left_nothing(b):
+    """True when nothing of this build is left: it was cancelled or failed, or it was planned and every task ended
+    badly (cancelled, failed, refused, stopped at the limit, or its PR closed). The brief can then be built again."""
+    if b["status"] in ("cancelled", "failed"):
+        return True
+    if b["status"] == "routed" and b["ended"]:
+        kids = children(b["id"])
+        return bool(kids) and all(k["status"] in ACCEPTABLE for k in kids)
+    return False
+
+
 def live_build(bid):
-    """The build of this brief that still counts: not cancelled or failed."""
-    return next((b for b in builds(bid) if b["status"] not in ("cancelled", "failed")), None)
+    """The build of this brief that still counts: the newest one that didn't end with nothing left."""
+    return next((b for b in builds(bid) if not build_left_nothing(b)), None)
 
 
 def set_brief_status(bid, status, why):

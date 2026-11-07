@@ -59,10 +59,13 @@ PR)" as not done. If your task is in homelab, make them:
 4. Behind `tailscale serve`: a change `changes/NNNN-<name>-serve/` with `apply.sh` and `revert.sh`
    (`tailscale serve --bg --yes --http=<port> http://127.0.0.1:<internal port>`). Run the `change-reviewer` and
    `exposure-checker` agents on it.
-   Use `--https=<port>` instead when the app marks its session cookie `Secure` (`COOKIE_SECURE=1`), because a
-   browser never sends such a cookie over plain HTTP and logging in then fails silently. `--https` needs HTTPS
-   Certificates to be on for the tailnet: check `tailscale status --json | jq .CertDomains` (`null` = off, and only
-   Chris can turn it on in the admin console) and assert it at the top of `apply.sh`.
+   `--http` and a `Secure` session cookie do not go together: a browser never sends such a cookie over plain HTTP,
+   so logging in fails with no error at all. Either use `--https=<port>` — which needs HTTPS Certificates on for the
+   tailnet (`tailscale status --json | jq .CertDomains`; `null` = off, only Chris can change it, assert it at the
+   top of `apply.sh`) — or keep `--http` and make sure the app's `Secure` flag is off. Take the flag from the env
+   file, not the compose file, so that choice can change later without a rebuild (pixel-quest does this:
+   `changes/0006` serves HTTP with `COOKIE_SECURE=0`, `changes/0007` is the prepared switch). The
+   `fix-a-failed-deploy` skill has the order to flip them in.
 5. `config/services.conf`: `<Name> | http://homelab:<port> | <what it is> (docs/projects.md)`. This is the link
    on the homelab page.
 6. `docs/projects.md`: the port in the "In gebruik" list and a section for the app (address, owner, state,

@@ -69,8 +69,24 @@ tailscale status --json | jq .CertDomains   # null = HTTPS Certificates is off i
 
 If it is `null`, `--https` is refused and only Chris can change it (Tailscale admin console, DNS > HTTPS
 Certificates; it also publishes the hostname in the public Certificate Transparency logs). Put that check at the
-**top** of `apply.sh` so a too-early merge changes nothing. The alternative is `--http` plus dropping
-`COOKIE_SECURE` — that is one coordinated change in **both** repos, never a one-sided edit.
+**top** of `apply.sh` so a too-early merge changes nothing.
+
+Serving plain HTTP on the tailnet is a legitimate choice — WireGuard already encrypts the traffic, and it is what
+pixel-quest does today (`changes/0006`, Chris's choice on 2026-11-07, with `changes/0007` prepared for the switch).
+But then the cookie flag must move with it: **the entry and `COOKIE_SECURE` are one decision, in both repos.** Of
+the two mismatches only one is loud, so get the order right:
+
+| Entry | `COOKIE_SECURE` | Result |
+| --- | --- | --- |
+| HTTPS | 1 | correct |
+| HTTP | 0 | correct, one hardening flag less |
+| HTTP | **1** | login fails silently — no error anywhere |
+| HTTPS | 0 | harmless |
+
+So switch **to** HTTPS entry-first then cookie, and **away** from it cookie-first then entry, and never let the
+third row exist in between. Make the flag come from the env file rather than the compose file, so the switch is a
+line in `/etc/homelab/<name>.env` plus `compose up -d` — interpolation happens at `up`, not at build, so the
+container has to be recreated for a new value to land.
 
 ### A wrong or clashing bind
 

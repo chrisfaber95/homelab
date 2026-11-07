@@ -28,7 +28,7 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
-  the app itself on 127.0.0.1:8112). Kijk bij twijfel met `ss -ltn`.
+  the app itself on 127.0.0.1:8112), 8113 pixel-quest. Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
   merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
@@ -246,3 +246,11 @@ together), merge, then restart Home Assistant once. Do not update from inside HA
   /etc/homelab/hacs-github-token`, paste, Ctrl-D), then revoke the old one on GitHub. For HACS' own login: in Home
   Assistant remove the HACS integration, add it again and approve a new device code, then revoke the old authorisation
   at github.com/settings/applications.
+
+## pixel-quest (H-014)
+
+Pixel-art browser adventure with a shared world (private repo `chrisfaber95/pixel-quest`), in `config/repos.conf` as
+`compose`. Address: `http://homelab:8113`, tailnet only. The repo's `compose.yaml` must publish the web app as
+`"100.85.70.34:8113:<container port>"` with `restart: unless-stopped`; Postgres stays inside the compose network
+(no published port). Check with `homelab-deploy status` and `ss -ltn`. Its database volume holds player data: add it
+to `config/backup.list` once the volume name is known.

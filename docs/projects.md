@@ -28,8 +28,17 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
-  the app itself on 127.0.0.1:8112), 8113 pixel-quest. Kijk bij twijfel met `ss -ltn`.
+  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`, HTTPS; the app itself on
+  127.0.0.1:8114). Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
+- **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next
+  to the compose file does not help either, because every commit is unpacked into a fresh release
+  (`git archive`) and takes the file with it. Put it in `/etc/homelab/<naam>.env` instead (`ENV_DIR` in
+  `config/deploy.conf`), mode 600 for the account `deploy`. Is it there, then homelab-deploy runs compose with
+  `--env-file` on it, which fills both `${VAR}` in the compose file and, through `environment:`, the containers.
+  Writing it is a root action, so it goes in a `changes/`-script that generates the value once and then leaves it
+  alone (see `changes/0006-pixel-quest-env-and-serve`). `/etc/homelab` is in `config/backup.list`, so a restore
+  brings the secret back. Repos without such a file are started exactly as before.
 - `service`: also add a unit `deploy/<name>.service` to this repo (see `deploy/claude-dashboard.service`). After the
   merge, `homelab-admin` runs `scripts/18-projects.sh` as root, which installs the unit (`docs/admin.md`, "Install
   scripts after a merge"). Until then the status says `is niet geïnstalleerd`; after the script the box retries
@@ -250,7 +259,19 @@ together), merge, then restart Home Assistant once. Do not update from inside HA
 ## pixel-quest (H-014)
 
 Pixel-art browser adventure with a shared world (private repo `chrisfaber95/pixel-quest`), in `config/repos.conf` as
-`compose`. Address: `http://homelab:8113`, tailnet only. The repo's `compose.yaml` must publish the web app as
-`"100.85.70.34:8113:<container port>"` with `restart: unless-stopped`; Postgres stays inside the compose network
-(no published port). Check with `homelab-deploy status` and `ss -ltn`. Its database volume holds player data: add it
-to `config/backup.list` once the volume name is known.
+`compose`. Address: `https://homelab.tail4eb878.ts.net:8113`, tailnet only.
+
+- **Why HTTPS and not a direct port.** The app marks its session cookie `Secure` (`COOKIE_SECURE=1`), so a browser
+  only sends it over TLS. `tailscale serve` terminates TLS on 8113 and proxies to the app on `127.0.0.1:8114`
+  (`changes/0006-pixel-quest-env-and-serve`). The container itself publishes on loopback only, never on the LAN or
+  the Tailscale address, so signing in over plain HTTP is not possible by accident. Postgres has no published port.
+- **Secret.** `POSTGRES_PASSWORD` (plus `PORT` and `BIND_ADDR`) lives in `/etc/homelab/pixel-quest.env`, mode 600 for
+  the account `deploy`; see "A compose repo with a secret" above. Never change the password: Postgres applies it only
+  when it initialises the `pgdata` volume, so a new one locks the box out of the existing data.
+- **State.** The compose volume `pixel-quest_pgdata` holds profiles, PIN hashes, progress and the shared world. The
+  migrations run at start, so after a rebuild there is nothing to do as long as the volume is there.
+- **Not backed up yet.** The volume is *not* in `config/backup.list`: `homelab-backup` copies files while everything
+  keeps running, and a file-by-file copy of a live Postgres data directory is not reliably restorable. The way to do
+  it is a nightly `docker compose -p pixel-quest exec -T db pg_dump -U pixelquest pixelquest` to a file and that file
+  in `config/backup.list`. Until that exists, losing the volume means losing the players' progress.
+- Check with `homelab-deploy status`, `ss -ltn` and `tailscale serve status`.

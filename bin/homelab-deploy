@@ -7,8 +7,10 @@
 De lus vraagt elke POLL_SECONDS met `git ls-remote` of main veranderd is (alleen uitgaand verkeer), zet de
 deploy-clone op origin/main, en deployt repo's van soort compose of service. Een mislukte build of start laat de
 vorige versie draaien. Instellingen: config/deploy.conf naast bin/; de repo-lijst: config/repos.conf in de
-deploy-clone van de homelab-repo. Voor tests overschrijfbaar met omgevingsvariabelen met dezelfde namen,
-plus SYSTEMCTL (bijvoorbeeld een nep-systemctl).
+deploy-clone van de homelab-repo. Een compose-repo die een geheim nodig heeft, krijgt ENV_DIR/<naam>.env mee
+(--env-file); dat bestand staat buiten de repo omdat een release bij elke commit opnieuw wordt uitgepakt.
+Voor tests overschrijfbaar met omgevingsvariabelen met dezelfde namen, plus SYSTEMCTL (bijvoorbeeld een
+nep-systemctl).
 
 Exit van status: 0 als alles in orde is, 1 als een deploy of sync faalt of de lus niet meer loopt.
 """
@@ -160,10 +162,27 @@ def compose_file(release):
     raise StepError(f"geen compose-bestand ({', '.join(COMPOSE_FILES)})")
 
 
+def compose_env_file(name):
+    """Het env-bestand van een compose-repo buiten de repo (ENV_DIR/<naam>.env), of None.
+
+    Geheimen horen niet in git en een release wordt bij elke commit opnieuw uitgepakt, dus een `.env` naast het
+    compose-bestand overleeft geen deploy. Staat ENV_DIR/<naam>.env er, dan leest compose dat in plaats daarvan:
+    het vult zowel `${VAR}` in het compose-bestand als de omgeving van de containers. Aanleggen doet een
+    changes/-script (root, mode 600 voor het account deploy); zie docs/projects.md.
+    """
+    # CONF.get, niet CONF[...]: een KeyError is geen StepError en zou de hele lus omleggen (en daarmee elke repo)
+    # als het geïnstalleerde config/deploy.conf ouder is dan het geïnstalleerde programma.
+    path = Path(CONF.get("ENV_DIR") or "/etc/homelab") / f"{name}.env"
+    return path if path.is_file() else None
+
+
 def compose(name, release, *args, timeout=600):
     try:
-        return run(["docker", "compose", "-p", name, "-f", str(compose_file(release)), *args],
-                   cwd=release, timeout=timeout)
+        cmd = ["docker", "compose", "-p", name, "-f", str(compose_file(release))]
+        env_file = compose_env_file(name)
+        if env_file:
+            cmd += ["--env-file", str(env_file)]
+        return run([*cmd, *args], cwd=release, timeout=timeout)
     except StepError as e:
         raise StepError(f"compose {args[0]}: {str(e).split(': ', 1)[-1]}")
 

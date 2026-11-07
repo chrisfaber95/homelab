@@ -71,6 +71,11 @@ back in the queue: its own session continues, gets the list of conflicted files,
 `KLAAR:` again; the inbox pushes to the same PR (a brief task is reviewed again). At most `CONFLICT_ROUNDS` (2) times
 per task; after that, or if the merge fails otherwise, you get a notification.
 
+**A task without a PR** (its push failed, so there is nothing for GitHub to report) gets main merged in by
+the inbox itself when its next round starts: it is told that main moved on, or which files conflict so its
+own session resolves them. A task cannot do this for itself, because its `origin` is the service's copy and
+git refuses a repository of another account.
+
 ## Automatisch doorsturen (repo "auto")
 
 Kies je in het formulier **auto (homelab beslist)** in plaats van een repo, dan verdeelt een router jouw bericht:

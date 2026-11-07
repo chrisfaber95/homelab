@@ -6,7 +6,7 @@
 set -euo pipefail
 SERVE_PORT=8113
 if tailscale serve status --json | jq -e --arg p "$SERVE_PORT" '.TCP[$p] != null' >/dev/null; then
-  tailscale serve --yes --https="$SERVE_PORT" off
+  tailscale serve --yes --http="$SERVE_PORT" off
 fi
 tailscale serve status --json | jq -e --arg p "$SERVE_PORT" '.TCP[$p] == null' >/dev/null
 echo "pixel-quest no longer served on $SERVE_PORT (/etc/homelab/pixel-quest.env kept: the pgdata volume needs it)"

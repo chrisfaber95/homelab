@@ -28,8 +28,8 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
-  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`, HTTPS; the app itself on
-  127.0.0.1:8114). Kijk bij twijfel met `ss -ltn`.
+  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114).
+  Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next
   to the compose file does not help either, because every commit is unpacked into a fresh release
@@ -259,15 +259,23 @@ together), merge, then restart Home Assistant once. Do not update from inside HA
 ## pixel-quest (H-014)
 
 Pixel-art browser adventure with a shared world (private repo `chrisfaber95/pixel-quest`), in `config/repos.conf` as
-`compose`. Address: `https://homelab.tail4eb878.ts.net:8113`, tailnet only.
+`compose`. Address: `http://homelab:8113`, tailnet only.
 
-- **Why HTTPS and not a direct port.** The app marks its session cookie `Secure` (`COOKIE_SECURE=1`), so a browser
-  only sends it over TLS. `tailscale serve` terminates TLS on 8113 and proxies to the app on `127.0.0.1:8114`
-  (`changes/0006-pixel-quest-env-and-serve`). The container itself publishes on loopback only, never on the LAN or
-  the Tailscale address, so signing in over plain HTTP is not possible by accident. Postgres has no published port.
-- **Secret.** `POSTGRES_PASSWORD` (plus `PORT` and `BIND_ADDR`) lives in `/etc/homelab/pixel-quest.env`, mode 600 for
-  the account `deploy`; see "A compose repo with a secret" above. Never change the password: Postgres applies it only
-  when it initialises the `pgdata` volume, so a new one locks the box out of the existing data.
+- **Why `serve` and not a direct port.** `tailscale serve` on 8113 proxies to the app on `127.0.0.1:8114`
+  (`changes/0006-pixel-quest-env-and-serve`). The container publishes on loopback only, never on the LAN or the
+  Tailscale address — and it must not, because tailscaled binds the Tailscale address for 8113 itself, so the two
+  would collide. Postgres has no published port.
+- **HTTP now, HTTPS prepared.** Plain HTTP on the tailnet, with `COOKIE_SECURE=0` (Chris's choice, 2026-11-07, so the
+  game could run). WireGuard still encrypts the traffic; what is missing is TLS between the browser and `serve`.
+  `tailscale serve --https` needs HTTPS Certificates on for the tailnet — an admin-console action
+  (`tailscale status --json | jq .CertDomains` must not be `null`), and enabling it publishes the hostname in the
+  public Certificate Transparency logs. The switch is written and waiting: `changes/0007-pixel-quest-https`.
+  Do not set `COOKIE_SECURE=1` while 8113 is HTTP: a browser never sends a `Secure` cookie over `http://`, so signing
+  in fails with no error anywhere.
+- **Secret.** `POSTGRES_PASSWORD` (plus `PORT`, `BIND_ADDR` and `COOKIE_SECURE`) lives in
+  `/etc/homelab/pixel-quest.env`, mode 600 for the account `deploy`; see "A compose repo with a secret" above. Never
+  change the password: Postgres applies it only when it initialises the `pgdata` volume, so a new one locks the box
+  out of the existing data.
 - **State.** The compose volume `pixel-quest_pgdata` holds profiles, PIN hashes, progress and the shared world. The
   migrations run at start, so after a rebuild there is nothing to do as long as the volume is there.
 - **Not backed up yet.** The volume is *not* in `config/backup.list`: `homelab-backup` copies files while everything

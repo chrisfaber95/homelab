@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # pixel-quest (H-014): give the compose project its database password (/etc/homelab/pixel-quest.env) and serve the app
-# on the tailnet as https://homelab.tail4eb878.ts.net:8113 -> http://127.0.0.1:8114.
+# on the tailnet as http://homelab:8113 -> http://127.0.0.1:8114.
 #
-# PRECONDITION, a web action this script cannot do: DNS > HTTPS Certificates must be on in the Tailscale admin console
-# (https://login.tailscale.com/admin/dns). Without it `tailscale serve --https` is refused. The check below runs before
-# anything is written, so merging this too early changes nothing on the box and says what to click. Note the side
-# effect of enabling it: the name homelab.tail4eb878.ts.net ends up in the public Certificate Transparency logs. That
-# makes the name visible, not the box reachable.
+# Plain HTTP for now, on purpose (Chris's choice, 2026-11-07): `tailscale serve --https` needs HTTPS Certificates
+# enabled for the tailnet, which is an admin-console action no script can do, and enabling it publishes the hostname
+# in the public Certificate Transparency logs. The traffic is still encrypted, because WireGuard carries it; what is
+# missing is TLS between the browser and serve. So COOKIE_SECURE stays 0 here: a browser never sends a Secure cookie
+# over http://, and signing in would fail with no error at all. changes/0007-pixel-quest-https is the prepared switch.
 #
 # Why the env file lives outside the repo: homelab-deploy unpacks a release again for every commit, so a `.env` next to
 # docker-compose.yml is gone after the next deploy. ENV_DIR/<name>.env (config/deploy.conf) survives, and homelab-deploy
@@ -19,9 +19,8 @@
 # gone as well.
 #
 # Tailnet only: `serve` listens on the Tailscale addresses, never on the LAN or the internet, and funnel must stay off
-# (checked before and after; funnel is only possible on 443/8443/10000 anyway). HTTPS and not HTTP because the app sets
-# COOKIE_SECURE=1, so the browser only sends the session cookie over TLS. The serve config lives in tailscaled's state
-# (in config/backup.list): a restore brings it back, so rerun this change only after a rebuild without a restore.
+# (checked before and after; funnel is only possible on 443/8443/10000 anyway). The serve config lives in tailscaled's
+# state (in config/backup.list): a restore brings it back, so rerun this change only after a rebuild without a restore.
 set -euo pipefail
 
 ENV_FILE=/etc/homelab/pixel-quest.env
@@ -33,14 +32,8 @@ no_funnel() {
     || { echo "tailscale funnel is on for something: refusing (nothing on this box may reach the internet)" >&2; exit 1; }
 }
 
-# --- 0. Preconditions: fail before the box is touched
+# --- 0. Precondition: fail before the box is touched
 no_funnel
-if ! tailscale status --json | jq -e '[(.CertDomains // [])[]] | length > 0' >/dev/null; then
-  echo "this tailnet cannot issue certificates, so 'tailscale serve --https=$SERVE_PORT' would be refused." >&2
-  echo "turn on DNS > HTTPS Certificates at https://login.tailscale.com/admin/dns, then apply this change again" >&2
-  echo "(check: tailscale status --json | jq .CertDomains  must list homelab.tail4eb878.ts.net)" >&2
-  exit 1
-fi
 
 # --- 1. The env file compose reads (the password is created once, never overwritten)
 if [ -e "$ENV_FILE" ]; then
@@ -61,6 +54,8 @@ else
     echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
     echo "PORT=$APP_PORT"
     echo "BIND_ADDR=127.0.0.1"
+    echo "# 0 while the tailnet entry is plain HTTP. changes/0007-pixel-quest-https sets this to 1."
+    echo "COOKIE_SECURE=0"
   } >"$tmp"
   chown deploy:deploy "$tmp"
   chmod 600 "$tmp"
@@ -78,6 +73,9 @@ grep -qxF "PORT=$APP_PORT" "$ENV_FILE" \
   || { echo "$ENV_FILE does not set PORT=$APP_PORT (found: $(grep -E '^PORT=' "$ENV_FILE" || echo none)); look at it by hand" >&2; exit 1; }
 grep -qxF 'BIND_ADDR=127.0.0.1' "$ENV_FILE" \
   || { echo "$ENV_FILE does not bind the app to 127.0.0.1; look at it by hand" >&2; exit 1; }
+# A Secure cookie over plain HTTP is never sent back, so signing in would fail without any error.
+grep -qxF 'COOKIE_SECURE=0' "$ENV_FILE" \
+  || { echo "$ENV_FILE does not set COOKIE_SECURE=0, which plain HTTP on $SERVE_PORT needs (found: $(grep -E '^COOKIE_SECURE=' "$ENV_FILE" || echo none)); apply changes/0007-pixel-quest-https for the HTTPS switch instead" >&2; exit 1; }
 
 # Prove the thing this change exists for: compose can interpolate now. `config` reads files only, no daemon, no build.
 release=/srv/homelab/releases/pixel-quest/current
@@ -89,17 +87,17 @@ else
   echo "no release yet ($release): homelab-deploy builds one in its next round"
 fi
 
-# --- 2. Serve it on the tailnet over HTTPS
-tailscale serve --bg --yes --https="$SERVE_PORT" "http://127.0.0.1:$APP_PORT"
+# --- 2. Serve it on the tailnet (HTTP; changes/0007-pixel-quest-https switches this to HTTPS)
+tailscale serve --bg --yes --http="$SERVE_PORT" "http://127.0.0.1:$APP_PORT"
 no_funnel
 
 status=$(tailscale serve status --json)
-jq -e --arg p "$SERVE_PORT" '.TCP[$p].HTTPS == true' >/dev/null <<<"$status" \
-  || { echo "serve has no HTTPS listener on $SERVE_PORT" >&2; exit 1; }
+jq -e --arg p "$SERVE_PORT" '.TCP[$p].HTTP == true' >/dev/null <<<"$status" \
+  || { echo "serve has no HTTP listener on $SERVE_PORT" >&2; exit 1; }
 jq -e --arg p ":$SERVE_PORT" --arg target "127.0.0.1:$APP_PORT" \
   '[.Web // {} | to_entries[] | select(.key | endswith($p)) | .value.Handlers["/"].Proxy // ""
     | select(. == "http://" + $target)] | length == 1' >/dev/null <<<"$status" \
   || { echo "$SERVE_PORT does not proxy to 127.0.0.1:$APP_PORT: $(jq -c .Web <<<"$status")" >&2; exit 1; }
 
-echo "pixel-quest: env file in place, served on the tailnet at https://homelab.tail4eb878.ts.net:$SERVE_PORT"
+echo "pixel-quest: env file in place, served on the tailnet at http://homelab:$SERVE_PORT (HTTP; see changes/0007)"
 echo "the deploy itself follows: a failed build is retried once per 30 minutes, so give it that long (homelab-deploy status)"

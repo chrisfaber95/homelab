@@ -128,8 +128,12 @@ hebben een token en worden alleen vanaf de pagina zelf geaccepteerd (tegen CSRF)
   herstart; een taak die liep tijdens een herstart, staat daarna op "mislukt" (verstuur hem opnieuw).
 - Grenzen en aantallen: `config/inbox.conf` (PR, daarna `scripts/21-inbox.sh`).
 - Tokens: `/etc/homelab/inbox-claude-token` (Claude Code voor `inbox`, van `claude setup-token`),
-  `/etc/homelab/inbox-github-token` (GitHub voor `inbox-runner`: Contents en Pull requests read/write; Checks, Commit statuses en Actions read-only),
+  `/etc/homelab/inbox-github-token` (GitHub voor `inbox-runner`: Contents, Pull requests en Workflows read/write; Checks, Commit statuses en Actions read-only),
   `/etc/homelab/inbox-ntfy-token`. Verloopt er een, draai dan `scripts/21-inbox.sh` opnieuw: het vraagt opnieuw.
+- A task that fails with `refusing to allow a Personal Access Token to create or update workflow`: the GitHub
+  token misses Workflows: Read and write, so the push of a branch that adds or changes a file in
+  `.github/workflows/` is rejected. Add that permission to the token on GitHub (its value stays the same, so
+  nothing has to be pasted again) and use Retry on the task.
 - Code: `bin/homelab-inbox` is the entry point; the parts are modules in `bin/homelab_inbox/` (map in `CLAUDE.md`).
   `scripts/21-inbox.sh` installs them next to it.
 - Logs: `journalctl -u homelab-inbox`.

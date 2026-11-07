@@ -87,6 +87,11 @@ Doe dit op het toetsenbord van de laptop, niet via SSH: een fout hier kost je de
 - [ ] `sudo tailscale up`: open de URL die hij toont op de Windows-pc en log in.
 - [ ] In de Tailscale-admin (Machines → homelab → ...): **Disable key expiry**, anders valt de box na een paar
       maanden van je tailnet en kun je er niet meer bij.
+- [ ] In de Tailscale-admin (DNS): **HTTPS Certificates** aan. Zonder dat kan `tailscale serve --https` geen
+      certificaat krijgen, en pixel-quest (`changes/0007-pixel-quest-https`, poort 8113) komt niet op. Het is een
+      instelling van het tailnet zelf: geen script kan hem zetten en een herbouw brengt hem niet terug.
+      Controle: `tailscale status --json | jq .CertDomains` noemt `homelab.tail4eb878.ts.net`. Let op: dit zet die
+      naam in de publieke Certificate Transparency-logs — de naam wordt zichtbaar, de box niet bereikbaar.
 - [ ] SSH alleen met sleutel, ook als cloud-init iets anders heeft neergezet:
       ```bash
       sudo tee /etc/ssh/sshd_config.d/10-homelab.conf <<'EOF'

@@ -71,19 +71,7 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
    `21-inbox.sh` ran on 2026-10-30), and claude-dashboard's two open team-hq tickets (T-103 became brief H-002,
    `needs-design`; T-045 is in `CHECKLIST.md`, PR #40). Tested end to end with fakes, not yet with real Claude
    runs: the first real build is the next step (`CHECKLIST.md`).
-3. **pixel-quest on HTTPS** (`changes/0007-pixel-quest-https`, written, in its own PR): the game is served over plain
-   HTTP on `http://homelab:8113` with `COOKIE_SECURE=0`, because `tailscale serve --https` needs HTTPS Certificates
-   on for the tailnet and only you can switch that on (Chris's choice on 2026-11-07: HTTP first so the game runs).
-   In this order:
-   1. Turn on DNS > HTTPS Certificates at <https://login.tailscale.com/admin/dns>. This publishes the name
-      `homelab.tail4eb878.ts.net` in the public Certificate Transparency logs; it makes the name visible, not the box
-      reachable.
-   2. Check `tailscale status --json | jq .CertDomains` lists `homelab.tail4eb878.ts.net`, and `homelab-deploy status`
-      shows pixel-quest running.
-   3. Only then merge the PR. **Not earlier**: `apply.sh` refuses without a cert domain, and `homelab-admin` runs a
-      failed change again only when `apply.sh` itself changes (`bin/homelab-admin`, "een mislukte wijziging alleen
-      opnieuw als apply.sh verandert"). A too-early merge therefore costs a new PR, not just a retry.
-4. **pixel-quest backups**: the compose volume `pixel-quest_pgdata` holds the players' profiles, progress and shared
+3. **pixel-quest backups**: the compose volume `pixel-quest_pgdata` holds the players' profiles, progress and shared
    world and is not backed up. A path in `config/backup.list` would not be enough, because `homelab-backup` copies
    files while Postgres keeps running; it needs a nightly `pg_dump` to a file and that file in the list
    (`docs/projects.md`, section pixel-quest).
@@ -103,6 +91,10 @@ Still for the user to test (also in `CHECKLIST.md`):
   and the note. Tested without root (unit tests); still to see live: retry task 97 with a note.
 - Brief review diff and CI rule (2026-10-30): the reviewer's diff skips lockfiles, generated files and fixtures
   (code first, REVIEW_MAX_DIFF 150000); the planner gives a repo without CI a CI task first.
+- pixel-quest over HTTPS (2026-11-07, `changes/0007-pixel-quest-https`): open
+  <https://homelab.tail4eb878.ts.net:8113> on a phone and a laptop on the tailnet and **sign in**, which is what a
+  wrong cookie flag breaks (a loading page proves nothing). Checked by the change itself: a real TLS request to
+  `/health` and `COOKIE_SECURE=1` in the running container.
 - After the move to the desktop: BIOS, `EXPECTED_GPU` to the GTX 1080, reboot and power test, the rebuild drill.
 
 ## Answered questions

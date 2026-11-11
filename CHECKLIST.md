@@ -370,6 +370,10 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] F-017: in `config/llm.conf` `LLM_NUM_CTX=8192` (het model `llama3.1:8b` blijft; commit en push), dan
       `sudo bash /home/claude/homelab/scripts/17-llm.sh`; `ollama ps` en `llm usage` tonen 100% GPU.
 
+## H-015: forge
+
+- [ ] After the merge, root runs `18-projects.sh` (and `25-forge.sh`). Then, once, by hand as the forge account: install the Claude CLI, `claude` login and `gh auth login` (docs/projects.md, forge). `homelab-deploy status` shows forge; the homelab page shows a Forge block that says Stopped; Start runs it, Stop ends it, and `sudo systemctl restart homelab-app-forge` (via homelab-admin) brings it back Stopped. From Windows with Tailscale off `Test-NetConnection <lan-ip> -Port 8120` is `False`.
+
 ## H-012: search index (index side)
 
 - [ ] After the merge: `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (copies the inbox transcripts to

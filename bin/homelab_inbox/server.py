@@ -14,7 +14,7 @@ from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, update_draft, update_run
 from .memory import LEARN_HINT, MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
-from . import search
+from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
@@ -84,6 +84,8 @@ class Handler(BaseHTTPRequestHandler):
                              "application/json")
         if url.path == "/search":
             return self.send(200, search_page())
+        if url.path == "/api/forge":
+            return self.send_upstream(*forge.state())
         if url.path == "/api/search/filters":
             return self.send_upstream(*search.filters())
         if url.path == "/api/search/results":
@@ -132,6 +134,8 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
         if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
             return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
+        if m := re.fullmatch(r"/api/forge/(start|stop)", self.path):
+            return self.send_upstream(*forge.control(m.group(1), self.who))
         if self.path == "/api/search/ask":
             return self.send_upstream(*search.ask(form))
         if self.path == "/api/search/feedback":

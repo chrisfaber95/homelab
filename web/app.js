@@ -280,3 +280,41 @@ if (searchForm) {
     if (searchForm.reportValidity()) run(false);
   });
 }
+
+// Forge (H-015): state, Start and Stop. Talks to the inbox only (/api/forge*), which calls forge.
+const forgeBox = document.getElementById("forge");
+if (forgeBox) {
+  const csrf = forgeBox.dataset.csrf;
+  const status = document.getElementById("forge-status");
+  const buttons = forgeBox.querySelectorAll("button[data-forge]");
+  const show = (d) => {
+    status.classList.remove("error");
+    status.textContent = d.running
+      ? `Running${d.step ? `: ${d.step}` : ""}${d.project ? ` (${d.project})` : ""}` : "Stopped";
+  };
+  const fail = (text) => { status.classList.add("error"); status.textContent = text; };
+  const refresh = async () => {
+    try {
+      const r = await fetch("/api/forge", { cache: "no-store" });
+      const d = await r.json();
+      if (r.ok) show(d); else fail(d.error?.message || `HTTP ${r.status}`);
+    } catch (e) { fail("Forge is not reachable."); }
+  };
+  for (const b of buttons) {
+    b.addEventListener("click", async () => {
+      buttons.forEach((x) => { x.disabled = true; });
+      try {
+        const r = await fetch(`/api/forge/${b.dataset.forge}`, {
+          method: "POST", cache: "no-store",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ csrf }),
+        });
+        const d = await r.json();
+        if (r.ok) show(d); else fail(d.error?.message || `HTTP ${r.status}`);
+      } catch (e) { fail("Forge is not reachable."); }
+      buttons.forEach((x) => { x.disabled = false; });
+    });
+  }
+  refresh();
+  setInterval(refresh, 10000);
+}

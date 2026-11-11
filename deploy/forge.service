@@ -1,0 +1,42 @@
+# homelab: forge (H-015), an autopilot that scouts, designs and builds its own projects. Tailnet only.
+# Binds the Tailscale address on port 8120 (ufw allows 8100-8199 only via tailscale0); forge refuses 0.0.0.0.
+# Runs as its own account `forge` (scripts/25-forge.sh creates it, with HOME=/var/lib/forge): forge runs `claude -p`
+# and `gh`, which need a login of their own, and that login must not be the claude account's. Chris logs in once
+# (docs/projects.md, "forge"). No Claude API key anywhere: the Claude CLI only.
+# The service always comes up *stopped*: forge itself ignores a saved "running" on startup, and only Start (the
+# homelab page, or POST /api/start) runs the worker. Config: /etc/forge/env (no secrets), template config/forge.env.
+[Unit]
+Description=forge (homelab, H-015)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=forge
+Group=forge
+StateDirectory=forge
+StateDirectoryMode=0700
+WorkingDirectory=/srv/homelab/releases/forge/current
+Environment=HOME=/var/lib/forge
+Environment=PATH=/var/lib/forge/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/srv/homelab/releases/forge/current/src
+Environment=PYTHONUNBUFFERED=1
+Environment=FORGE_BIND_HOST=100.85.70.34
+Environment=FORGE_PORT=8120
+Environment=FORGE_STATE_DIR=/var/lib/forge
+EnvironmentFile=-/etc/forge/env
+ExecStart=/usr/bin/python3 -m forge
+# Stop ends running child processes; forge saves its state within 5 minutes, so allow that before a kill.
+TimeoutStopSec=330
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

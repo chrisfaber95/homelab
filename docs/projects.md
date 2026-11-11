@@ -28,7 +28,7 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
-  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114).
+  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114), 8120 forge (Tailscale address).
   Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next
@@ -153,6 +153,38 @@ database gezet door `changes/0003-visualshopping-demo`).
 - **Database opnieuw opbouwen** (na een wijziging in `db/`), als `deploy` in `/srv/homelab/releases/visualshopping-server/current`:
   `docker compose -p visualshopping-server down`, `docker volume rm visualshopping-server_db`, `docker compose -p
   visualshopping-server up -d`. Geen `down -v`: dat wist ook de volume met foto's en uploads.
+
+## forge (H-015)
+
+An autopilot (`chrisfaber95/forge`, private) that scouts an idea, designs it, builds it as PRs in a repo of its own,
+reviews and merges them, and moves on, inside hard limits. `service` repo: `homelab-app-forge.service`
+(`deploy/forge.service`) runs `python3 -m forge` from `/srv/homelab/releases/forge/current/src`.
+
+- **Address**: **`http://homelab:8120`**, bound to the Tailscale address `100.85.70.34` (forge refuses `0.0.0.0`);
+  ufw's 8100-8199 rule on `tailscale0` covers it. Its page shows what it does, its ideas, repos used (of 3), the
+  allowance share, the log, open PRs and merged features.
+- **Start and Stop**: the **Forge** block on the homelab page (`http://homelab.tail4eb878.ts.net:8105`, next to
+  Services) calls forge's `POST /api/start` and `POST /api/stop` through the inbox (`bin/homelab_inbox/forge.py`,
+  `FORGE_URL` in `config/inbox.conf`). Stop ends running work within 5 minutes with state saved. **After any service
+  restart or reboot forge is stopped**, whatever it did before; press Start again.
+- **Account and files**: `scripts/25-forge.sh` creates the account `forge` (`HOME=/var/lib/forge`, the state and the
+  clones in `work/`) and copies `config/forge.env` to `/etc/forge/env` once (no secrets; the limits are edited
+  there, then restart the service). `scripts/18-projects.sh` calls it before it installs the unit. State in
+  `/var/lib/forge`; `config/backup.list` keeps `state.json` and the logins.
+- **Logins, once, by hand** (they need your browser): `sudo -iu forge` is not possible (nologin shell), so use
+  `sudo -u forge -H bash`, then install the Claude CLI there (`curl -fsSL https://claude.ai/install.sh | bash`), run
+  `claude` and log in, and run `gh auth login` for the GitHub account that owns `chrisfaber95/` (it needs to create
+  private repos and PRs there). There is no Claude API key anywhere. Without the logins forge starts but its
+  builds fail and show up in its log.
+- **Repos**: only the `forge` line is in `config/repos.conf`. Forge's own project repos are never registered and
+  forge never writes to a repo it did not create. It only opens two kinds of PR here, which you merge: this
+  Start/Stop block and link, and per finished web project one PR with its deploy line and page link.
+- **Assumptions to check on the first run** (written without forge's source at hand): forge starts with
+  `python3 -m forge` from `src/`, reads `FORGE_BIND_HOST`, `FORGE_PORT` and `FORGE_STATE_DIR`, and serves
+  `GET /api/state` (with `running` or `status`), `POST /api/start` and `POST /api/stop`. If a name differs, change
+  `deploy/forge.service` or `bin/homelab_inbox/forge.py`.
+- **After a rebuild**: run `scripts/18-projects.sh`; the account, config and unit come back, the code comes from the
+  deploy, and a restore brings the state and logins back. Without a restore, do the logins again.
 
 ## Herbouwen op een lege box
 

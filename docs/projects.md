@@ -172,7 +172,7 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
   there, then restart the service). `scripts/18-projects.sh` calls it before it installs the unit. State in
   `/var/lib/forge`; `config/backup.list` keeps `state.json` and the logins.
 - **Logins, once, by hand** (they need your browser): `sudo -iu forge` is not possible (nologin shell), so use
-  `sudo -u forge -H bash`, then install the Claude CLI there (`curl -fsSL https://claude.ai/install.sh | bash`), run
+  `sudo -u forge -H bash`, then cd out of your own home first, then install the Claude CLI there (`curl -fsSL https://claude.ai/install.sh | bash`), run
   `claude` and log in, and run `gh auth login` for the GitHub account that owns `chrisfaber95/` (it needs to create
   private repos and PRs there). There is no Claude API key anywhere. Without the logins forge starts but its
   builds fail and show up in its log.

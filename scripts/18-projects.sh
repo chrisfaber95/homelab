@@ -125,6 +125,9 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+echo "== Account for forge (H-015): before its unit starts"
+bash "$REPO/scripts/25-forge.sh"
+
 echo "== Services uit deploy/"
 installed=()
 changed=()

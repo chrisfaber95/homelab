@@ -466,6 +466,18 @@ def services_html():
             '<a href="/briefs">Briefs</a> tab. More in docs/briefs.md.</p>')
 
 
+def forge_html():
+    """Start and Stop for forge (H-015). The buttons talk to the inbox (/api/forge), which calls forge; app.js fills in
+    the state. The link to forge's page is its line in config/services.conf."""
+    link = next((s["address"] for s in SERVICES if s["name"] == "Forge"), "")
+    page_link = f' <a href="{html.escape(link)}">Forge page</a>' if link.startswith(("http://", "https://")) else ""
+    return (f'<section id="forge" class="sec-forge" data-csrf="{csrf_token()}"><div class="section-head"><h2>Forge</h2>'
+            f'<p class="note">autopilot{page_link}</p></div>'
+            '<p id="forge-status" class="note" role="status">Checking forge...</p>'
+            '<div class="forge-actions"><button type="button" data-forge="start">Start</button> '
+            '<button type="button" class="ghost" data-forge="stop">Stop</button></div></section>')
+
+
 def overview_page():
     h = health()
     sentence, cls = status_sentence(h)
@@ -486,6 +498,7 @@ def overview_page():
             f'</div><div>'
             f'<section class="sec-services"><div class="section-head"><h2>Services</h2><p class="note">only over '
             f'Tailscale</p></div>{services_html()}</section>'
+            f'{forge_html()}'
             f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
             f'{usage_html()}</section>'
             f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'

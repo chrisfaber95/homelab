@@ -295,3 +295,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .snippet { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; display: -webkit-box;
   -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 440px) { .search-filters { grid-template-columns: 1fr; } .search-actions button { flex: 1 1 100%; } }
+
+/* Forge (H-015): Start and Stop on the overview. */
+.forge-actions { display: flex; gap: 10px; }
+.forge-actions button { min-height: 44px; margin: 0; flex: 1; }
+.forge-actions button:disabled { opacity: 0.5; cursor: wait; }
+#forge-status.error { color: var(--crit); }

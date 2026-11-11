@@ -69,6 +69,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-022 jobs and skills | `bin/homelab_inbox/jobs.py` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
 | H-012 search (index, query and answer, MCP tool, Search tab) | `search/`, `bin/homelab-search`, `bin/homelab-search-mcp`, `scripts/24-search.sh`, `systemd/homelab-search-*`, `bin/homelab_inbox/search.py` (tab proxy) | `config/search.json` | `docs/search.md` |
+| H-015 forge (Start/Stop on the homelab page, service) | `bin/homelab_inbox/forge.py`, `deploy/forge.service`, `scripts/25-forge.sh` | `config/forge.env`, `config/inbox.conf` | `docs/projects.md` |
 | F-024 homelab page | `bin/homelab_inbox/{overview,pages,server}.py`, `web/` | | `docs/dashboard.md` |
 | H-001 briefs: build, review, handoff | `bin/homelab_inbox/briefs.py` | `config/inbox.conf` | `docs/briefs.md` |
 | Claude's skills, agents, plugins, global CLAUDE.md | `scripts/18-claude.sh`, `claude/agents/`, `claude/CLAUDE.md` | `config/claude.conf` | `STATUS.md` |
@@ -76,7 +77,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 `bin/homelab-inbox` only parses the command line and imports the modules in `bin/homelab_inbox/` (installed next to it
 by `scripts/21-inbox.sh`). Layers, each importing only from the ones above it: `config` (settings, shared state),
 `storage` (SQLite), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
-round), `router`, `briefs` (H-001), `search` (Search tab proxy), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
+round), `router`, `briefs` (H-001), `search` (Search tab proxy), `forge` (Start/Stop proxy), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
 `overview` (page data), `pages` (HTML), `server` (HTTP handler, serve). No import cycles: keep it that way.
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`

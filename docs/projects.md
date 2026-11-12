@@ -163,6 +163,13 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
 - **Address**: **`http://homelab:8120`**, bound to the Tailscale address `100.85.70.34` (forge refuses `0.0.0.0`);
   ufw's 8100-8199 rule on `tailscale0` covers it. Its page shows what it does, its ideas, repos used (of 3), the
   allowance share, the log, open PRs and merged features.
+- **While it works**: as long as forge runs it stands in **Nu bezig** on the homelab page, like an inbox task: the
+  project it is on, what its `claude -p` child is doing this second, and **Log tonen** for its log (the inbox passes
+  forge's `GET /api/log?from=<sequence>` through at `/api/log/f1`, and the answer is kept for a couple of seconds so
+  the poll does not ask forge over and over). The status sentence at the top says "Forge bouwt aan ...". Annuleren is
+  not there: forge is stopped with its own Stop.
+- **Out of tokens**: forge pauses until the window resets and then carries on with the same brief, so a build that
+  ran into the limit is not lost and not marked failed. Its page and the pause reason name the time it goes on.
 - **Start and Stop**: the **Forge** block on the homelab page (`http://homelab.tail4eb878.ts.net:8105`, next to
   Services) calls forge's `POST /api/start` and `POST /api/stop` through the inbox (`bin/homelab_inbox/forge.py`,
   `FORGE_URL` in `config/inbox.conf`). Stop ends running work within 5 minutes with state saved. **After any service
@@ -179,10 +186,11 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
 - **Repos**: only the `forge` line is in `config/repos.conf`. Forge's own project repos are never registered and
   forge never writes to a repo it did not create. It only opens two kinds of PR here, which you merge: this
   Start/Stop block and link, and per finished web project one PR with its deploy line and page link.
-- **Assumptions to check on the first run** (written without forge's source at hand): forge starts with
-  `python3 -m forge` from `src/`, reads `FORGE_BIND_HOST`, `FORGE_PORT` and `FORGE_STATE_DIR`, and serves
-  `GET /api/state` (with `running` or `status`), `POST /api/start` and `POST /api/stop`. If a name differs, change
-  `deploy/forge.service` or `bin/homelab_inbox/forge.py`.
+- **What the inbox expects of forge**: `python3 -m forge` from `src/`, `FORGE_BIND_HOST`, `FORGE_PORT` and
+  `FORGE_STATE_DIR`, and the endpoints `GET /api/state` (`status` or `running`, plus `step`, `project`, `activity`,
+  `started_at`, `paused`, `pause_reason`, `paused_until`), `GET /api/log?from=<sequence>` (`lines`, `next`,
+  `running`), `POST /api/start` and `POST /api/stop`. If a name changes, change `bin/homelab_inbox/forge.py` with it;
+  a missing field only empties its part of the row.
 - **After a rebuild**: run `scripts/18-projects.sh`; the account, config and unit come back, the code comes from the
   deploy, and a restore brings the state and logins back. Without a restore, do the logins again.
 

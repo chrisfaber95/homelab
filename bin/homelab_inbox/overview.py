@@ -5,6 +5,7 @@ import urllib.request
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
+from . import forge
 from .config import CONF, JOBS, TZ, _round_started
 from .helpers import first_line, label, read_json
 from .jobs import JOB_KINDS, LLM_URL, RUN_NL, run_view
@@ -92,7 +93,7 @@ def model_name(model):
 
 
 def live_items():
-    """Wat nu draait: inbox-taken en Claude-jobs (als taak) en lokale job-runs."""
+    """Wat nu draait: inbox-taken en Claude-jobs (als taak), lokale job-runs en forge (H-015)."""
     items = []
     recent = tasks(100)
     for t in recent:
@@ -107,6 +108,9 @@ def live_items():
         items.append({"key": f"r{r['id']}", "title": f"Job {r['job']}", "what": JOB_KINDS.get(r["kind"], r["kind"]),
                       "repo": "box", "model": f"lokaal model ({CONF.get('LLM_MODEL', '?')})", "url": f"/run/{r['id']}",
                       "cancel": f"/run/{r['id']}/cancel", "started": r["started"] or r["created"]})
+    # Forge draait als eigen dienst met eigen Claude-login: hij staat hier naast de taken.
+    if (item := forge.live_item()) is not None:
+        items.append(item)
     return items, sum(t["status"] == "queued" for t in recent)
 
 
@@ -116,12 +120,23 @@ def next_job():
     return min(upcoming) if upcoming else None
 
 
+WHO = {"t": "Claude", "r": "Het lokale model", "f": "Forge"}
+
+
+def forge_sentence(it):
+    """Forge noemt zijn project en wat hij nu doet; dat is zijn titel niet, dus een eigen zin."""
+    where = f" aan {it['repo']}" if it["repo"] else ""
+    return f"Forge bouwt{where}: {it['what']}."
+
+
 def activity_sentence(items, queued):
     if not items:
         now_part = "Niets bezig."
+    elif len(items) == 1 and items[0]["key"][0] == "f":
+        now_part = forge_sentence(items[0])
     elif len(items) == 1:
         it = items[0]
-        who = "Claude" if it["key"][0] == "t" else "Het lokale model"
+        who = WHO.get(it["key"][0], "Claude")
         now_part = f"{who} werkt aan {it['title'][0].lower() + it['title'][1:]}."
     else:
         now_part = f"Bezig: {join_nl(i['title'][0].lower() + i['title'][1:] for i in items)}."

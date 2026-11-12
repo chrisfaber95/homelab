@@ -69,6 +69,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"items": items, "queued": queued,
                                               "activity": activity_sentence(items, queued)}),
                              "application/json")
+        if url.path == f"/api/log/{forge.LIVE_KEY}":
+            start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
+            return self.send_upstream(*forge.log(max(0, start)))
         if m := re.fullmatch(r"/api/log/([tr])(\d+)", url.path):
             start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
             lines, nxt = read_log(f"{m.group(1)}{m.group(2)}", max(0, start))

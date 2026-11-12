@@ -84,6 +84,8 @@ if (live) {
   const activity = document.getElementById("activity");
 
   function cancelForm(url) {
+    // Niet alles is te annuleren vanaf deze pagina: forge heeft zijn eigen Start/Stop.
+    if (!url) return el("span", { class: "note", text: "eigen dienst: zie Forge hieronder" });
     return el("form", { method: "post", action: url },
       el("input", { type: "hidden", name: "csrf", value: csrf }),
       el("button", { class: "linkbtn danger", text: "Annuleren" }));
@@ -96,6 +98,8 @@ if (live) {
       const existing = list.querySelector(`[data-key="${it.key}"]`);
       if (existing) {
         existing.querySelector(".elapsed").textContent = elapsed(it.started);
+        // Wat een agent doet verandert terwijl hij bezig is (forge: zijn laatste logregel).
+        existing.querySelector(".row-title span").textContent = it.what;
         return existing;
       }
       const meta = el("div", { class: "row-meta" },

@@ -95,3 +95,5 @@ Agents and skills added for brief H-012 (LLM router and local search); full list
 - `router-tiers` (skill, written for H-012): tiers, backends, escalation, usage log, how callers declare a tier.
 - `search-corpus` (skill, written for H-012): chunking, metadata, secret scrubbing, incremental re-indexing.
 - `test-automator`, `documentation-engineer`, `code-reviewer` (agents) with skills `write-tests`, `coverage-gaps`, `fix-flaky-tests`, `write-docs`, `sync-docs`: tests, docs and review.
+- `home-actions` (skill, written for H-019): the picked list, the fixed set of home actions, per-client permission and off-switch, the Home Assistant token in `/etc/homelab`, and what is logged.
+- `home-chat-intent` (skill, written for H-019): how the local model turns a chat message into one allowed home action, asking when unsure, and the test phrases.

@@ -25,3 +25,5 @@ Items added by the build setup for brief H-012. A later setup overwrites an item
 | frontend-design | skill | anthropics/skills | ca45fc4 | H-012 |
 | router-tiers | skill | written for H-012 | - | H-012 |
 | search-corpus | skill | written for H-012 | - | H-012 |
+| home-actions | skill | written for H-019 | - | H-019 |
+| home-chat-intent | skill | written for H-019 | - | H-019 |

@@ -1,6 +1,6 @@
 # Build kit
 
-Items added by the build setup for briefs H-012 and H-016. A later setup overwrites an item only if it has the same source.
+Items added by the build setup for briefs H-012, H-016 and H-017. A later setup overwrites an item only if it has the same source.
 
 | Name | Type | Source | Ref | Brief |
 |---|---|---|---|---|
@@ -27,3 +27,5 @@ Items added by the build setup for briefs H-012 and H-016. A later setup overwri
 | search-corpus | skill | written for H-012 | - | H-012 |
 | chat-clients | skill | written for H-016 | - | H-016 |
 | discord-bridge | skill | written for H-016 | - | H-016 |
+| job-delivery | skill | written for H-017 | - | H-017 |
+| research-reports | skill | written for H-017 | - | H-017 |

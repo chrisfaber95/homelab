@@ -104,3 +104,7 @@ Added for brief H-016 (chat with the box, and Discord):
 Added for brief H-017 (agents: deep research, delivery and a catalogue):
 - `job-delivery` (skill, written for H-017): how a job file names where its result goes, what counts as nothing to report, the catalogue and the file format of a catalogue agent, the repo watcher.
 - `research-reports` (skill, written for H-017): what a research report must contain: a source for every claim, private search before the web, quick and deep modes, how to say nothing was found, limits of a run.
+
+Added for brief H-019 (Home: a Home Assistant front in kitt, the homelab page and chat):
+- `home-actions` (skill, written for H-019): the picked list, the fixed set of home actions, per-client permission and off-switch, the Home Assistant token in `/etc/homelab`, and what is logged.
+- `home-chat-intent` (skill, written for H-019): how the local model turns a chat message into one allowed home action, asking when unsure, and the test phrases.

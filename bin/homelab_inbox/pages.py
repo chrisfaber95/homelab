@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 
 from .briefs import build_left_nothing, builds, live_build, load_briefs, split_frontmatter
+from . import conversation
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
@@ -478,6 +479,25 @@ def forge_html():
             '<button type="button" class="ghost" data-forge="stop">Stop</button></div></section>')
 
 
+def discord_html():
+    """The two Discord switches (H-016): Discord as a whole, and approvals from Discord. Each is a plain form."""
+    st = conversation.state()
+    stored = {n: conversation.switch(n) for n in conversation.SWITCHES}
+
+    def row(name, title, note):
+        on = stored[name]
+        return (f'<div class="switch-row"><div><strong>{title}</strong> <span class="note">{note}</span><br>'
+                f'<span id="switch-{name}" role="status">{"On" if on else "Off"}</span></div>'
+                + form(f"/discord/{name}/{'off' if on else 'on'}", "", "Switch off" if on else "Switch on",
+                       ghost=on) + "</div>")
+    held = "" if st["discord"] else ('<p class="note">Discord is off: nothing is sent or read; what is written meanwhile '
+                                     'arrives when it is switched on.</p>')
+    return ('<section id="discord" class="sec-discord"><div class="section-head"><h2>Discord</h2>'
+            '<p class="note">chat with the box</p></div>'
+            + row("discord", "Discord", "the bot and its messages") + held
+            + row("discord_approvals", "Approvals from Discord", "build buttons and their confirm") + '</section>')
+
+
 def overview_page():
     h = health()
     sentence, cls = status_sentence(h)
@@ -498,7 +518,7 @@ def overview_page():
             f'</div><div>'
             f'<section class="sec-services"><div class="section-head"><h2>Services</h2><p class="note">only over '
             f'Tailscale</p></div>{services_html()}</section>'
-            f'{forge_html()}'
+            f'{forge_html()}{discord_html()}'
             f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
             f'{usage_html()}</section>'
             f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'

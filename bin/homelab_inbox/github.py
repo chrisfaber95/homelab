@@ -171,7 +171,7 @@ def on_conflict(t, slug, pr):
     except Exception as e:
         log(f"taak {t['id']}: conflict: {e}")
         return notify(f"{label(t)}: PR #{t['pr_number']} conflicts with main",
-                      f"Couldn't merge main into the branch ({e}): resolve it yourself."[:300], t["pr_url"])
+                      f"Couldn't merge main into the branch ({e}): resolve it yourself.", t["pr_url"])
     files = [f for f in out.splitlines() if f.strip()]
     update(t["id"], status="queued", ended=None, conflicts=(t["conflicts"] or 0) + 1, review_ok=None,
            mem_source=None, mem_link=None,

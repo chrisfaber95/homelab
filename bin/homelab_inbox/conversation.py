@@ -96,11 +96,49 @@ def refusals(limit=100):
                                            (limit,)).fetchall()]
 
 
+SWITCHES = ("discord", "discord_approvals")  # on the homelab page; stored in the kv table, read on every request
+
+
+def switch(name):
+    """True unless the switch was turned off. Read from the database each time: no restart needed."""
+    with db() as c:
+        _init(c)
+        row = c.execute("SELECT value FROM kv WHERE key=?", (f"switch:{name}",)).fetchone()
+    return not (row and row["value"] == "off")
+
+
+def set_switch(name, on):
+    if name not in SWITCHES:
+        raise ValueError(f"unknown switch: {name}")
+    with db() as c:
+        c.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?,?)", (f"switch:{name}", "on" if on else "off"))
+
+
+def state():
+    """What clients may know: whether Discord is on, and whether approvals from Discord are on (off when Discord is)."""
+    on = switch("discord")
+    return {"discord": on, "discord_approvals": on and switch("discord_approvals")}
+
+
+def switched_off(client, action=None):
+    """Why a switch blocks this client (and action), or None. Only the Discord client is behind the switches."""
+    if client != "discord":
+        return None
+    if not switch("discord"):
+        return "Discord is switched off on the homelab page"
+    if action == "approve" and not switch("discord_approvals"):
+        return "approvals from Discord are off"
+    return None
+
+
 def allowed(client, action):
     """True when the client has the permission; otherwise False, and the refusal is logged (journal and table)."""
     if action in PERMISSIONS and action in clients().get(client, set()):
-        return True
-    why = "unknown client" if client not in clients() else f"no permission '{action}'"
+        why = switched_off(client, action)
+        if not why:
+            return True
+    else:
+        why = "unknown client" if client not in clients() else f"no permission '{action}'"
     log(f"conversation: refused {client}: {action} ({why})")
     with db() as c:
         _init(c)

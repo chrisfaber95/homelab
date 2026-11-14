@@ -27,14 +27,15 @@ def repo_list():
 
 
 def notify(title, message, click=None, store=True):
-    """ntfy push; also a notification entry in the conversation, unless the caller stored the full text itself."""
+    """ntfy push (message cut to 300 characters); also a notification entry in the conversation with the full text and
+    the link, unless the caller stored the full text itself."""
     if store:
         conversation.note("box", "ntfy", "notification", f"{title}\n{message}", click)  # before sending: ntfy may fail
     if os.environ.get("NTFY_FAKE") == "1":
-        log(f"MELDING: {title} | {message} | {click or ''}")
+        log(f"MELDING: {title} | {message[:300]} | {click or ''}")
         return
     try:
-        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message, "priority": 4,
+        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message[:300], "priority": 4,
                 "tags": ["robot"]}
         if click:
             body["click"] = click

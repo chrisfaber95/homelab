@@ -15,7 +15,7 @@ Every entry has `id` (the cursor), `time` (UTC), `author` (`chris`, `claude`, `b
 | `message` | Chris: a task or reply from the page (or a client with `write`) |
 | `question` | Claude's question on a task (full text, with a link to the task) |
 | `answer` | Claude's answer to a task |
-| `notification` | every `notify()` call (the ntfy push), except question and answer, which are stored in full as above |
+| `notification` | every `notify()` call (the ntfy push), with the full text and link; ntfy itself gets the text cut to 300 characters. Questions and answers are stored as `question` / `answer` instead (also those of brief and routing tasks) |
 | `approval` | Chris approving a brief on the page |
 | `approval_request` | reserved for the Discord bot's confirm step (not written yet) |
 
@@ -33,6 +33,16 @@ An action without the permission is refused, and the refusal goes to the journal
 `approve` and `run_job` are checked by the code that does those things (`conversation.allowed(client, action)`).
 SSH keys, memory edits and merges on `homelab` exist for no client.
 
+## Switches
+
+The homelab page has two switches (section Discord): **Discord** as a whole and **Approvals from Discord**. They live
+in the `kv` table (`switch:discord`, `switch:discord_approvals`; on unless set to `off`) and are read on every request,
+so they need no restart or rebuild. With Discord off, the door refuses the `discord` client (403, not logged as a
+refusal, so a polling bot doesn't flood the log) and approvals are off too; entries keep being written and the
+bot's cursor picks them up when it is switched on. With only approvals off, `conversation.allowed("discord",
+"approve")` is false ("approvals from Discord are off"), and the bot answers that on its buttons. Other clients
+(Jarvis) are not behind these switches. Both switches are on by default.
+
 ## The door (internal API)
 
 Clients on the box use the inbox on loopback. The inbox refuses the box itself everywhere else; this is the one
@@ -42,6 +52,9 @@ exception, only for `/api/chat/entries`, only from `127.0.0.1`/`::1`, and with a
 - `GET /api/chat/entries?after=<id>&limit=<n>`: entries with an id above `after`, oldest first; answers
   `{"entries": [...], "next": <id to pass next time>}`. Messages written while a client was away are still there.
 - `POST /api/chat/entries` with `{"kind": "message", "text": "...", "ref": "task:12"}`: appends an entry.
+
+- `GET /api/chat/state`: `{"discord": true, "discord_approvals": true}` for any authenticated client; `discord_approvals`
+  is false when Discord is off. A client polls this to see the switches.
 
 Statuses: 401 unknown token, 403 refused (not permitted, or not loopback), 400 bad request. Inside the inbox use
 `conversation.append(...)`, `conversation.read(after)`.

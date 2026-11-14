@@ -20,7 +20,7 @@ FAKE_TOKEN = "ghp_" + "a" * 30
 
 class FakeCtx(core.Ctx):
     def __init__(self, user=OWNER, dm=True):
-        self.user_id, self.is_dm, self.where = user, dm, "a DM" if dm else "channel 9"
+        self.user_id, self.in_place, self.where = user, dm, "a DM" if dm else "channel 9"
         self.sent, self.worked = [], 0
 
     async def working(self):
@@ -89,6 +89,13 @@ class OwnerOnly(BotTest):
             self.assertEqual(len(logs.records), 4)
         self.assertEqual(self.api.calls, [])
         self.assertEqual(self.api.appended, [])
+
+    def test_the_place_is_the_dm_or_only_the_configured_channel(self):
+        self.assertTrue(core.in_place(None, 5, True))        # no channel configured: the DM
+        self.assertFalse(core.in_place(None, 9, False))      # ... and no server channel
+        self.assertTrue(core.in_place(9, 9, False))          # channel configured: that channel
+        self.assertFalse(core.in_place(9, 8, False))         # ... not another one
+        self.assertFalse(core.in_place(9, 5, True))          # ... and not the DM any more
 
     async def test_log_has_who_and_where_but_not_the_content(self):
         with self.assertLogs("discord-bot", "WARNING") as logs:

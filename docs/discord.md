@@ -1,6 +1,7 @@
 # The Discord bot (H-016)
 
-A small separate service that lets Chris read and write the conversation (`docs/conversation.md`) from a Discord DM.
+A small separate service that lets Chris read and write the conversation (`docs/conversation.md`) from a Discord DM, or
+from one channel in his own server ("In your own server instead of the DM" below).
 Code: `discord-bot/` (`bot_core.py` the behaviour, no Discord import; `bot_run.py` the discord.py glue; `bot_client.py` the loopback
 calls; `bot_scrub.py` the secret filter), installer `scripts/26-discord-bot.sh`, unit `systemd/homelab-discord-bot.service`.
 Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
@@ -20,8 +21,9 @@ Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
 
 ## Rules the bot follows
 
-- **Owner and DM only**, checked on every message, command and button press: the sender must be the Discord id in
-  `DISCORD_OWNER_ID`, in a DM. Anything else does nothing and is logged (who and where, never the text).
+- **Owner and one place only**, checked on every message, command and button press: the sender must be the Discord id in
+  `DISCORD_OWNER_ID`, in the bot's place. That place is the DM, or, when `DISCORD_CHANNEL_ID` is set, that one server
+  channel and then not the DM. Anything else does nothing and is logged (who and where, never the text).
 - **A plain message is a question**: answered from the private search (`/v1/ask`) with sources, or "Nothing relevant
   found". Under it is a **Make this a task** button (a task on `auto`). Nothing decides by itself that text is a task. The
   question is also appended to the conversation as a `question` entry.
@@ -62,6 +64,28 @@ Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
    (they are in `/etc/homelab`, which is backed up with the box's secrets, never in the repo). Entered once, never again.
    The token is read by systemd (`LoadCredential`) and is never in the repo, the logs or the conversation.
 4. Open the DM with the bot and send `!help`.
+
+## In your own server instead of the DM
+
+Chris's choice (2026-11-14), a change to H-016's "DM only". Set `DISCORD_CHANNEL_ID` and the bot lives in that one
+channel: it answers the owner there, the relay posts there, the slash commands work there, and the DM is ignored.
+Without the setting nothing changes.
+
+**Everyone who can see that channel reads everything the box sends**: notifications, answers, task questions. Only the
+owner's messages and button presses do anything, but reading is up to Discord's channel permissions. Use a server with
+only yourself in it, or a channel only you can see.
+
+1. Developer Portal > your application > Bot: switch **Message Content Intent** on. In a server channel a plain message
+   arrives empty without it, and with `DISCORD_CHANNEL_ID` set the bot does not start until it is on (it asks for the
+   intent at login).
+2. Add the bot to your server: OAuth2 > URL Generator, scopes `bot` and `applications.commands`, Integration Type Guild
+   Install, bot permissions View Channels, Send Messages, Attach Files and Read Message History. Open the URL and pick
+   your server. (With Public Bot off the Install Link must be None; only you can use the generated URL.)
+3. Copy the channel's id (Developer Mode on, right-click the channel > Copy Channel ID) and add
+   `DISCORD_CHANNEL_ID=<id>` to `/etc/homelab/discord-bot.env`.
+4. `sudo bash /var/lib/homelab/repo/scripts/26-discord-bot.sh` (restarts the bot). Send `!help` in the channel.
+
+Back to the DM: remove the line and run the script again. Messages in threads of the channel are ignored.
 
 ## Switching it off
 

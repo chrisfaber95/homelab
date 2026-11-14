@@ -15,6 +15,7 @@ Source: brief H-016 (`homelab/briefs/H-016-chat-and-discord.md` in the product r
 ## Owner only, DM only
 - Check on every message, button press and command, not once per session: it must come from the owner's Discord account and in the DM.
 - Anything from another account or place does nothing and is logged.
+- Later choice by Chris (2026-11-14, `docs/discord.md`): with `DISCORD_CHANNEL_ID` set, the place is that one channel in his own server instead of the DM (then the DM is ignored too). Still one place and still owner only; the docs warn that everyone who can see the channel reads what the box sends.
 
 ## Messages, commands and buttons
 - A plain message is a question: answer from the private search, with citations, and say so when nothing relevant was found. Under the answer is a button that turns the message into an inbox task. No model decides whether something is a task.

@@ -254,3 +254,22 @@ class Permissions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Page(unittest.TestCase):
+    def setUp(self):
+        reset()
+
+    def test_form_asks_question_and_mode_and_posts_to_ask(self):
+        html = pages.research_page()
+        self.assertIn('action="/research/ask"', html)
+        self.assertIn('name="question"', html)
+        self.assertIn('<option value="quick">', html)
+        self.assertIn('<option value="deep">', html)
+
+    def test_asked_question_shows_in_the_history_and_an_error_keeps_the_question(self):
+        self.assertEqual(jobs.ask_research("What is <X>?", "quick")[0], 200)
+        self.assertIn("quick", pages.research_page())
+        html = pages.research_page(error="daily limit reached", question="Keep <me>")
+        self.assertIn("daily limit reached", html)
+        self.assertIn("Keep &lt;me&gt;", html)

@@ -20,7 +20,7 @@ TASK_BUTTON_TTL = 3600
 TASK_MARK = re.compile(r"\(task (\d+)\)")
 HELP = ("Send a message to ask a question: the answer comes from your private search, with sources.\n"
         "Commands: `!task <repo|auto> <text>`, `!status`, `!jobs`, `!run <job>`, `!drafts`, "
-        "`!approve <brief> [without-me]` (also as slash commands). Reply to a question from Claude to answer it. "
+        "`!research [quick|deep] <question>` (a report with sources, one Claude run), `!approve <brief> [without-me]` (also as slash commands). Reply to a question from Claude to answer it. "
         "Approving always asks for a confirm button; a message like \"approve H-016\" does nothing.")
 
 
@@ -202,6 +202,16 @@ class Bot:
                 return await ctx.send("Usage: `!run <job>`")
             status, body = await self.call(self.api.action, "run_job", job=args)
             return await ctx.send(f"Job {body['job']} started." if status == 200 else failure(status, body))
+        if name == "research":
+            mode, _, rest = args.partition(" ")
+            mode, question = (mode.lower(), rest.strip()) if mode.lower() in ("quick", "deep") else ("quick", args)
+            if not question:
+                return await ctx.send("Usage: `!research [quick|deep] <question>` (quick is the default)")
+            status, body = await self.call(self.api.action, "research", question=question, mode=mode)
+            if status != 200:
+                return await ctx.send(failure(status, body))
+            return await ctx.send(f"Research started ({body['mode']}). The report comes back here when it is done "
+                                  f"(quick takes a few minutes): <{body['url']}>")
         if name == "drafts":
             status, body = await self.call(self.api.action, "drafts")
             if status != 200:

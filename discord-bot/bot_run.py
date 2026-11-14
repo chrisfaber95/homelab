@@ -98,6 +98,13 @@ class DiscordBot(discord.Client):
         async def runjob(inter: discord.Interaction, job: str):
             await run(inter, "run", job)
 
+        @command("research", "Ask a research question: a report with sources comes back here")
+        @app_commands.describe(question="What to look up", mode="quick (a few minutes) or deep")
+        @app_commands.choices(mode=[app_commands.Choice(name="quick", value="quick"),
+                                    app_commands.Choice(name="deep", value="deep")])
+        async def research(inter: discord.Interaction, question: str, mode: str = "quick"):
+            await run(inter, "research", f"{mode} {question}")
+
         @command("drafts", "Draft briefs, with approve buttons")
         async def drafts(inter: discord.Interaction):
             await run(inter, "drafts")

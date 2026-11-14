@@ -187,6 +187,29 @@ class Commands(BotTest):
         self.assertIn("nightly (claude, 03:00)", ctx.texts)
         self.assertEqual(self.api.did("run_job"), [{"job": "nightly"}])
 
+    async def test_research_command_defaults_to_quick_and_takes_deep(self):
+        self.api.replies["research"] = (200, {"run": 5, "mode": "quick", "url": "http://h/research"})
+        ctx = FakeCtx()
+        await self.bot.on_message(ctx, "!research what is tailscale serve?")
+        await self.bot.on_command(ctx, "research", "deep compare X and Y")
+        self.assertEqual(self.api.did("research"), [{"question": "what is tailscale serve?", "mode": "quick"},
+                                                    {"question": "compare X and Y", "mode": "deep"}])
+        self.assertIn("Research started", ctx.texts)
+        self.assertIn("http://h/research", ctx.texts)
+
+    async def test_research_needs_a_question_and_reports_refusals(self):
+        ctx = FakeCtx()
+        await self.bot.on_message(ctx, "!research deep")
+        self.assertIn("Usage: `!research", ctx.texts)
+        self.assertEqual(self.api.did("research"), [])
+        self.api.replies["research"] = (429, {"error": "daily limit reached: 10 Claude runs today"})
+        await self.bot.on_message(ctx, "!research why?")
+        self.assertIn("Daily limit reached", ctx.texts)
+
+    async def test_research_from_a_stranger_does_nothing(self):
+        await self.bot.on_message(FakeCtx(user=1), "!research why?")
+        self.assertEqual(self.api.did("research"), [])
+
     async def test_inbox_down(self):
         self.api.replies["state"] = (0, {"error": "x"})
         ctx = FakeCtx()

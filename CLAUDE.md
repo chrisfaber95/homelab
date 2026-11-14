@@ -100,3 +100,7 @@ Agents and skills added for brief H-012 (LLM router and local search); full list
 Added for brief H-016 (chat with the box, and Discord):
 - `chat-clients` (skill, written for H-016): the one conversation in the inbox, how a client (Discord, later Jarvis) reads and writes it and gets its permissions, the two-step approval with confirm.
 - `discord-bridge` (skill, written for H-016): rules for the Discord bot: owner-only check on every message and button, DM only, length limits, slow answers, what is scrubbed before it leaves the box, token and switches.
+
+Added for brief H-017 (agents: deep research, delivery and a catalogue):
+- `job-delivery` (skill, written for H-017): how a job file names where its result goes, what counts as nothing to report, the catalogue and the file format of a catalogue agent, the repo watcher.
+- `research-reports` (skill, written for H-017): what a research report must contain: a source for every claim, private search before the web, quick and deep modes, how to say nothing was found, limits of a run.

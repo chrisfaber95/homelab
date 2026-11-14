@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 
 from bot_client import Api
-from bot_core import Bot, Cursor, Ctx
+from bot_core import Bot, Cursor, Ctx, in_place
 from bot_scrub import scrub
 
 log = logging.getLogger("discord-bot")
@@ -24,12 +24,13 @@ def is_dm(channel, guild_id):
 
 
 class DiscordCtx(Ctx):
-    def __init__(self, bot, *, user, channel, message=None, interaction=None):
-        self.bot, self.message, self.interaction = bot, message, interaction
+    def __init__(self, bot, *, user, channel, home=None, message=None, interaction=None):
+        self.bot, self.message, self.interaction, self.home = bot, message, interaction, home
         self.user_id = user.id
         guild = (message.guild if message else interaction.guild)
-        self.is_dm = is_dm(channel, guild.id if guild else None)
-        self.where = "a DM" if self.is_dm else f"channel {getattr(channel, 'id', '?')}"
+        dm = is_dm(channel, guild.id if guild else None)
+        self.in_place = in_place(home, getattr(channel, "id", None), dm)
+        self.where = "a DM" if dm else f"channel {getattr(channel, 'id', '?')}"
         self.channel, self.deferred = channel, False
 
     async def working(self):
@@ -48,7 +49,7 @@ class DiscordCtx(Ctx):
 
             async def callback(inter, cid=b.cid):
                 await self.bot.on_button(DiscordCtx(self.bot, user=inter.user, channel=inter.channel,
-                                                    interaction=inter), cid)
+                                                    home=self.home, interaction=inter), cid)
             item.callback = callback
             view.add_item(item)
         return view
@@ -65,21 +66,28 @@ class DiscordCtx(Ctx):
 
 
 class DiscordBot(discord.Client):
-    def __init__(self, bot, owner_id):
-        super().__init__(intents=discord.Intents.default())  # DMs carry their text without the message-content intent
+    def __init__(self, bot, owner_id, channel_id=None):
+        intents = discord.Intents.default()  # DMs carry their text without the message-content intent
+        if channel_id:
+            # A server channel does not: without this privileged intent (switched on in the Developer Portal too,
+            # docs/discord.md) a plain message arrives empty.
+            intents.message_content = True
+        super().__init__(intents=intents)
         self.core, self.owner_id, self.tree = bot, owner_id, app_commands.CommandTree(self)
-        self.dm = None
+        self.channel_id, self.place = channel_id, None
         self._commands()
 
     def _commands(self):
         def command(name, description):
             def wrap(fn):
-                fn = app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)(fn)
+                fn = app_commands.allowed_contexts(guilds=bool(self.channel_id), dms=not self.channel_id,
+                                                   private_channels=False)(fn)
                 return self.tree.command(name=name, description=description)(fn)
             return wrap
 
         async def run(inter, name, args=""):
-            ctx = DiscordCtx(self.core, user=inter.user, channel=inter.channel, interaction=inter)
+            ctx = DiscordCtx(self.core, user=inter.user, channel=inter.channel, home=self.channel_id,
+                             interaction=inter)
             await self.core.on_command(ctx, name, args)
 
         @command("task", "Start a task on a repo or auto")
@@ -120,7 +128,8 @@ class DiscordBot(discord.Client):
     async def on_message(self, message):
         if message.author.id == self.user.id:
             return
-        ctx = DiscordCtx(self.core, user=message.author, channel=message.channel, message=message)
+        ctx = DiscordCtx(self.core, user=message.author, channel=message.channel, home=self.channel_id,
+                         message=message)
         replied = None
         if message.reference and message.reference.message_id:
             try:
@@ -130,19 +139,22 @@ class DiscordBot(discord.Client):
                 pass
         await self.core.on_message(ctx, message.content, replied)
 
-    async def send_dm(self, text, file=None):
-        if self.dm is None:
-            self.dm = await (await self.fetch_user(self.owner_id)).create_dm()
+    async def send_place(self, text, file=None):
+        """The relay: to the configured server channel, or else to the DM with the owner."""
+        if self.place is None and self.channel_id:
+            self.place = self.get_channel(self.channel_id) or await self.fetch_channel(self.channel_id)
+        elif self.place is None:
+            self.place = await (await self.fetch_user(self.owner_id)).create_dm()
         kw = {"content": text, "allowed_mentions": NO_MENTIONS}
         if file:
             kw["file"] = discord.File(io.BytesIO(file[1]), filename=file[0])
-        await self.dm.send(**kw)
+        await self.place.send(**kw)
 
     async def relay_loop(self):
         await self.wait_until_ready()
         while not self.is_closed():
             try:
-                await self.core.relay_once(self.send_dm)
+                await self.core.relay_once(self.send_place)
             except Exception:  # noqa: BLE001  the loop must survive anything; the next poll retries
                 log.exception("relay failed")
             await asyncio.sleep(RELAY_POLL_SECONDS)
@@ -179,10 +191,14 @@ def main():
         owner = int(os.environ["DISCORD_OWNER_ID"])
     except (KeyError, ValueError):
         sys.exit("DISCORD_OWNER_ID is not set (see docs/discord.md)")
+    try:
+        channel = int(os.environ.get("DISCORD_CHANNEL_ID", "").strip() or 0) or None
+    except ValueError:
+        sys.exit("DISCORD_CHANNEL_ID is not a channel id (see docs/discord.md)")
     state = os.path.join(os.environ.get("STATE_DIRECTORY", "."), "cursor.json")
     api = Api(os.environ.get("INBOX_URL", "http://127.0.0.1:8105"), chat_token,
               os.environ.get("SEARCH_URL", "http://127.0.0.1:8019"))
-    DiscordBot(Bot(api, owner, Cursor(state)), owner).run(token, log_handler=None)
+    DiscordBot(Bot(api, owner, Cursor(state)), owner, channel).run(token, log_handler=None)
 
 
 if __name__ == "__main__":

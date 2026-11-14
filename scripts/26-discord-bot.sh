@@ -34,7 +34,7 @@ chown root:inbox /etc/homelab/chat-discord-token
 chmod 640 /etc/homelab/chat-discord-token
 if [[ ! -e /etc/homelab/discord-bot.env ]]; then
   install -m 600 -o root -g root /dev/null /etc/homelab/discord-bot.env
-  printf '# Your own Discord user id (Discord: Settings > Advanced > Developer Mode, then right-click yourself > Copy User ID).\nDISCORD_OWNER_ID=\n' \
+  printf '# Your own Discord user id (Discord: Settings > Advanced > Developer Mode, then right-click yourself > Copy User ID).\nDISCORD_OWNER_ID=\n# Optional: the id of one channel in your own private server. Set: the bot lives there instead of in the DM (docs/discord.md).\n#DISCORD_CHANNEL_ID=\n' \
     > /etc/homelab/discord-bot.env
 fi
 

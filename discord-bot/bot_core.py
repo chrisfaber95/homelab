@@ -1,7 +1,8 @@
 """The bot's behaviour, without any Discord import: the owner-only check, questions, commands, buttons, the confirm
 step and the relay of the conversation. bot_run.py connects it to discord.py; the tests connect it to a fake.
 
-A `ctx` (see Ctx) is one incoming event: who sent it, whether it was in the DM, and how to answer it. The bot keeps no
+A `ctx` (see Ctx) is one incoming event: who sent it, whether it was in the bot's one place (the DM, or the configured
+server channel), and how to answer it. The bot keeps no
 history: only a cursor file (the last conversation entry delivered) and a few short-lived buttons in memory."""
 import asyncio
 import json
@@ -24,11 +25,17 @@ HELP = ("Send a message to ask a question: the answer comes from your private se
         "Approving always asks for a confirm button; a message like \"approve H-016\" does nothing.")
 
 
+def in_place(home_channel_id, channel_id, is_dm):
+    """Is this the bot's one place? Without a configured channel that is the DM with the owner; with one
+    (DISCORD_CHANNEL_ID) it is that server channel and nothing else, so the DM is then ignored too."""
+    return channel_id == home_channel_id if home_channel_id else bool(is_dm)
+
+
 class Ctx:
-    """One incoming event. user_id, is_dm and where are set by the Discord layer. `working()` shows that a slow answer
+    """One incoming event. user_id, in_place and where are set by the Discord layer. `working()` shows that a slow answer
     is coming (defer or typing); `send()` delivers text, optional buttons and an optional (filename, bytes) file."""
     user_id = None
-    is_dm = False
+    in_place = False
     where = "?"
 
     async def working(self): ...
@@ -112,9 +119,10 @@ class Bot:
         return await asyncio.to_thread(fn, *a, **kw)
 
     def guard(self, ctx, what):
-        """Owner and DM, checked on every message, command and button. Anything else does nothing and is logged
+        """Owner and place (the DM, or the one configured server channel), checked on every message, command and
+        button. Anything else does nothing and is logged
         (who and where, never the content)."""
-        if ctx.user_id == self.owner_id and ctx.is_dm:
+        if ctx.user_id == self.owner_id and ctx.in_place:
             return True
         log.warning("ignored %s from user %s in %s", what, ctx.user_id, ctx.where)
         return False
@@ -268,7 +276,7 @@ class Bot:
     # --- relay --------------------------------------------------------------------------------------------------
     @staticmethod
     def own_echo(e):
-        """Entries the bot's own commands wrote: Chris just saw the answer to those in the DM."""
+        """Entries the bot's own commands wrote: Chris just saw the answer to those where he typed them."""
         return e["client"] == "discord" and e["kind"] in ("message", "question", "approval", "approval_request")
 
     @staticmethod

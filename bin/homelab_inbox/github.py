@@ -39,7 +39,14 @@ def ci_state(slug, sha, since):
     """'ok' (green), 'none' (the repo has no CI), 'pending' or 'failed' for a PR's head commit."""
     if not sha:
         return "none"
-    runs = (gh("GET", f"/repos/{slug}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs") or []
+    try:
+        runs = (gh("GET", f"/repos/{slug}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs") or []
+    except urllib.error.HTTPError as e:
+        if e.code != 403:
+            raise
+        # GitHub gives a fine-grained personal token no access to check runs, whatever its permissions. The Actions
+        # runs of the commit carry the same status and conclusion (Actions: read); checks of other apps are not seen.
+        runs = (gh("GET", f"/repos/{slug}/actions/runs?head_sha={sha}&per_page=100") or {}).get("workflow_runs") or []
     status = gh("GET", f"/repos/{slug}/commits/{sha}/status") or {}
     if not runs and (gh("GET", f"/repos/{slug}/actions/workflows") or {}).get("total_count"):
         runs = [{"status": "queued"}]  # the repo has CI that hasn't started for this commit yet

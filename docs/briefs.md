@@ -101,6 +101,9 @@ which turns it into a normal build from then on.
   met and CI on the PR's head commit is green, or the repo has no CI. CI that hasn't finished after 30 minutes counts
   as failed. Your own PR comments still send the task back first. If GitHub refuses to show the CI status (a token
   without the permissions in `docs/inbox.md`), you get one notification and the inbox keeps trying on every poll.
+  With a fine-grained token GitHub never shows check runs (403, whatever the permissions), so the inbox then reads
+  the commit's GitHub Actions runs instead (Actions: read-only). Checks of other apps (GitGuardian, for example) are
+  not seen that way: only a classic token with `repo` makes them count.
 - Verdicts: ✅ met, ❌ missed, 🧪 only running it shows (tests, lint, typecheck, build pass): CI decides, so the PR
   waits for you if the repo has no CI; ❔ can't be judged from the diff (behaviour on the box, in a browser): counts
   as not met, the notification names it.

@@ -183,13 +183,15 @@ def as_records(value):
     return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
 
-def start_build(bid, unattended=False, who="the page"):
-    """Build an approved brief; a draft is approved first (the button on the page is the approval)."""
+def start_build(bid, unattended=False, who="the page", source=None):
+    """Build an approved brief; a draft is approved first (the button on the page is the approval). `source` is the
+    chat client that approved it (discord): it goes on the brief's commit and on the build task."""
     b = brief_by_id(bid, max_age=0)
     if b and b["status"] == "draft":
         if live_build(bid):
             raise ValueError(f"{bid} is already being built")
-        set_brief_status(bid, "approved", f"approved on the homelab page by {who}"
+        set_brief_status(bid, "approved", (f"approved from {source} by {who}" if source
+                                           else f"approved on the homelab page by {who}")
                          + (", build without me" if unattended else ""))
         b = brief_by_id(bid, max_age=0)
     if not b or b["status"] != "approved":
@@ -198,9 +200,10 @@ def start_build(bid, unattended=False, who="the page"):
         raise ValueError(f"{bid} is already being built")
     add_new_repo(b)
     with _lock, db() as c:
-        return c.execute("INSERT INTO tasks (repo, text, status, created, session, brief, unattended) "
-                         "VALUES (?,?,?,?,?,?,?)", (BRIEF, f"Build {bid}: {b['title']}", "queued", now(),
-                                                    str(uuid.uuid4()), bid, 1 if unattended else 0)).lastrowid
+        return c.execute("INSERT INTO tasks (repo, text, status, created, session, brief, unattended, source) "
+                         "VALUES (?,?,?,?,?,?,?,?)", (BRIEF, f"Build {bid}: {b['title']}", "queued", now(),
+                                                      str(uuid.uuid4()), bid, 1 if unattended else 0,
+                                                      source)).lastrowid
 
 
 def parse_plan(text, repos, limit):

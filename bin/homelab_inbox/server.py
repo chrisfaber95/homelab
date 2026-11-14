@@ -4,22 +4,21 @@ import json
 import re
 import threading
 import urllib.request
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import conversation
+from . import chat, conversation
 from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, update_draft, update_run
-from .memory import LEARN_HINT, MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
+from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
 from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
-from .queue import cancel_task, recover, retry_task, scheduler
+from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
-from .storage import db, get, log, now, update
+from .storage import db, get, log, new_task, now, update
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,7 +59,7 @@ class Handler(BaseHTTPRequestHandler):
         token per request, and the client's permissions from config/clients.json. Everything else stays closed to the
         box itself."""
         url = urllib.parse.urlsplit(self.path)
-        if url.path not in ("/api/chat/entries", "/api/chat/state"):
+        if url.path not in ("/api/chat/entries", "/api/chat/state", "/api/chat/action"):
             return False
         if self.client_address[0].removeprefix("::ffff:") not in ("127.0.0.1", "::1"):
             self.send_upstream(403, {"error": "loopback only"})
@@ -77,6 +76,9 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if why := conversation.switched_off(client):  # not logged as a refusal: a stopped client polls
             self.send_upstream(403, {"error": f"refused: {why}", **conversation.state()})
+            return True
+        if url.path == "/api/chat/action":
+            self.send_upstream(*self.chat_action(client, method))
             return True
         if method == "GET":
             q = urllib.parse.parse_qs(url.query)
@@ -104,6 +106,33 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_upstream(200, {"entry": entry})
         return True
+
+    def chat_action(self, client, method):
+        """POST /api/chat/action {"action": ..., ...}: the explicit actions of chat.py, each checked against the
+        client's permissions there. Free text never reaches this: the client names the action."""
+        if method != "POST":
+            return 405, {"error": "POST only"}
+        try:
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 * 1024)))
+            action = str(body["action"])
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            return 400, {"error": f"bad request: {e}"}
+        if action in conversation.FORBIDDEN:  # SSH keys, memory edits, merges on homelab: no client, whatever the config
+            conversation.allowed(client, action)
+            return 403, {"error": f"refused: {action} cannot be done from a chat client"}
+        try:
+            do = {"task": lambda: chat.start_task(client, body.get("repo"), body.get("text")),
+                  "answer": lambda: chat.answer(client, body.get("task"), body.get("text")),
+                  "state": lambda: chat.tasks_state(client),
+                  "jobs": lambda: chat.jobs_list(client),
+                  "run_job": lambda: chat.run_job(client, body.get("job")),
+                  "drafts": lambda: chat.drafts(client),
+                  "approve": lambda: chat.approval_request(client, body.get("brief"), body.get("mode")),
+                  "confirm": lambda: chat.approval_confirm(client, body.get("confirm"))}.get(action)
+            return do() if do else (400, {"error": f"unknown action '{action}'"})
+        except Exception as e:  # noqa: BLE001
+            log(f"chat action {action} by {client}: {e}")
+            return 500, {"error": "the action failed; see the inbox journal"}
 
     def do_GET(self):
         if self.chat_door("GET"):
@@ -206,10 +235,7 @@ class Handler(BaseHTTPRequestHandler):
             repo, text = form.get("repo", ""), form.get("text", "").strip()
             if (repo not in repo_list() and repo != AUTO) or not text:
                 return self.send(400, page("fout", "<p>Kies een repo uit de lijst en beschrijf de taak.</p>"))
-            with _lock, db() as c:
-                cur = c.execute("INSERT INTO tasks (repo, text, status, created, session) VALUES (?,?,?,?,?)",
-                                (repo, text[:8000], "queued", now(), str(uuid.uuid4())))
-                tid = cur.lastrowid
+            tid = new_task(repo, text)
             conversation.note("chris", "page", "message", f"[{repo}] {text}", page_url(tid), f"task:{tid}")
             return self.send(303, "", location=f"/task/{tid}")
         if m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})/(build|park)", self.path):
@@ -242,20 +268,8 @@ class Handler(BaseHTTPRequestHandler):
         t = get(int(m.group(1))) if m else None
         if not t:
             return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
-        if m.group(2) == "answer" and t["status"] in ("waiting", "answered") and form.get("answer", "").strip():
-            conversation.note("chris", "page", "message", form["answer"], page_url(t["id"]), f"task:{t['id']}")
-        if m.group(2) == "answer" and t["status"] == "waiting" and form.get("answer", "").strip():
-            update(t["id"], status="queued", answer=None, pending_input=(
-                f"Antwoord van de gebruiker op je vraag:\n\n{form['answer'].strip()[:8000]}\n\n"
-                "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die. "
-                + LEARN_HINT), mem_source=f"jouw antwoord in {label(t).lower()}", mem_link=page_url(t["id"]))
-        elif m.group(2) == "answer" and t["status"] == "answered" and not t["job"] and form.get("answer", "").strip():
-            # Vervolg op een antwoord (bijvoorbeeld een plan met een vraag erin): zelfde sessie, nieuwe werkkopie.
-            update(t["id"], status="queued", question=t["answer"], answer=None, ended=None, reprepare=1,
-                   pending_input=(f"Reactie van de gebruiker op je antwoord:\n\n{form['answer'].strip()[:8000]}\n\n"
-                                  "Ga verder met de taak. Neem waar nodig een redelijke aanname en noem die. "
-                                  + LEARN_HINT),
-                   mem_source=f"jouw reactie in {label(t).lower()}", mem_link=page_url(t["id"]))
+        if m.group(2) == "answer":
+            answer_task(t, form.get("answer", ""))
         elif m.group(2) == "cancel" and (t["status"] in ACTIVE + ("waiting",) or (t["status"] == "routed" and not t["ended"])):
             if t["status"] == "routed":  # het hele bericht: alle kindtaken die nog niet klaar zijn
                 for k in children(t["id"]):

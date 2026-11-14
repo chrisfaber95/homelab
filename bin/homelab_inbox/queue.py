@@ -8,7 +8,7 @@ from . import conversation
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, STATUS_NL, _cancel, _lock, _round_started
 from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
 from .jobs import propose_skill, split_skill
-from .memory import after_round, load_memory, split_memory
+from .memory import LEARN_HINT, after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
 from .router import revive_followups, route_task, settle_routed
 from .storage import db, get, log, now, tasks, update
@@ -170,6 +170,28 @@ def finish_round(task_id, cache, text, result, capped):
         log(f"taak {task_id} afronden: {e}")
         update(task_id, status="failed", ended=now(), note=f"afronden mislukt: {e}"[:500])
         notify(f"{label(t)} mislukt", str(e), page_url(task_id))
+
+
+def answer_task(t, text, source=None):
+    """Continue a task with the user's reply: an answer to Claude's question (waiting) or a reaction to its answer
+    (answered). The page and chat clients (`source`, e.g. discord) both come through here. True when it was taken."""
+    text = (text or "").strip()
+    if not text or t["status"] not in ("waiting", "answered") or (t["status"] == "answered" and t["job"]):
+        return False
+    conversation.note("chris", source or "page", "message", text, page_url(t["id"]), f"task:{t['id']}")
+    if t["status"] == "waiting":
+        update(t["id"], status="queued", answer=None, pending_input=(
+            f"Antwoord van de gebruiker op je vraag:\n\n{text[:8000]}\n\n"
+            "Ga verder met de taak. Stel geen nieuwe vraag; neem waar nodig een redelijke aanname en noem die. "
+            + LEARN_HINT), mem_source=f"jouw antwoord in {label(t).lower()}", mem_link=page_url(t["id"]))
+    else:
+        # Vervolg op een antwoord (bijvoorbeeld een plan met een vraag erin): zelfde sessie, nieuwe werkkopie.
+        update(t["id"], status="queued", question=t["answer"], answer=None, ended=None, reprepare=1,
+               pending_input=(f"Reactie van de gebruiker op je antwoord:\n\n{text[:8000]}\n\n"
+                              "Ga verder met de taak. Neem waar nodig een redelijke aanname en noem die. "
+                              + LEARN_HINT),
+               mem_source=f"jouw reactie in {label(t).lower()}", mem_link=page_url(t["id"]))
+    return True
 
 
 def cancel_task(t):

@@ -19,6 +19,11 @@ KINDS = ("message", "question", "answer", "notification", "approval_request", "a
 PERMISSIONS = ("read", "write", "ask", "start_task", "answer", "approve", "run_job")
 
 
+# Actions no chat client can ever do, whatever config/clients.json says: this is code, not configuration. Checked first
+# in allowed(), and never part of PERMISSIONS, so a config file that lists them gives nothing.
+FORBIDDEN = ("ssh_key", "memory_edit", "merge_homelab")
+
+
 # What a client may append, and the permission that takes: a client always writes as Chris.
 CLIENT_KINDS = {"message": "write", "question": "ask", "answer": "answer"}
 
@@ -34,16 +39,28 @@ def scrub(text):
     return SECRET_RE.sub(REDACTED, text or "")
 
 
-def clients():
-    """name -> set of permissions, read from config/clients.json on every call (an unknown permission is dropped)."""
-    f = ROOT / "config" / "clients.json"
+CLIENTS_FILE = ROOT / "config" / "clients.json"
+
+
+def _config():
+    """name -> its entry in config/clients.json, read on every call."""
     try:
-        data = json.loads(os.environ.get("CLIENTS_JSON") or f.read_text())
+        data = json.loads(os.environ.get("CLIENTS_JSON") or CLIENTS_FILE.read_text())
     except (OSError, ValueError) as e:
-        log(f"conversation: {f}: {e}; no client has permissions")
+        log(f"conversation: {CLIENTS_FILE}: {e}; no client has permissions")
         return {}
-    return {name: {p for p in c.get("permissions", []) if p in PERMISSIONS}
-            for name, c in (data.get("clients") or {}).items() if isinstance(c, dict)}
+    return {name: c for name, c in (data.get("clients") or {}).items() if isinstance(c, dict)}
+
+
+def clients():
+    """name -> set of permissions, read from config/clients.json on every call (an unknown permission is dropped,
+    which is also why FORBIDDEN actions in the file give nothing)."""
+    return {name: {p for p in c.get("permissions", []) if p in PERMISSIONS} for name, c in _config().items()}
+
+
+def client_setting(client, key):
+    """A setting of one client in config/clients.json (e.g. tasks_per_day), or None."""
+    return _config().get(client, {}).get(key)
 
 
 def _init(conn):
@@ -133,7 +150,9 @@ def switched_off(client, action=None):
 
 def allowed(client, action):
     """True when the client has the permission; otherwise False, and the refusal is logged (journal and table)."""
-    if action in PERMISSIONS and action in clients().get(client, set()):
+    if action in FORBIDDEN:
+        why = "chat clients can never do this"
+    elif action in PERMISSIONS and action in clients().get(client, set()):
         why = switched_off(client, action)
         if not why:
             return True

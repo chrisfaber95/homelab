@@ -26,7 +26,7 @@ def repo_list():
     return repos
 
 
-def notify(title, message, click=None, store=True):
+def notify(title, message, click=None, store=True, limit=300):
     """ntfy push (message cut to 300 characters); also a notification entry in the conversation with the full text and
     the link, unless the caller stored the full text itself."""
     if store:
@@ -35,7 +35,7 @@ def notify(title, message, click=None, store=True):
         log(f"MELDING: {title} | {message[:300]} | {click or ''}")
         return
     try:
-        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message[:300], "priority": 4,
+        body = {"topic": CONF.get("NTFY_TOPIC", "homelab"), "title": title, "message": message[:limit], "priority": 4,
                 "tags": ["robot"]}
         if click:
             body["click"] = click

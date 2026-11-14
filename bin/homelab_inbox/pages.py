@@ -14,7 +14,7 @@ from .briefs import build_left_nothing, builds, live_build, load_briefs, split_f
 from . import conversation
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
-from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, job_runs, parse_job, run_view, skill_list
+from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
 from .router import blocked_by, blocked_followups, children
@@ -542,6 +542,10 @@ def job_facts(job):
         rows.append(("Script", f'<code>{e(" ".join([job["script"], *job["args"]]))}</code>'))
     if job["sources"]:
         rows.append(("Bronnen", "<br>".join(e(s) for s in job["sources"])))
+    rows.append(("Resultaat naar", {"page": "alleen de pagina", "ntfy": "ntfy (push)",
+                                    "conversation": "het gesprek (Discord)"}[job["deliver"]]))
+    if job["deliver"] != "page":
+        rows.append(("Niets te melden", f'<pre>{e(nothing_statement(job))}</pre>'))
     rows.append(("Skills", ", ".join(f'<a href="/skills">{e(s)}</a>' for s in job["skills"]) or "-"))
     if job["minutes"] is not None:
         rows.append(("Bespaart", f'{job["minutes"]} min per run'))

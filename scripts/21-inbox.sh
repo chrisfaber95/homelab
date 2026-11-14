@@ -246,4 +246,9 @@ for f in /etc/homelab/inbox-github-token /home/claude/.config/gh/hosts.yml /home
 done
 if sudo -u inbox test -w /srv/homelab/repos; then echo "inbox kan in de deploy-clones schrijven." >&2; exit 1; fi
 sudo -u inbox-runner sudo -n -u inbox "$DEST/bin/homelab-inbox-task" cleanup 0
+# H-016: the Discord bot is part of the rebuild. It needs the inbox account and group (just made above) and starts itself
+# once the token and the owner id are in /etc/homelab; without them it is installed but off. Nothing to do per rebuild.
+echo "== Discord bot (scripts/26-discord-bot.sh)"
+bash "$(dirname "$(readlink -f "$0")")/26-discord-bot.sh"
+
 echo "Klaar. Op je telefoon: http://$TAILNET_NAME:$INBOX_PORT"

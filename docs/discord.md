@@ -55,7 +55,10 @@ Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
      repo, never in chat);
    - your id: `DISCORD_OWNER_ID=<id>` in `/etc/homelab/discord-bot.env`;
    - run the script again: it starts the bot.
-   A rebuild from the repo brings the bot back; the token and the env file are entered once.
+   A rebuild from the repo brings the bot back: `21-inbox.sh` runs `26-discord-bot.sh`, which recreates the account and the
+   venv (from the hashed requirements) and installs the unit; it starts the bot as soon as the token file and the id exist
+   (they are in `/etc/homelab`, which is backed up with the box's secrets, never in the repo). Entered once, never again.
+   The token is read by systemd (`LoadCredential`) and is never in the repo, the logs or the conversation.
 4. Open the DM with the bot and send `!help`.
 
 ## Switching it off
@@ -64,3 +67,14 @@ Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
   Discord** off keeps the rest but answers "approvals are off" on the buttons.
 - Stop the service: `homelab-admin service stop homelab-discord-bot --reason "..."`. Stopped for good: remove the token file,
   the unit has `ConditionPathExists` on it. The page, ntfy and the task queue never depend on the bot.
+
+## Exposure
+
+The bot has no listening port and no ufw rule. `bin/homelab-exposure` fails when `discord-bot/` contains server code or
+`26-discord-bot.sh` touches ufw. The unit is limited to `AF_INET`/`AF_INET6`/`AF_UNIX`, an empty capability set and a
+read-only system.
+
+## F-021's out-of-scope note
+
+F-021's line "sending tasks through chat apps" is in the brief in the private `product` repo, not in this one; H-016 replaces
+it there. In this repo, `docs/inbox.md` (section Gesprek) points to the conversation and this page.

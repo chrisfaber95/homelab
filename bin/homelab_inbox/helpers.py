@@ -8,6 +8,7 @@ import urllib.request
 from pathlib import Path
 
 from .config import CONF, FAKE_GH, GH_TOKEN_FILE, HOME, JOBS, NEW_REPOS, NTFY_TOKEN_FILE, REPOS_CONF, SECRET_RE, TASK_CMD, _lock
+from . import conversation
 from .storage import get, log, now
 
 
@@ -25,7 +26,10 @@ def repo_list():
     return repos
 
 
-def notify(title, message, click=None):
+def notify(title, message, click=None, store=True):
+    """ntfy push; also a notification entry in the conversation, unless the caller stored the full text itself."""
+    if store:
+        conversation.note("box", "ntfy", "notification", f"{title}\n{message}", click)  # before sending: ntfy may fail
     if os.environ.get("NTFY_FAKE") == "1":
         log(f"MELDING: {title} | {message} | {click or ''}")
         return

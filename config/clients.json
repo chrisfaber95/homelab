@@ -1,0 +1,7 @@
+{
+  "_comment": "Clients of the conversation between Chris and the box (H-016, docs/conversation.md). Each client has its own permissions: read (read entries), write (append a message), ask (append a question for Claude/search), start_task, answer (reply to a question from Claude), approve, run_job. An action without the permission is refused and logged. Read again on every request: no restart needed. A client authenticates to the loopback door with the token in /etc/homelab/chat-<name>-token. Nothing here can grant SSH keys, memory edits or merges on homelab: those exist for no client.",
+  "clients": {
+    "discord": {"permissions": ["read", "write", "ask", "start_task", "answer", "approve", "run_job"]},
+    "jarvis": {"permissions": ["read", "write", "ask"]}
+  }
+}

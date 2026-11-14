@@ -4,6 +4,7 @@ import time
 from collections import Counter
 
 from .briefs import plan_task, review_pr, settle_briefs
+from . import conversation
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, STATUS_NL, _cancel, _lock, _round_started
 from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
 from .jobs import propose_skill, split_skill
@@ -117,13 +118,16 @@ def finish_round(task_id, cache, text, result, capped):
         if kind == "ANTWOORD" and not capped:
             # Een vraag maakt geen commit, branch of PR; eventuele commits blijven lokaal en worden weggegooid.
             update(task_id, status="answered", answer=body, ended=now(), note=note)
+            if not t["job"]:
+                conversation.note("claude", "inbox", "answer", body, page_url(task_id), f"task:{task_id}")
             task_cmd("cleanup", task_id)
             if t["job"]:
                 return  # een job meldt alleen wat de gebruiker nodig heeft; het resultaat staat op de pagina
-            return notify(f"Inbox {task_id}: antwoord", body[:300], page_url(task_id))
+            return notify(f"Inbox {task_id}: antwoord", body[:300], page_url(task_id), store=False)
         if kind == "VRAAG" and not capped:
             update(task_id, status="waiting", question=body, note=note)
-            return notify(f"{label(t)}: vraag", body[:300], page_url(task_id))
+            conversation.note("claude", "inbox", "question", body, page_url(task_id), f"task:{task_id}")
+            return notify(f"{label(t)}: vraag", body[:300], page_url(task_id), store=False)
         if kind == "GEWEIGERD" and not capped:
             update(task_id, status="refused", summary=body, ended=now(), note=note)
             task_cmd("cleanup", task_id)

@@ -110,6 +110,11 @@ Elke taak en Claude-job begint met wat Claude over jou, de box en de repo weet, 
 je Claude in review-commentaar of een antwoord, dan bewaart hij dat als voorkeur. Alles staat op de tab **Geheugen**,
 waar je het bewerkt of wist, en op de branch `memory` van de privé repo `homelab-data`. Alles hierover: `docs/memory.md`.
 
+## Gesprek (H-016)
+
+De box houdt één gesprek met jou bij (berichten, vragen, antwoorden, meldingen, goedkeuringen) voor clients zoals de
+Discord-bot, met rechten per client in `config/clients.json`. Alles hierover: `docs/conversation.md`.
+
 ## Wat Claude in de inbox wel en niet kan
 
 - **Niet**: pushen, een PR openen of mergen, naar `main` pushen. `inbox` heeft geen GitHub-token en geen `gh`-login;

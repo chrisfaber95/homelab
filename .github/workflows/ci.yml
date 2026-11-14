@@ -1,5 +1,4 @@
-# Copy to .github/workflows/ci.yml: runs the repo's checks on every pull request (scripts/ci.sh).
-# It is kept here because the inbox token has no `workflow` scope and cannot push files under .github/workflows.
+# Runs the repo's checks on every pull request (scripts/ci.sh).
 name: ci
 on:
   pull_request:

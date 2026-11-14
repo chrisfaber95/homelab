@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# homelab: the checks of every pull request (the workflow in docs/ci/pull-request.yml runs this). Run it yourself
+# homelab: the checks of every pull request (.github/workflows/ci.yml runs this). Run it yourself
 # before a PR: bash scripts/ci.sh. There is no package.json, so no npm lint, typecheck or build; for this repo those are:
 #   lint       shellcheck on the shell scripts, py_compile on the Python (also catches syntax errors = "typecheck")
 #   validate   docker compose config on compose.yaml, and the exposure check on its definition

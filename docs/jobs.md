@@ -169,6 +169,22 @@ NOTHING TO REPORT als eerste regel.
 één keer zodra de box weer aan is, niet één keer per gemist moment. Een nieuwe of hervatte job begint bij zijn
 volgende tijd.
 
+## Catalogus (H-017)
+
+De tab Jobs toont onder "Catalogus" kant-en-klare agents. Een agent is een gewoon jobbestand (zelfde kop en instructie,
+inclusief `deliver` en de `NOTHING TO REPORT`-regel) in **`agents/<naam>.md` in deze repo**; de inbox leest ze uit zijn
+kopie van `main` (zoals de skills), dus na een herbouw is de catalogus er weer. Het bestand mag geen privébronnen of
+geheimen bevatten (de repo is public). Elke regel toont wat de agent doet (de eerste alinea van de instructie), het
+schema, het model en waar hij bezorgt. Een kapot bestand verschijnt als regel met zijn fout; de andere agents blijven
+zichtbaar.
+
+**Aanzetten** maakt alleen een concept: je ziet het jobbestand (met `name:` erin), past schema, bronnen of repos aan en
+kiest **Bevestigen**, net als bij een opgesteld concept. Pas dan staat de job op de `jobs`-branch; ervoor draait en
+bestaat er niets. Daarna is het een gewone job (pauzeren, wijzigen, nu draaien, verwijderen) en toont de catalogus hem
+als "staat aan" (een job met dezelfde naam als de agent). Verwijder je de job, dan kun je de agent weer aanzetten.
+Een agent met een lege plek (bijvoorbeeld de bronnen van een digest) hoort die in het concept te laten invullen:
+verzin geen lijst; het concept toont de fout tot jij hem invult. Voorbeeld: `agents/box-report.md`.
+
 ## Skills
 
 Een skill is een vaste manier van werken die Claude hergebruikt: `skills/<naam>/SKILL.md` op `main` (het formaat van

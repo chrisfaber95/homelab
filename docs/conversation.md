@@ -26,7 +26,7 @@ the caller: if it fails, the notification is still sent and the failure is in th
 ## Clients and permissions
 
 `config/clients.json` lists each client with its permissions: `read`, `write`, `ask`, `start_task`, `answer`,
-`approve`, `run_job`. It is read on every request, so a change needs no restart (installed by `scripts/21-inbox.sh`).
+`approve`, `run_job`, `research`. It is read on every request, so a change needs no restart (installed by `scripts/21-inbox.sh`).
 An action without the permission is refused, and the refusal goes to the journal and to the table
 `conversation_refusals`. A client always writes as Chris and only the kinds `message` (needs `write`), `question`
 (`ask`) and `answer` (`answer`); it cannot write notifications, approvals or Claude's text. `start_task`,
@@ -72,6 +72,7 @@ nothing classifies free text (a message "approve H-016" is only a message). Body
 | `answer` | `task`, `text` | `answer` | `queue.answer_task`, the code behind the page's answer form |
 | `state` | | `read` | tasks running, waiting for Chris and queued |
 | `jobs` / `run_job` | `job` | `read` / `run_job` | list jobs / run one now (`jobs.dispatch`, manual) |
+| `research` | `question`, `mode` (`quick` default, or `deep`) | `research` | a read-only research run (`jobs.ask_research`, docs/jobs.md); the report comes back as a conversation entry; 429 with a message above the daily cap for Claude jobs |
 | `drafts` | | `read` | draft briefs |
 | `approve` | `brief`, `mode` (`build` or `without-me`) | `approve` | step one: a pending approval and a `confirm` token |
 | `confirm` | `confirm` | `approve` | step two: approves and starts the build |

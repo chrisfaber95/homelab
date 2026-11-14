@@ -22,11 +22,12 @@ from .memory import load_memory
 from .storage import db, get, log, now
 
 
-JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "digest", "script": "script"}
+JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "digest", "script": "script",
+             "research": "onderzoek"}
 
 
 JOB_FIELDS = {"name", "when", "schedule", "kind", "model", "repo", "skills", "script", "args", "sources", "minutes",
-              "paused", "deliver"}
+              "paused", "deliver", "mode"}
 
 
 # Where a successful result goes (H-017): the page only (as before), a ntfy push, or the conversation (Discord shows it).
@@ -36,6 +37,14 @@ DELIVER = ("page", "ntfy", "conversation")
 # A delivering job's instruction must state what "nothing to report" is and tell the job to answer with this marker as
 # the first line; a result that starts with it is not delivered (it stays in the job's history).
 NOTHING_MARKER = "NOTHING TO REPORT"
+
+
+# Research (H-017): the instruction of a research job is its question. quick = a few minutes and a handful of sources,
+# deep = up to the limit of an inbox task.
+RESEARCH_MODES = ("quick", "deep")
+
+
+RESEARCH_JOB = "research"  # the name under which questions asked from the page or a chat client show in the history
 
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -155,7 +164,7 @@ def parse_job(name, text, repos=None, skills=None):
            "kind": meta.get("kind"), "model": meta.get("model"), "repo": meta.get("repo") or None,
            "skills": as_list(meta.get("skills")), "script": meta.get("script"), "args": as_list(meta.get("args")),
            "sources": as_list(meta.get("sources")), "minutes": meta.get("minutes"),
-           "paused": meta.get("paused") is True, "deliver": meta.get("deliver") or "page", "instruction": rest.partition("\n")[2].strip(), "text": text}
+           "paused": meta.get("paused") is True, "deliver": meta.get("deliver") or "page", "mode": meta.get("mode"), "instruction": rest.partition("\n")[2].strip(), "text": text}
     job["cron"] = Cron(job["schedule"])
     if job["kind"] not in JOB_KINDS:
         raise ValueError(f"kind moet een van {', '.join(JOB_KINDS)} zijn")
@@ -184,7 +193,18 @@ def parse_job(name, text, repos=None, skills=None):
         raise ValueError(f"skill(s) {', '.join(missing)} staan (nog) niet op main")
     if job["deliver"] not in DELIVER:
         raise ValueError(f"deliver moet een van {', '.join(DELIVER)} zijn")
-    if job["deliver"] != "page" and NOTHING_MARKER not in job["instruction"]:
+    if job["kind"] == "research":
+        job["mode"] = job["mode"] or "quick"
+        if job["mode"] not in RESEARCH_MODES:
+            raise ValueError(f"mode moet een van {', '.join(RESEARCH_MODES)} zijn")
+        if job["model"] != "claude":
+            raise ValueError("een onderzoek draait op Claude (model: claude)")
+        if name == RESEARCH_JOB:
+            raise ValueError(f"de naam {RESEARCH_JOB} is voor vragen van de pagina en uit de chat")
+    elif job["mode"] is not None:
+        raise ValueError("mode geldt alleen voor kind: research")
+    # A research report is always worth delivering (an empty search is itself the report), so it has no marker.
+    if job["deliver"] != "page" and job["kind"] != "research" and NOTHING_MARKER not in job["instruction"]:
         raise ValueError(f"een job met deliver: {job['deliver']} noemt in zijn instructie wat 'niets te melden' is en "
                          f"antwoordt dan met {NOTHING_MARKER} als eerste regel")
     if job["minutes"] is not None and (not isinstance(job["minutes"], int) or job["minutes"] < 0):
@@ -317,9 +337,9 @@ def tick(now_dt):
 
 def dispatch(job, due, manual=False):
     with _lock, db() as c:
-        run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual, minutes) "
-                           "VALUES (?,?,?,?,?,?,?,?)", (job["name"], job["kind"], job["model"], due, now(), "queued",
-                                                        int(manual), job["minutes"])).lastrowid
+        run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual, minutes, mode) "
+                           "VALUES (?,?,?,?,?,?,?,?,?)", (job["name"], job["kind"], job["model"], due, now(), "queued",
+                                                          int(manual), job["minutes"], job.get("mode"))).lastrowid
     threading.Thread(target=run_job, args=(run_id, job), daemon=True).start()
     return run_id
 
@@ -331,6 +351,115 @@ def nothing_statement(job):
 
 def is_nothing(text):
     return (text or "").strip().partition("\n")[0].strip(" .!*_`#:").upper() == NOTHING_MARKER
+
+
+RESEARCH_PROMPT = """Dit is een onderzoeksrun (alleen lezen): beantwoord de vraag hieronder met een rapport. Modus: {mode}.
+{limits}
+
+Vraag:
+{question}
+
+Regels voor het rapport (skill research-reports):
+- Raadpleeg eerst de privézoekindex: `homelab-search query "<tekst>" -k 8 --json` (en zo nodig `--source`/`--project`).
+  Pas daarna het web (WebSearch, WebFetch). Zonder eerst de index te hebben geprobeerd begin je niet aan het web.
+- Elke bewering heeft een bron. Web: een link. Privézoeken: bron, plaats en datum van de treffer, zoals de index ze geeft.
+  Een bewering zonder bron laat je weg of je markeert hem als "niet gevonden". Gok niet en vul niets aan uit je hoofd.
+- Geen inloggen op sites en geen bronnen achter een betaalmuur.
+- Je verandert niets: geen commit, branch of PR, geen bestanden, geen machinewijzigingen. Je tools laten het ook niet toe.
+- Geen vraag terug: neem een redelijke aanname en noem die.
+- Eindig met `ANTWOORD:` en dan het rapport in Markdown, met precies deze delen:
+  `## Antwoord` (de bevindingen, elke bewering met bron achter of onder zich),
+  `## Bronnen` (alle bronnen: links, en bij privézoeken bron, plaats, datum),
+  `## Doorzocht` (wat je doorzocht: de zoektermen in de privé-index en op het web).
+- Vond je niets relevants, schrijf dan als eerste regel na `ANTWOORD:` `NIETS GEVONDEN`, zeg dat in één zin, en vul alleen
+  `## Doorzocht`. Geen gok, geen algemene kennis als antwoord."""
+
+
+RESEARCH_LIMITS = {"quick": "Snel: je hebt een paar minuten (hooguit {minutes} minuten en {turns} beurten) en gebruikt "
+                            "een handvol bronnen (hooguit ongeveer 5). Houd het klein.",
+                   "deep": "Diep: tot de grens van een inbox-taak ({minutes} minuten, {turns} beurten). Lees "
+                           "bronnen grondig en vergelijk ze; zoek verder waar ze elkaar tegenspreken."}
+
+
+def research_limits(mode):
+    """(minutes, turns) of a research run: quick has its own small limits, deep the limits of an inbox task."""
+    if mode == "quick":
+        return int(CONF.get("RESEARCH_QUICK_MINUTES", 6)), int(CONF.get("RESEARCH_QUICK_TURNS", 25))
+    return int(CONF["MAX_MINUTES"]), int(CONF["MAX_TURNS"])
+
+
+def research_prompt(job):
+    minutes, turns = research_limits(job["mode"])
+    return RESEARCH_PROMPT.format(mode=job["mode"], question=job["instruction"],
+                                  limits=RESEARCH_LIMITS[job["mode"]].format(minutes=minutes, turns=turns))
+
+
+def research_run(t):
+    """The job_runs row of a task when the task is a research run, else None."""
+    if not t["job"] or not t["run_id"]:
+        return None
+    with db() as c:
+        r = c.execute("SELECT * FROM job_runs WHERE id=? AND kind='research'", (t["run_id"],)).fetchone()
+    return r
+
+
+def job_of_task(t):
+    """The job a task is the run of: the file's job, or for a research question from the page or a chat client the
+    job made up for it (its mode and where the report goes are on the run)."""
+    if not t["job"]:
+        return None
+    if t["job"] in JOBS:
+        return JOBS[t["job"]]
+    if r := research_run(t):
+        return {"name": t["job"], "kind": "research", "model": "claude", "mode": r["mode"], "repo": None, "skills": [],
+                "deliver": r["deliver"] or "page", "instruction": t["text"], "source": r["source"]}
+    return None
+
+
+def duration_text(seconds):
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60} min {seconds % 60} s" if seconds >= 60 else f"{seconds} s"
+
+
+def report_header(mode, seconds):
+    """The line shown with every report (the answer on the page, the delivered message): the mode and the time taken."""
+    return f"Research report | mode: {mode} | time taken: {duration_text(seconds)}"
+
+
+def report_problems(body):
+    """What is missing from a report, in words (empty = fine). A check on the shape the prompt asks for, so a report
+    without sources is flagged on the run instead of passing as an answer."""
+    low = (body or "").lower()
+    missing = []
+    nothing = low.lstrip().startswith("niets gevonden") or low.lstrip().startswith("nothing found")
+    if "## doorzocht" not in low and "## searched" not in low:
+        missing.append("no list of what was searched")
+    if not nothing and "## bronnen" not in low and "## sources" not in low:
+        missing.append("no sources")
+    return missing
+
+
+def ask_research(question, mode, source=None):
+    """A research question from the page (source None) or a chat client: one Claude run, counted against the daily cap
+    like any Claude job. Above the cap it is refused with a message (nothing is queued, so one waiting question can't
+    replace another). Returns (http status, body)."""
+    question = (question or "").strip()
+    if not question or mode not in RESEARCH_MODES:
+        return 400, {"error": f"give a question and a mode: {' or '.join(RESEARCH_MODES)}"}
+    cap = int(CONF.get("JOB_CLAUDE_CAP", 10))
+    deliver = "conversation" if source else "page"  # to where the question came from
+    job = {"name": RESEARCH_JOB, "kind": "research", "model": "claude", "mode": mode, "repo": None, "skills": [],
+           "deliver": deliver, "instruction": question[:4000], "minutes": None}
+    with _lock:  # check and start together, so two questions cannot both slip under the cap
+        if claude_runs_today() >= cap:
+            return 429, {"error": f"daily limit reached: {cap} Claude runs today; research and Claude jobs share it. "
+                                  "Nothing was started; ask again tomorrow."}
+        with db() as c:
+            run_id = c.execute("INSERT INTO job_runs (job, kind, model, due, created, status, manual, mode, deliver, "
+                               "source) VALUES (?,?,?,?,?,?,1,?,?,?)", (RESEARCH_JOB, "research", "claude", now(), now(),
+                                                                       "queued", mode, deliver, source)).lastrowid
+        start_claude(run_id, job)
+    return 200, {"run": run_id, "mode": mode, "url": page_url() + "/research"}
 
 
 def deliver_result(job, run_id, text, link):
@@ -481,6 +610,9 @@ def job_prompt(job, run_id):
     if job["kind"] in ("box-report", "digest"):
         parts.append("Hieronder de verzamelde gegevens. Eindig met ANTWOORD: (je rapport of digest); commit niets.\n\n"
                      + gather(job, run_id)[:30000])
+    elif job["kind"] == "research":
+        return research_prompt(job) + (f"\n\nGebruik hiervoor de skill(s): {', '.join(job['skills'])}."
+                                      if job["skills"] else "")
     elif job["kind"] == "script":
         cmd = " ".join([job["script"], *job["args"]])
         parts.append(f"Draai `{cmd}` in deze werkkopie (als dit account, zonder root) en vat de uitvoer samen zoals "

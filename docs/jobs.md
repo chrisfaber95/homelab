@@ -26,7 +26,7 @@ Claudes eigen sessies houdt de pre-push-hook het tegen, net als bij `main`).
 ---
 when: elke werkdag om 7:00            # in woorden, voor jou
 schedule: "0 7 * * 1-5"               # cron: minuut uur dag maand weekdag (0 = zondag), tijdzone Europe/Amsterdam
-kind: box-report                      # box-report | repo-chore | digest | script
+kind: box-report                      # box-report | repo-chore | digest | script | research
 model: local                          # local | claude
 repo: claude-dashboard                # repo-chore (verplicht), script (standaard homelab)
 skills: [deploy-debuggen]             # alleen bij model claude
@@ -42,7 +42,9 @@ De instructie: wat de job doet en hoe het resultaat eruitziet.
 
 Een schema met dag én weekdag (bijvoorbeeld `0 9 1 * 1`) draait zoals in cron als één van de twee klopt.
 
-## De vier soorten
+## De vier soorten (en onderzoek)
+
+Naast de vier soorten hieronder is er `research` (zie "Onderzoek").
 
 **box-report**: een rapport uit de staat van de box (de uitvoer van `homelab-overview`: checks, deploys, LLM-gebruik,
 wijzigingen, backup).
@@ -165,6 +167,59 @@ Som op wat er gisteren in de repo gebeurde, één regel per punt. Gebeurde er ni
 NOTHING TO REPORT als eerste regel.
 ```
 
+## Onderzoek (`kind: research`, H-017)
+
+A research run answers one question with a report. Code: `bin/homelab_inbox/jobs.py` (`ask_research`, `research_prompt`),
+`finish_research` in `queue.py`, the tools in `bin/homelab-inbox-task` (`run ... research`).
+
+**Asking.** Three ways, the same run: on the page (**`/research`**, also linked from the Jobs tab: question and mode),
+from a chat client (action `research`, permission `research`, see `docs/conversation.md`; in Discord the bot's command
+maps to it), and as a job on a schedule:
+
+```
+---
+when: every Monday at 9:00
+schedule: "0 9 * * 1"
+kind: research
+model: claude                  # the only possible value
+mode: deep                     # quick (default) | deep
+deliver: conversation          # optional, as for other jobs
+---
+What changed in the Tailscale ACL syntax this year?
+```
+
+The instruction is the question. A research job needs no `NOTHING TO REPORT` line: a report is always delivered when
+`deliver` says so, and a search that found nothing is itself the report. The name `research` is reserved for questions
+from the page and from clients (they show in the history under it).
+
+**Modes.** `quick`: a few minutes and a handful of sources (about 5): the run stops after `RESEARCH_QUICK_MINUTES` (6)
+and `RESEARCH_QUICK_TURNS` (25) in `config/inbox.conf`. `deep`: up to the limit of an inbox task (`MAX_MINUTES`,
+`MAX_TURNS`). A run that hits its limit ends as "gestopt bij limiet" with a notification and no report; ask again as
+`deep`.
+
+**The report** (the prompt in `jobs.RESEARCH_PROMPT`, skill `research-reports`): the first line is
+`Research report | mode: <mode> | time taken: <time>`, then `## Antwoord`, `## Bronnen` and `## Doorzocht`. Every claim has a
+source: a link for the web, source, place and date for a hit of private search (`homelab-search query`). Private search
+is consulted before the web. When nothing relevant is found the report starts with `NIETS GEVONDEN` and lists what was
+searched; it must not guess. A report without a sources section or without the list of what was searched is not
+rejected but flagged in the run's note ("report check: ...").
+
+**Cap.** Every research run is one Claude run against `JOB_CLAUDE_CAP`, like any Claude job. A scheduled research job
+above the cap waits until tomorrow (one waiting run per job). A question from the page or a client is refused at once
+with "daily limit reached ..." (page: red message; chat: HTTP 429 and a notification in the conversation) and nothing
+is queued.
+
+**Read-only.** `homelab-inbox-task run <id> <session> <new|resume> research` starts Claude with `--tools
+Read,Grep,Glob,WebSearch,WebFetch,Bash`, `--permission-mode dontAsk` (anything not allowed is denied, not asked), Bash
+allowed only for `homelab-search query/status`, and Edit, Write, git, gh, `homelab-admin` and sudo denied. On top of
+that `finish_research` never pushes a branch or opens a PR and always cleans the working copy, whatever the run did.
+The system prompt is `rounds.RESEARCH_SYSTEM_PROMPT`, not the coding one.
+
+**Delivery and history.** The report goes to where the question came from: the page (shown on the task page and in the
+history at `/research`, with its sources), a chat client (a conversation entry in full, scrubbed, with a link), or what
+the job file's `deliver` says. It is stored as the task's answer, so the mode, the time taken and the sources stay on
+the page. Tests: `tests/test_inbox_research.py`.
+
 **Schema en gemiste runs**: een job start binnen een minuut na zijn tijd. Stond de box uit, dan draait een gemiste job
 één keer zodra de box weer aan is, niet één keer per gemist moment. Een nieuwe of hervatte job begint bij zijn
 volgende tijd.
@@ -203,6 +258,6 @@ hun PR.
 ## Beheer
 
 - `homelab-inbox jobs`: de jobs met model, schema, volgende run en laatste resultaat.
-- Instellingen in `config/inbox.conf`: `DATA_REPO`, `JOBS_BRANCH`, `JOB_TIMEZONE`, `JOB_CLAUDE_CAP`, `JOB_SCRIPT_MINUTES` (PR, daarna
+- Instellingen in `config/inbox.conf`: `DATA_REPO`, `JOBS_BRANCH`, `JOB_TIMEZONE`, `JOB_CLAUDE_CAP`, `JOB_SCRIPT_MINUTES`, `RESEARCH_QUICK_MINUTES`, `RESEARCH_QUICK_TURNS` (PR, daarna
   `scripts/21-inbox.sh`).
 - De geschiedenis van runs staat in `/var/lib/homelab-inbox/inbox.db` (naast de taken).

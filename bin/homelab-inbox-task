@@ -3,7 +3,8 @@
 #   sudo -u inbox homelab-inbox-task <actie> ...
 # (één vaste regel in /etc/sudoers.d/homelab-inbox). `inbox` heeft geen GitHub-toegang en kan niet bij /home/claude.
 #   prepare <id> <repo-map>      werkkopie in TASK_HOME/work/<id> (clone van de kopie van de dienst), branch inbox/<id>
-#   run <id> <sessie> <new|resume>  Claude in auto mode, prompt uit RUNNER_HOME/share/<id>/prompt.txt, stream-json op stdout
+#   run <id> <sessie> <new|resume> [research]  Claude in auto mode, prompt uit RUNNER_HOME/share/<id>/prompt.txt, stream-json op stdout
+#                                (research, H-017: read-only tools instead of auto mode; see below)
 #   bundle <id>                  de nieuwe commits van inbox/<id> als bundle in TASK_HOME/out/<id>.bundle (exit 3: geen)
 #   sync <id>                    merge the latest main of the service's copy into inbox/<id> (exit 4 + the conflicted
 #                                files: the merge stays in progress for Claude to resolve)
@@ -71,7 +72,8 @@ case $action in
     fi
     ;;
   run)
-    sid=${3:-}; mode=${4:-}
+    sid=${3:-}; mode=${4:-}; kind=${5:-}
+    [[ -z $kind || $kind == research ]] || { echo "ongeldige soort run" >&2; exit 2; }
     [[ $sid =~ ^[0-9a-f-]{36}$ && $mode =~ ^(new|resume)$ ]] || { echo "ongeldige sessie" >&2; exit 2; }
     [[ -d "$work/repo" ]] || { echo "geen werkkopie" >&2; exit 2; }
     prompt="$RUNNER_HOME/share/$id/prompt.txt"
@@ -88,6 +90,16 @@ case $action in
     extra=()
     [[ -d "$RUNNER_HOME/share/$id/geschiedenis" ]] && extra=(--add-dir "$RUNNER_HOME/share/$id/geschiedenis")
     echo $$ > "$work/pid"
+    if [[ $kind == research ]]; then
+      # H-017: a research run only reads. The tool set is the enforcement, not the prompt: no Edit/Write (no files, so no
+      # commit), Bash only for `homelab-search` (private search, read-only on its sources), and dontAsk denies everything
+      # else instead of asking. WebFetch/WebSearch are the web; there is no login and no git, gh or homelab-admin.
+      exec claude -p "$(cat "$prompt")" --append-system-prompt "$(cat "$system")" "${session[@]}" \
+        "${extra[@]}" --tools "Read,Grep,Glob,WebSearch,WebFetch,Bash" \
+        --allowedTools "Read" "Grep" "Glob" "WebSearch" "WebFetch" "Bash(homelab-search query:*)" "Bash(homelab-search status:*)" \
+        --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(git:*)" "Bash(gh:*)" "Bash(homelab-admin:*)" "Bash(sudo:*)" \
+        --permission-mode dontAsk --output-format stream-json --verbose
+    fi
     # auto mode: de veiligheidscheck van Claude Code beoordeelt elke actie; nooit bypassPermissions.
     exec claude -p "$(cat "$prompt")" --append-system-prompt "$(cat "$system")" "${session[@]}" \
       "${extra[@]}" --permission-mode auto --output-format stream-json --verbose

@@ -303,6 +303,10 @@ class Bot:
             if status == 200:
                 await self.call(self.cursor.save, cur)
                 log.info("first start: cursor at %s", cur)
+                self._reported_off = False
+            elif not self._reported_off:
+                log.warning("conversation not readable (%s): %s", status, (body or {}).get("error"))
+                self._reported_off = True
             return
         while True:
             status, body = await self.call(self.api.entries, cur, 100)

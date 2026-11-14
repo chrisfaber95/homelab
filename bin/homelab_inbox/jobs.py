@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from . import conversation
 from .config import CONF, HOME, JOBS, TZ, _cancel_runs, _lock
 from .helpers import as_list, gh, git, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, sync_branch, task_cmd
 from .memory import load_memory
@@ -25,10 +26,22 @@ JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "d
 
 
 JOB_FIELDS = {"name", "when", "schedule", "kind", "model", "repo", "skills", "script", "args", "sources", "minutes",
-              "paused"}
+              "paused", "deliver"}
+
+
+# Where a successful result goes (H-017): the page only (as before), a ntfy push, or the conversation (Discord shows it).
+DELIVER = ("page", "ntfy", "conversation")
+
+
+# A delivering job's instruction must state what "nothing to report" is and tell the job to answer with this marker as
+# the first line; a result that starts with it is not delivered (it stays in the job's history).
+NOTHING_MARKER = "NOTHING TO REPORT"
 
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+
+
+NTFY_DELIVER_CHARS = 4000  # ntfy's own message limit is 4096 bytes; the conversation always gets the full text
 
 
 JOBS_DIR = HOME / "jobs-repo"
@@ -142,7 +155,7 @@ def parse_job(name, text, repos=None, skills=None):
            "kind": meta.get("kind"), "model": meta.get("model"), "repo": meta.get("repo") or None,
            "skills": as_list(meta.get("skills")), "script": meta.get("script"), "args": as_list(meta.get("args")),
            "sources": as_list(meta.get("sources")), "minutes": meta.get("minutes"),
-           "paused": meta.get("paused") is True, "instruction": rest.partition("\n")[2].strip(), "text": text}
+           "paused": meta.get("paused") is True, "deliver": meta.get("deliver") or "page", "instruction": rest.partition("\n")[2].strip(), "text": text}
     job["cron"] = Cron(job["schedule"])
     if job["kind"] not in JOB_KINDS:
         raise ValueError(f"kind moet een van {', '.join(JOB_KINDS)} zijn")
@@ -169,6 +182,11 @@ def parse_job(name, text, repos=None, skills=None):
     known = skill_list() if skills is None else skills
     if missing := [s for s in job["skills"] if s not in known]:
         raise ValueError(f"skill(s) {', '.join(missing)} staan (nog) niet op main")
+    if job["deliver"] not in DELIVER:
+        raise ValueError(f"deliver moet een van {', '.join(DELIVER)} zijn")
+    if job["deliver"] != "page" and NOTHING_MARKER not in job["instruction"]:
+        raise ValueError(f"een job met deliver: {job['deliver']} noemt in zijn instructie wat 'niets te melden' is en "
+                         f"antwoordt dan met {NOTHING_MARKER} als eerste regel")
     if job["minutes"] is not None and (not isinstance(job["minutes"], int) or job["minutes"] < 0):
         raise ValueError("minutes is een heel aantal minuten (0 of meer)")
     return job
@@ -306,6 +324,35 @@ def dispatch(job, due, manual=False):
     return run_id
 
 
+def nothing_statement(job):
+    """The lines of the job's own instruction that define 'nothing to report' (shown on the job's page)."""
+    return "\n".join(l.strip() for l in job["instruction"].splitlines() if NOTHING_MARKER in l)
+
+
+def is_nothing(text):
+    return (text or "").strip().partition("\n")[0].strip(" .!*_`#:").upper() == NOTHING_MARKER
+
+
+def deliver_result(job, run_id, text, link):
+    """Send a successful result where the job file says, in full, with the link to the run. Nothing for the default
+    (page), for an empty result and for the job's own 'nothing to report' marker. Never raises: the run stays ok."""
+    if not job or job.get("deliver", "page") == "page" or not (text or "").strip():
+        return False
+    if is_nothing(text):
+        log_line(f"r{run_id}", "info", "niets te melden: niets bezorgd")
+        return False
+    try:
+        title = f"Job {job['name']}"
+        if job["deliver"] == "ntfy":
+            notify(title, text.strip(), link, limit=NTFY_DELIVER_CHARS)
+        else:
+            conversation.note("box", "inbox", "notification", f"{title}\n{text.strip()}", link, f"job:{job['name']}:{run_id}")
+        return True
+    except Exception as e:  # noqa: BLE001
+        log(f"job {job['name']}: bezorgen mislukt: {e}")
+        return False
+
+
 def run_job(run_id, job):
     try:
         if job["model"] == "local":
@@ -412,6 +459,7 @@ def run_local(run_id, job):
         log_line(key, "claude", summary)
         log_line(key, "info", f"klaar in {round(time.monotonic() - started)} s")
         update_run(run_id, status="ok", ended=now(), summary=summary)
+        deliver_result(job, run_id, summary, f"{page_url()}/run/{run_id}")
     except InterruptedError:
         log_line(key, "info", "geannuleerd")
         update_run(run_id, status="cancelled", ended=now(), note="geannuleerd op de pagina")
@@ -577,6 +625,7 @@ skills: [alleen bij model claude, en alleen uit: {skills}]
 script: alleen bij script: pad in de repo
 args: [alleen bij script, optioneel]
 sources: [alleen bij digest: https-URL's (RSS of webpagina) of github:eigenaar/repo]
+deliver: page | ntfy | conversation   (optioneel; standaard page. Bij ntfy of conversation moet de instructie zeggen wat "niets te melden" is en dan met {marker} als eerste regel antwoorden)
 minutes: hoeveel minuten handwerk een run de gebruiker bespaart (schatting, geheel getal)
 ---
 De instructie: wat de job doet en hoe het resultaat eruit moet zien, kort en concreet.
@@ -610,7 +659,7 @@ def make_draft(draft_id):
         prompt = (f"Pas deze bestaande job aan (houd de naam {d['base']}):\n\n{JOBS[d['base']]['text']}\n\n"
                   f"Gevraagde wijziging:\n\n{d['request']}")
     (share / "prompt.txt").write_text(prompt)
-    (share / "system.txt").write_text(DRAFT_SYSTEM.format(tz=TZ.key, repos=", ".join(sorted(repo_list())),
+    (share / "system.txt").write_text(DRAFT_SYSTEM.format(tz=TZ.key, marker=NOTHING_MARKER, repos=", ".join(sorted(repo_list())),
                                                           skills=", ".join(skill_list()) or "(nog geen)"))
     for f in ("prompt.txt", "system.txt"):
         os.chmod(share / f, 0o640)
@@ -639,6 +688,44 @@ def update_draft(draft_id, **fields):
 def get_draft(draft_id):
     with db() as c:
         return c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+
+
+# The agent catalogue (H-017): job files in `agents/` of the homelab repo (the service's copy of main, like skills).
+AGENTS_DIR = HOME / "repos" / "homelab" / "agents"
+
+
+def load_agents():
+    """The catalogue: one entry per file, {name, text, job} or {name, text, error}; a broken file never hides the rest.
+    `on` says whether a job of that name exists (an ordinary job from then on)."""
+    out, repos, skills = [], repo_list(), skill_list()
+    for f in sorted(AGENTS_DIR.glob("*.md")):
+        text = f.read_text()
+        entry = {"name": f.stem, "text": text, "on": f.stem in JOBS}
+        try:
+            entry["job"] = parse_job(f.stem, text, repos, skills)
+        except (ValueError, OSError) as e:
+            entry["error"] = str(e)
+        out.append(entry)
+    return out
+
+
+def agent_job_text(agent):
+    """The job file shown when switching an agent on: the catalogue file with `name:` in its header (draft_name needs it)."""
+    text = agent["text"]
+    if draft_name(text):
+        return text
+    return "---\n" + f"name: {agent['name']}\n" + text[4:]
+
+
+def switch_on_agent(name):
+    """Make a ready draft of a catalogue agent: nothing runs and nothing is saved until the user confirms it on the
+    draft page (the same flow as a drafted job). Returns the draft id, or None for an unknown or broken agent."""
+    agent = next((a for a in load_agents() if a["name"] == name), None)
+    if not agent or "error" in agent:
+        return None
+    with _lock, db() as c:
+        return c.execute("INSERT INTO drafts (created, request, base, status, text) VALUES (?,?,?,?,?)",
+                         (now(), f"Agent aanzetten: {name}", None, "ready", agent_job_text(agent))).lastrowid
 
 
 def draft_name(text):

@@ -11,7 +11,7 @@ from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
-from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, update_draft, update_run
+from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
 from . import forge, search
@@ -254,6 +254,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.cancel_run(int(m.group(1)))
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
+        if self.path.startswith("/agents/"):
+            return self.post_agent()
         if self.path == "/ssh":
             name, key = form.get("name", "").strip(), form.get("key", "").strip()
             r = admin_ask({"cmd": "sshkey", "label": name, "key": key, "by": self.who})
@@ -287,6 +289,14 @@ class Handler(BaseHTTPRequestHandler):
             log_line(f"t{t['id']}", "info", f"build without me stopped by {self.who}: you merge the rest")
         return self.send(303, "", location=f"/task/{t['id']}")
 
+
+    def post_agent(self):
+        """Catalogue (H-017): switching an agent on only makes a draft; the job exists after Confirm on the draft page."""
+        m = re.fullmatch(r"/agents/([a-z0-9-]+)/on", self.path)
+        draft_id = switch_on_agent(m.group(1)) if m else None
+        if not draft_id:
+            return self.send(404, page("niet gevonden", "<p>Onbekende of kapotte agent.</p>"))
+        return self.send(303, "", location=f"/draft/{draft_id}")
 
     def post_jobs(self, form):
         """Jobs (F-022): opstellen, bevestigen, wijzigen, pauzeren, verwijderen, nu draaien."""

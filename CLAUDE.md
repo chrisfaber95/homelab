@@ -68,7 +68,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
 | H-016 conversation (store, client permissions, loopback door) | `bin/homelab_inbox/conversation.py` | `config/clients.json` | `docs/conversation.md` |
 | H-016 Discord bot (separate service, own account and venv, outward only) | `discord-bot/` (`bot_core.py` behaviour, `bot_run.py` discord.py glue, `requirements.txt` with hashes), `scripts/26-discord-bot.sh`, `systemd/homelab-discord-bot.service` | `/etc/homelab/discord-bot.env` (not in the repo) | `docs/discord.md` |
-| F-022 jobs and skills | `bin/homelab_inbox/jobs.py` | `config/inbox.conf` | `docs/jobs.md` |
+| F-022 jobs and skills, H-017 catalogue (`agents/`) | `bin/homelab_inbox/jobs.py`, `agents/` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
 | H-012 search (index, query and answer, MCP tool, Search tab) | `search/`, `bin/homelab-search`, `bin/homelab-search-mcp`, `scripts/24-search.sh`, `systemd/homelab-search-*`, `bin/homelab_inbox/search.py` (tab proxy) | `config/search.json` | `docs/search.md` |
 | H-015 forge (Start/Stop on the homelab page, service) | `bin/homelab_inbox/forge.py`, `deploy/forge.service`, `scripts/25-forge.sh` | `config/forge.env`, `config/inbox.conf` | `docs/projects.md` |

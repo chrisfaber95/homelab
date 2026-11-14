@@ -5,9 +5,9 @@ from collections import Counter
 
 from .briefs import plan_task, review_pr, settle_briefs
 from . import conversation
-from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, STATUS_NL, _cancel, _lock, _round_started
+from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, STATUS_NL, _cancel, _lock, _round_started
 from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
-from .jobs import propose_skill, split_skill
+from .jobs import deliver_result, propose_skill, split_skill
 from .memory import LEARN_HINT, after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
 from .router import revive_followups, route_task, settle_routed
@@ -122,6 +122,7 @@ def finish_round(task_id, cache, text, result, capped):
                 conversation.note("claude", "inbox", "answer", body, page_url(task_id), f"task:{task_id}")
             task_cmd("cleanup", task_id)
             if t["job"]:
+                deliver_result(JOBS.get(t["job"]), t["run_id"], body, page_url(task_id))  # alleen als het bestand dat vraagt
                 return  # een job meldt alleen wat de gebruiker nodig heeft; het resultaat staat op de pagina
             return notify(f"Inbox {task_id}: antwoord", body, page_url(task_id), store=False)
         if kind == "VRAAG" and not capped:

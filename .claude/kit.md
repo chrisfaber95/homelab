@@ -29,3 +29,5 @@ Items added by the build setup for briefs H-012, H-016 and H-017. A later setup 
 | discord-bridge | skill | written for H-016 | - | H-016 |
 | job-delivery | skill | written for H-017 | - | H-017 |
 | research-reports | skill | written for H-017 | - | H-017 |
+| home-actions | skill | written for H-019 | - | H-019 |
+| home-chat-intent | skill | written for H-019 | - | H-019 |

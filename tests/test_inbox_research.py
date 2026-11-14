@@ -248,6 +248,12 @@ class Permissions(unittest.TestCase):
         self.assertIn("Bash(homelab-search query:*)", allowed)
         self.assertNotIn("Bash(*", allowed)
 
+    def test_review_prompt_goes_in_on_stdin(self):
+        """A prompt as an argument fails above 128 KiB (Argument list too long); REVIEW_MAX_DIFF allows more."""
+        block = self.SCRIPT.split("draft|route|review)", 1)[1].split(";;", 1)[0]
+        self.assertIn('< "$prompt"', block)
+        self.assertNotIn('"$(cat "$prompt")"', block)
+
     def test_run_accepts_only_the_research_kind(self):
         self.assertIn('[[ -z $kind || $kind == research ]]', self.SCRIPT)
 

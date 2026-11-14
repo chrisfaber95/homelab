@@ -189,7 +189,9 @@ case $action in
       export CLAUDE_CODE_OAUTH_TOKEN
     fi
     # Alleen tekst: geen tools, dus niets op de box.
-    claude -p "$(cat "$prompt")" --append-system-prompt "$(cat "$system")" --tools "" --output-format json
+    # The prompt goes in on stdin: as an argument Linux refuses one above 128 KiB ("Argument list too long"), and
+    # a review prompt holds up to REVIEW_MAX_DIFF characters of diff.
+    claude -p --append-system-prompt "$(cat "$system")" --tools "" --output-format json < "$prompt"
     ;;
   cleanup)
     rm -rf "$work" "$TASK_HOME/out/$id.bundle"

@@ -22,6 +22,8 @@
 /srv/homelab/data/homeassistant/config
 # forge (H-015): its state (idea list, merged features, repo registry, log) and its Claude CLI / gh logins.
 /var/lib/forge/state.json
+# The mark of changes/0009-forge-reset-memory: without it a restored box would clear the restored state again.
+/var/lib/forge/before-reset-0009/done
 /var/lib/forge/.claude
 /var/lib/forge/.claude.json
 /var/lib/forge/.config/gh

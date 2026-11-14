@@ -14,10 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HOME = tempfile.mkdtemp()
-os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
-                  CHAT_TOKEN_DIR=tempfile.mkdtemp())
+os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"))
 ALL = ["read", "write", "ask", "start_task", "run_job", "approve"]
-os.environ["CLIENTS_JSON"] = json.dumps({"clients": {"kitt": {"permissions": ALL}, "discord": {"permissions": ["read"]}}})
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import briefs, chat, config, conversation, gate, kitt, pages, server, storage  # noqa: E402
 
@@ -46,6 +44,7 @@ class Base(unittest.TestCase):
         cls.srv.shutdown()
 
     def setUp(self):
+        self._clients_json = os.environ.get("CLIENTS_JSON")  # other test files set theirs for the whole run
         conversation.refusals()
         with storage.db() as c:
             for t in ("tasks", "kv", "conversation", "conversation_refusals", "job_runs"):
@@ -68,6 +67,10 @@ class Base(unittest.TestCase):
         (kitt.account_uid, kitt.peer_uid, pages.Access.owner, briefs.brief_by_id, chat.brief_by_id,
          briefs.set_brief_status, briefs.add_new_repo, chat.notify, kitt.load_briefs) = self.saved
         conversation.set_switch("kitt", True)
+        if self._clients_json is None:
+            os.environ.pop("CLIENTS_JSON", None)
+        else:
+            os.environ["CLIENTS_JSON"] = self._clients_json
 
     def set_clients(self, perms):
         os.environ["CLIENTS_JSON"] = json.dumps({"clients": {"kitt": {"permissions": perms, "tasks_per_day": 5}}})

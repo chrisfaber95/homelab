@@ -23,6 +23,9 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 | `compose` | het compose-bestand in de root bouwen en starten in de rootless Docker van het account `deploy` |
 | `service` | met een `package.json`: `npm ci` en `npm run build`; dan `homelab-app-<naam>.service` herstarten |
 
+Changing a repo from `sync` to `compose` or `service` builds and starts its current commit in the next round, without
+a new push: a repo with no release on disk does not count as deployed.
+
 **Toevoegen**: een regel erbij, commit, PR, mergen naar `main`. Binnen een minuut staat de deploy-clone er.
 - `compose`: publiceer poorten in de reeks **8100-8199**. Die laat ufw alleen via `tailscale0` door, en rootless
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).

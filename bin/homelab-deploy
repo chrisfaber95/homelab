@@ -363,6 +363,12 @@ def cycle():
         entries, sha = load_list(), None
     for name, repo, kind in entries:
         state = read_state(name) | {"name": name, "repo": repo, "kind": kind}
+        if kind != "sync" and state.get("deployed_sha") and not (RELEASES / name / "current").exists():
+            # Was a `sync` repo before (or its releases are gone): "deployed" only meant synced, nothing was ever
+            # built. Forget it, or the commit would count as running and the app would never start.
+            log(name, "no release on disk: forgetting the synced-only deploy, so this commit gets built")
+            for key in ("deployed_sha", "deployed_subject", "previous_sha", "last_deploy"):
+                state.pop(key, None)
         try:
             state["synced_sha"] = sha if name == HOMELAB and sha else sync_clone(name, repo)
             state["synced_at"], state["sync_error"] = now(), None

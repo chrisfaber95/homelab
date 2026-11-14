@@ -1,6 +1,6 @@
 """Queue: the scheduler, run_round / finish_round, cancel, and recovery after a restart."""
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 from collections import Counter
 
@@ -142,8 +142,8 @@ def finish_round(task_id, cache, text, result, capped):
             return notify(f"{label(t)}: gestopt bij {capped}", f"{run['mode']}-onderzoek niet afgerond", page_url(task_id))
         commits = push_branch(task_id, cache)
         if capped:
-            if not t["pr_number"]:
-                task_cmd("cleanup", task_id)  # de commits staan (als die er zijn) op GitHub in inbox/<id>
+            # The working copy stays: Continue on the page carries on in it, uncommitted work included.
+            # sweep_capped removes it when nobody continued the task for CAPPED_KEEP_DAYS.
             update(task_id, status="capped", ended=now(),
                    note=f"gestopt bij {capped}" + (f"; branch inbox/{task_id} gepusht" if commits else "")
                    + (f"; {note}" if note else ""))
@@ -231,9 +231,33 @@ def cancel_task(t):
             threading.Thread(target=after_round, args=(t["id"], []), daemon=True).start()
 
 
+_swept = set()  # capped tasks whose working copy this process already removed
+
+
+def sweep_capped():
+    """Remove the working copy of a task that stopped at the limit and wasn't continued for CAPPED_KEEP_DAYS. Its
+    commits are on inbox/<id>, so a later Continue rebuilds the copy from those; only uncommitted work is gone."""
+    limit = datetime.now(timezone.utc) - timedelta(days=int(CONF.get("CAPPED_KEEP_DAYS", 7)))
+    for t in tasks():
+        if t["status"] != "capped" or t["pr_number"] or t["id"] in _swept or not t["ended"] \
+                or datetime.fromisoformat(t["ended"]) > limit:
+            continue
+        _swept.add(t["id"])
+        if task_cmd("has", t["id"])[0] != 0:
+            continue
+        task_cmd("cleanup", t["id"])
+        log_line(f"t{t['id']}", "info", "working copy removed: not continued since it stopped at the limit")
+        if get(t["id"])["status"] == "queued":  # continued in the same moment: its round needs a new copy
+            update(t["id"], reprepare=1)
+
+
 def scheduler():
+    swept_at = 0
     while True:
         try:
+            if time.monotonic() - swept_at > 3600:
+                swept_at = time.monotonic()
+                sweep_capped()
             settle_routed()  # buiten het slot: het bewaart de geschiedenis (git)
             settle_briefs()
             with _lock:

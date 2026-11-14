@@ -31,7 +31,7 @@ telefoon ──tailnet──> homelab-inbox (inbox-runner) ── wachtrij ─�
 | beantwoord | een vraag ("waarom ...", "wat doet ..."): antwoord op de pagina, geen commit, branch of PR; je kunt er op de pagina op reageren, dan gaat dezelfde sessie verder (nieuwe werkkopie) |
 | wacht op jou | Claude vond de taak te onduidelijk en stelde één vraag; antwoord op de pagina, dan gaat dezelfde taak verder |
 | geweigerd | mag niet (bijvoorbeeld iets wat F-019 verbiedt); de reden staat op de pagina. **Retry** puts it back in the queue (see below) |
-| gestopt bij limiet | 80 beurten of 30 minuten per ronde (`config/inbox.conf`); de commits staan op `inbox/<id>`, zonder PR |
+| gestopt bij limiet | 80 beurten of 30 minuten per ronde (`config/inbox.conf`); de commits staan op `inbox/<id>`, zonder PR. **Continue** on the task page carries on in the same session and working copy, uncommitted work included (see below) |
 | geannuleerd | jij annuleerde hem (knop op de pagina); daarna geen commits of pushes meer |
 | mislukt | iets anders ging mis; de reden staat op de pagina. **Retry** on the task page puts it back in the queue (see below) |
 | gemerged / PR gesloten | de PR is dicht; de werkkopie is opgeruimd |
@@ -53,6 +53,11 @@ to do differently) and is told not to refuse again for the same reason. It goes 
 and working copy if that still exists, otherwise in a fresh copy of main (the task is told its earlier work is gone).
 Tasks of the same build or message that were cancelled because of it ("niet gestart: de voorgaande taak ...") come
 back too, in their order, and the build or message counts as running again.
+
+**Continue**: a task that stopped at the limit has a Continue button instead. Its working copy is kept as it was when
+the round was cut off, so the next round picks up half-finished, uncommitted work instead of redoing it. A copy nobody
+continued for `CAPPED_KEEP_DAYS` (7) is removed; Continue after that rebuilds it from the commits on `inbox/<id>` and
+tells the task its uncommitted work is gone.
 
 **Follow-ups of a task that ended badly**: a follow-up doesn't start when its predecessor failed, was refused, was
 cancelled, stopped at the limit or had its PR closed. Two things bring it back, in order, without running the

@@ -95,3 +95,7 @@ Agents and skills added for brief H-012 (LLM router and local search); full list
 - `router-tiers` (skill, written for H-012): tiers, backends, escalation, usage log, how callers declare a tier.
 - `search-corpus` (skill, written for H-012): chunking, metadata, secret scrubbing, incremental re-indexing.
 - `test-automator`, `documentation-engineer`, `code-reviewer` (agents) with skills `write-tests`, `coverage-gaps`, `fix-flaky-tests`, `write-docs`, `sync-docs`: tests, docs and review.
+
+Added for brief H-016 (chat with the box, and Discord):
+- `chat-clients` (skill, written for H-016): the one conversation in the inbox, how a client (Discord, later Jarvis) reads and writes it and gets its permissions, the two-step approval with confirm.
+- `discord-bridge` (skill, written for H-016): rules for the Discord bot: owner-only check on every message and button, DM only, length limits, slow answers, what is scrubbed before it leaves the box, token and switches.

@@ -16,8 +16,12 @@
 # Everything inside /var/lib/forge is done as the account `forge`, never as root: that directory belongs to an
 # account that runs generated code, so root does not follow paths in it.
 #
-# Runs once: before-reset-0009/done marks it, so a re-run never clears what forge built afterwards. On a rebuilt box
-# without a restore there is nothing to clear and it only sets the mark.
+# Runs once: before-reset-0009/done marks it, so a re-run never clears what forge built afterwards. The mark is set
+# only after forge is seen to be back with an empty state. On a box with nothing to clear (a rebuild without a
+# restore) it sets the mark and leaves the service alone.
+#
+# Do not merge a forge PR in the same few minutes: a deploy restarts the service, and a start in the middle of the
+# move would load the old memory again. The change notices that and fails instead of claiming it worked.
 #
 # A restart always leaves forge *stopped*: press Start on the homelab page afterwards.
 #
@@ -38,9 +42,11 @@ as_forge() { runuser -u forge -- "$@"; }
 id forge >/dev/null 2>&1 || { echo "no account forge: run scripts/25-forge.sh first" >&2; exit 1; }
 [[ $(stat -c %U "$HOME_DIR") == forge ]] || { echo "$HOME_DIR is not forge's" >&2; exit 1; }
 # This change knows the default places only. A box where they were moved needs its own look.
-if [[ -r $ENV_FILE ]] && grep -Eq '^FORGE_(STATE_DIR|STATE_FILE|WORK_DIR|CONFIG)=' "$ENV_FILE"; then
-  if grep -E '^FORGE_(STATE_DIR|STATE_FILE|WORK_DIR|CONFIG)=' "$ENV_FILE" \
-      | grep -Evxq "FORGE_STATE_DIR=$HOME_DIR|FORGE_STATE_FILE=$STATE|FORGE_WORK_DIR=$WORK"; then
+# (systemd strips leading blanks in an EnvironmentFile, so the match allows them too.)
+if [[ -r $ENV_FILE ]]; then
+  moved="$(sed -n 's/^[[:space:]]*\(FORGE_\(STATE_DIR\|STATE_FILE\|WORK_DIR\|CONFIG\)=.*\)$/\1/p' "$ENV_FILE" \
+    | grep -Evx "FORGE_STATE_DIR=$HOME_DIR|FORGE_STATE_FILE=$STATE|FORGE_WORK_DIR=$WORK" || true)"
+  if [[ -n $moved ]]; then
     echo "$ENV_FILE moves forge's state or work directory: clear it by hand." >&2
     exit 1
   fi
@@ -49,10 +55,18 @@ if as_forge test -e "$KEEP/done"; then
   echo "forge: memory was already cleared by this change ($KEEP), nothing to do"
   exit 0
 fi
+# Nothing to clear (no state file, no clones): set the mark and leave the service alone.
+if ! as_forge test -e "$STATE" -o -L "$STATE" \
+    && [[ -z $(as_forge find "$WORK" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]]; then
+  as_forge mkdir -p -m 700 "$KEEP"
+  as_forge touch "$KEEP/done"
+  echo "forge: no state file and no clones, so there is nothing to clear"
+  exit 0
+fi
 
 # --- 1. Stop forge, and never leave it down, whatever happens below
 # Stopping can take a while on purpose (TimeoutStopSec=330: forge ends its children and saves its state first).
-trap 'systemctl start "$UNIT" || true' EXIT
+trap 'systemctl start "$UNIT" || echo "could not start $UNIT again: start it by hand" >&2' EXIT
 systemctl stop "$UNIT"
 
 # --- 2. Move the memory aside (as forge; a leftover of an earlier, broken run keeps its own name)
@@ -69,25 +83,36 @@ aside() {  # aside <path>: move it into $KEEP under its own name, or a numbered 
 aside "$STATE"
 aside "$WORK"
 as_forge mkdir -m 700 "$WORK"
-as_forge touch "$KEEP/done"
 
 # --- 3. Start forge again and check that it came back empty
+# Something else (a deploy of forge) may have started it during the move: then it runs with the old memory in its
+# head and would write it back. Fail, so this is looked at, instead of marking the reset as done.
+if systemctl is-active --quiet "$UNIT"; then
+  echo "$UNIT was started by something else during the reset: the old memory may be back. Run this change again." >&2
+  exit 1
+fi
 trap - EXIT
 systemctl start "$UNIT"
 empty=no
+why=""
 for _ in $(seq 1 15); do
   sleep 2
   # Forge writes a fresh state file when it starts. Read as forge: the file is its own (the directory is 700).
-  if as_forge python3 -c '
+  # -I: without forge's own site-packages, so generated code there cannot answer for this check.
+  if why="$(as_forge python3 -I -c '
 import json, sys
 s = json.load(open(sys.argv[1], encoding="utf-8"))
 sys.exit(0 if s.get("repos") == [] and s.get("ideas") == [] and s.get("merged") == [] else 1)
-' "$STATE" 2>/dev/null; then
+' "$STATE" 2>&1)"; then
     empty=yes
     break
   fi
 done
-systemctl is-active --quiet "$UNIT"
-[[ $empty == yes ]] || { echo "forge did not come back with an empty state: look at $STATE" >&2; exit 1; }
+systemctl is-active --quiet "$UNIT" || { echo "$UNIT is not active after the reset" >&2; exit 1; }
+[[ $empty == yes ]] || {
+  echo "forge did not come back with an empty state: look at $STATE${why:+ ($(tail -n 1 <<<"$why"))}" >&2
+  exit 1
+}
+as_forge touch "$KEEP/done"
 echo "forge: memory cleared, the old state and clones are in $KEEP. $UNIT active."
 echo "forge is stopped after a restart: press Start on the homelab page."

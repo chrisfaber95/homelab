@@ -128,7 +128,7 @@ def task_row(t, link=True):
     what = JOB_KINDS.get(JOBS.get(t["job"], {}).get("kind"), "job") if t["job"] else first_line(t["text"])
     return (f'<div class="row"><div class="row-title">{head}<span class="st {t["status"]}">'
             f'{e(STATUS_NL[t["status"]])}</span><span>{e(what)}</span></div>'
-            + meta(e(t["repo"]), f'aangemaakt {local(t["created"])}',
+            + meta(e(t["repo"]), f'via {e(t["source"].capitalize())}' if t["source"] else "", f'aangemaakt {local(t["created"])}',
                    f'klaar {local(t["ended"])}' if t["ended"] else "", pr) + '</div>')
 
 
@@ -160,6 +160,9 @@ def log_html(key):
 def task_page(t):
     e = html.escape
     parts = [f'<h1>{e(label(t))}</h1>', task_row(t, link=False), f'<h2>Taak</h2><pre>{e(t["text"])}</pre>']
+    if t["source"]:
+        parts.insert(2, f'<p class="muted">Sent from {e(t["source"].capitalize())}'
+                     + (', approved there (two-step confirm)' if t["repo"] == BRIEF else '') + '.</p>')
     if t["question"]:
         parts.append(f'<h2>Vraag van Claude</h2><pre>{e(t["question"])}</pre>')
         if t["status"] == "waiting":

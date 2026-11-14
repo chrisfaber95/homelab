@@ -1,5 +1,6 @@
 """Storage: the SQLite database (tasks, job runs, key/value), plus small readers of it."""
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 
 from .config import DB, _lock
@@ -31,7 +32,7 @@ def db():
                       ("review", "TEXT"), ("handoff", "TEXT"), ("unattended", "INTEGER DEFAULT 0"),
                       ("review_ok", "INTEGER"), ("conflicts", "INTEGER DEFAULT 0"), ("conflict_sha", "TEXT"),
                       ("restarts", "INTEGER DEFAULT 0"), ("accepted", "INTEGER DEFAULT 0"),
-                      ("no_auto_revive", "INTEGER DEFAULT 0")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
+                      ("no_auto_revive", "INTEGER DEFAULT 0"), ("source", "TEXT")):  # reprepare: vervolg na een antwoord, werkkopie was opgeruimd
         # H-001: brief = the brief id (build parent and its children), criteria = JSON list for a child, reviews =
         # automatic rework rounds used, review = the reviewer's last verdict, handoff = the handed-off PR (or error)
         # Build without me: unattended = on a build, the inbox merges its PRs; review_ok = 1 when every criterion of
@@ -39,6 +40,7 @@ def db():
         # Merge conflicts: conflicts = automatic conflict rounds used, conflict_sha = the PR head last handled
         # restarts = rounds in a row cut off by a restart of the inbox (recover puts the task back in the queue)
         # accepted = the user marked this task as fine, so its follow-ups may run
+        # source = the client a task or build came from (discord), NULL for the homelab page
         # no_auto_revive = cancelled before follow-ups could come back by themselves: a merge doesn't restart it
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
@@ -73,3 +75,11 @@ def update(task_id, **fields):
 def tasks(limit=200):
     with db() as c:
         return c.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def new_task(repo, text, source=None):
+    """Queue a task: the one place a task is created, for the page and for chat clients alike, so both get the same
+    queue, limits, auto mode and PR. `source` is the client it came from (None = the homelab page)."""
+    with _lock, db() as c:
+        return c.execute("INSERT INTO tasks (repo, text, status, created, session, source) VALUES (?,?,?,?,?,?)",
+                         (repo, text[:8000], "queued", now(), str(uuid.uuid4()), source)).lastrowid

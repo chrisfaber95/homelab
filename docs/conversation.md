@@ -16,8 +16,8 @@ Every entry has `id` (the cursor), `time` (UTC), `author` (`chris`, `claude`, `b
 | `question` | Claude's question on a task (full text, with a link to the task) |
 | `answer` | Claude's answer to a task |
 | `notification` | every `notify()` call (the ntfy push), with the full text and link; ntfy itself gets the text cut to 300 characters. Questions and answers are stored as `question` / `answer` instead (also those of brief and routing tasks) |
-| `approval` | Chris approving a brief on the page |
-| `approval_request` | reserved for the Discord bot's confirm step (not written yet) |
+| `approval` | Chris approving a brief, on the page or from a client (after the confirm step) |
+| `approval_request` | step one of an approval from a client: waiting for confirmation (without the token) |
 
 Text and link are scrubbed with the memory's secret filter (`config.SECRET_RE`) before they are stored: the match is
 replaced by `[removed: looks like a secret]`, the rest stays. Entries are cut at 20000 characters. Storing never breaks
@@ -31,7 +31,9 @@ An action without the permission is refused, and the refusal goes to the journal
 `conversation_refusals`. A client always writes as Chris and only the kinds `message` (needs `write`), `question`
 (`ask`) and `answer` (`answer`); it cannot write notifications, approvals or Claude's text. `start_task`,
 `approve` and `run_job` are checked by the code that does those things (`conversation.allowed(client, action)`).
-SSH keys, memory edits and merges on `homelab` exist for no client.
+SSH keys, memory edits and merges on `homelab` exist for no client: `ssh_key`, `memory_edit` and `merge_homelab` are in
+`conversation.FORBIDDEN`, refused (and logged) first in `allowed()` whatever the config says, and dropped from any
+permission list.
 
 ## Switches
 
@@ -58,6 +60,35 @@ exception, only for `/api/chat/entries`, only from `127.0.0.1`/`::1`, and with a
 
 Statuses: 401 unknown token, 403 refused (not permitted, or not loopback), 400 bad request. Inside the inbox use
 `conversation.append(...)`, `conversation.read(after)`.
+
+## Actions of a client (`POST /api/chat/action`)
+
+`bin/homelab_inbox/chat.py`, through the same door and token as the entries. The client names the action explicitly;
+nothing classifies free text (a message "approve H-016" is only a message). Body `{"action": ..., ...}`:
+
+| action | fields | permission | does |
+|---|---|---|---|
+| `task` | `repo` (a repo or `auto`), `text` | `start_task` | queues a task through `storage.new_task`, the same row as the page, so same queue, limits, auto mode and PR; `tasks.source` = the client, shown on the task page and row |
+| `answer` | `task`, `text` | `answer` | `queue.answer_task`, the code behind the page's answer form |
+| `state` | | `read` | tasks running, waiting for Chris and queued |
+| `jobs` / `run_job` | `job` | `read` / `run_job` | list jobs / run one now (`jobs.dispatch`, manual) |
+| `drafts` | | `read` | draft briefs |
+| `approve` | `brief`, `mode` (`build` or `without-me`) | `approve` | step one: a pending approval and a `confirm` token |
+| `confirm` | `confirm` | `approve` | step two: approves and starts the build |
+
+**Daily cap.** `tasks_per_day` on the client in `config/clients.json`, else `CLIENT_TASKS_PER_DAY` in
+`config/inbox.conf` (10). It counts the tasks and builds with that client as `source` since local midnight
+(`JOB_TIMEZONE`); page tasks and job runs don't count. Above it: 429 with "daily limit reached ... nothing was
+started". Checked again at confirm.
+
+**Two-step approval.** `approve` only inserts a row in `approvals` (random token, client, brief, mode, expiry
+`CONFIRM_TTL_SECONDS`, default 300) and writes an `approval_request` entry (the token is not in it: only the asking
+client gets it). Only `confirm` with that token approves. It must be unexpired, unused and from the same client (one
+use, claimed atomically); permission, the Discord switches, the cap and "still a draft" are checked again then. The
+brief's commit says "approved from discord by Chris" (and ", build without me"), the build task has `source`
+`discord` and its page says it was approved there, an `approval` entry is written and ntfy gets a notification.
+Statuses: 403 refused (permission, switches, forbidden), 404 unknown token or task, 409 not possible now, 410
+expired or used token, 429 cap.
 
 ## Does scrubbing and storing slow a notification down?
 

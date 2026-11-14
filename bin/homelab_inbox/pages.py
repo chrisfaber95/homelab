@@ -14,7 +14,7 @@ from .briefs import build_left_nothing, builds, live_build, load_briefs, split_f
 from . import conversation
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
-from .jobs import JOB_KINDS, RUN_NL, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
+from .jobs import JOB_KINDS, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
 from .router import blocked_by, blocked_followups, children
@@ -553,6 +553,26 @@ def job_facts(job):
             f'<h2>Instructie</h2><pre>{e(job["instruction"])}</pre>')
 
 
+def catalogue_html():
+    e = html.escape
+    rows = []
+    for a in load_agents():
+        name = e(a["name"])
+        if "error" in a:
+            rows.append(f'<div class="row"><div class="row-title">{name}<span class="st failed">fout in het bestand</span>'
+                        f'</div>{meta(e(a["error"]))}</div>')
+            continue
+        j = a["job"]
+        what = e(j["instruction"].split("\n\n")[0][:300])
+        action = (f'<a href="/job/{name}">staat aan</a>' if a["on"]
+                  else form(f"/agents/{name}/on", "", "Aanzetten", cls="small"))
+        rows.append(f'<div class="row"><div class="row-title">{name}<span>{action}</span></div><p class="muted">{what}</p>'
+                    + meta(e(j["when"] or j["schedule"]), "model: " + ("lokaal" if j["model"] == "local" else "Claude"),
+                           "bezorgt: " + e(j["deliver"])) + '</div>')
+    return ('<h2>Catalogus</h2><p class="muted">Kant-en-klare agents uit <code>agents/</code> in de repo. Aanzetten toont '
+            'eerst het jobbestand; pas na Bevestigen bestaat de job.</p>' + ("".join(rows) or "<p class=empty>Geen agents.</p>"))
+
+
 def jobs_page():
     e = html.escape
     cap = int(CONF.get("JOB_CLAUDE_CAP", 10))
@@ -578,6 +598,7 @@ def jobs_page():
                    'id="jobtext" required placeholder="Bijvoorbeeld: elke werkdag om 7:00, vertel me wat er vannacht '
                    'misging"></textarea>', "Job opstellen")
             + (f'<h2>Concepten</h2>{open_drafts}' if open_drafts else "")
+            + catalogue_html()
             + f'<h2>Alle jobs</h2>{"".join(rows) or "<p class=empty>Nog geen jobs.</p>"}'
             + f'<h2>Laatste runs</h2>{"".join(run_row(r, True) for r in job_runs(limit=20)) or "<p class=empty>Nog geen runs.</p>"}')
     return page("jobs", body, refresh=any(d["status"] == "drafting" for d in drafts))

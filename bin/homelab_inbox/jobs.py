@@ -690,6 +690,44 @@ def get_draft(draft_id):
         return c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
 
 
+# The agent catalogue (H-017): job files in `agents/` of the homelab repo (the service's copy of main, like skills).
+AGENTS_DIR = HOME / "repos" / "homelab" / "agents"
+
+
+def load_agents():
+    """The catalogue: one entry per file, {name, text, job} or {name, text, error}; a broken file never hides the rest.
+    `on` says whether a job of that name exists (an ordinary job from then on)."""
+    out, repos, skills = [], repo_list(), skill_list()
+    for f in sorted(AGENTS_DIR.glob("*.md")):
+        text = f.read_text()
+        entry = {"name": f.stem, "text": text, "on": f.stem in JOBS}
+        try:
+            entry["job"] = parse_job(f.stem, text, repos, skills)
+        except (ValueError, OSError) as e:
+            entry["error"] = str(e)
+        out.append(entry)
+    return out
+
+
+def agent_job_text(agent):
+    """The job file shown when switching an agent on: the catalogue file with `name:` in its header (draft_name needs it)."""
+    text = agent["text"]
+    if draft_name(text):
+        return text
+    return "---\n" + f"name: {agent['name']}\n" + text[4:]
+
+
+def switch_on_agent(name):
+    """Make a ready draft of a catalogue agent: nothing runs and nothing is saved until the user confirms it on the
+    draft page (the same flow as a drafted job). Returns the draft id, or None for an unknown or broken agent."""
+    agent = next((a for a in load_agents() if a["name"] == name), None)
+    if not agent or "error" in agent:
+        return None
+    with _lock, db() as c:
+        return c.execute("INSERT INTO drafts (created, request, base, status, text) VALUES (?,?,?,?,?)",
+                         (now(), f"Agent aanzetten: {name}", None, "ready", agent_job_text(agent))).lastrowid
+
+
 def draft_name(text):
     m = re.search(r"^name:\s*([a-z0-9][a-z0-9-]*)\s*$", text.partition("\n---")[0], re.M)
     return m.group(1) if m else ""

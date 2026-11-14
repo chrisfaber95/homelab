@@ -26,7 +26,7 @@ Claudes eigen sessies houdt de pre-push-hook het tegen, net als bij `main`).
 ---
 when: elke werkdag om 7:00            # in woorden, voor jou
 schedule: "0 7 * * 1-5"               # cron: minuut uur dag maand weekdag (0 = zondag), tijdzone Europe/Amsterdam
-kind: box-report                      # box-report | repo-chore | digest | script | research
+kind: box-report                      # box-report | repo-chore | digest | script | repo-watch | research
 model: local                          # local | claude
 repo: claude-dashboard                # repo-chore (verplicht), script (standaard homelab)
 skills: [deploy-debuggen]             # alleen bij model claude
@@ -238,7 +238,25 @@ kiest **Bevestigen**, net als bij een opgesteld concept. Pas dan staat de job op
 bestaat er niets. Daarna is het een gewone job (pauzeren, wijzigen, nu draaien, verwijderen) en toont de catalogus hem
 als "staat aan" (een job met dezelfde naam als de agent). Verwijder je de job, dan kun je de agent weer aanzetten.
 Een agent met een lege plek (bijvoorbeeld de bronnen van een digest) hoort die in het concept te laten invullen:
-verzin geen lijst; het concept toont de fout tot jij hem invult. Voorbeeld: `agents/box-report.md`.
+verzin geen lijst; het concept toont de fout tot jij hem invult. De eerste agents (alle drie lokaal en `deliver: conversation`, elk met zijn eigen "niets te melden"):
+
+| Agent | Wanneer | Doet | Niets te melden |
+|---|---|---|---|
+| `morning-digest` | elke ochtend 7:30 | de vijf interessantste items uit je bronnen | geen nieuw item, of geen enkele bron laadde |
+| `box-report` | werkdagen 7:00 | de staat van de box in hooguit acht regels | geen check, deploy of backup mislukt of achterstallig |
+| `repo-watcher` | elke ochtend 8:00 | nieuwe commits, PR's en releases van je repo's | geen enkele activiteit sinds de dag van de vorige run |
+
+`morning-digest` en `repo-watcher` leveren `sources: []`: het bestand is dan geldig voor de catalogus, maar het concept
+toont "sources nodig" tot jij de bronnen (RSS of pagina's) of repo's (`github:eigenaar/repo`) invult. Er is geen
+verzonnen lijst; de bronnen van de digest zijn jouw keuze.
+
+**repo-watch** is een eigen soort: `sources` bevat alleen `github:eigenaar/repo`. Per repo haalt de run de commits,
+PR's (nieuw of bijgewerkt: open, gemerged of gesloten) en releases (geen concepten) op sinds het begin van de dag (in
+de tijdzone van de inbox) van de vorige geslaagde run van die job; zonder vorige run sinds het begin van gisteren, nooit
+verder dan 31 dagen terug. Dat is het enige geheugen. Heeft een repo niets, dan staat er "geen activiteit"; staat dat
+overal, dan antwoordt de job `NOTHING TO REPORT` en wordt er niets bezorgd. De PR-regels tellen ook PR's die alleen een
+reactie kregen (`updated_at`). Code: `watch_repo`, `since_day` en `previous_run_time` in `jobs.py`; tests in
+`tests/test_inbox_agents.py`. Voorbeeld van een kaal agentbestand: `agents/box-report.md`.
 
 ## Skills
 

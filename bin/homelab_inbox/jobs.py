@@ -23,7 +23,7 @@ from .storage import db, get, log, now
 
 
 JOB_KINDS = {"box-report": "boxrapport", "repo-chore": "repo-klus", "digest": "digest", "script": "script",
-             "research": "onderzoek"}
+             "repo-watch": "repo-waker", "research": "onderzoek"}
 
 
 JOB_FIELDS = {"name", "when", "schedule", "kind", "model", "repo", "skills", "script", "args", "sources", "minutes",
@@ -37,6 +37,14 @@ DELIVER = ("page", "ntfy", "conversation")
 # A delivering job's instruction must state what "nothing to report" is and tell the job to answer with this marker as
 # the first line; a result that starts with it is not delivered (it stays in the job's history).
 NOTHING_MARKER = "NOTHING TO REPORT"
+
+
+class NeedsInput(ValueError):
+    """A catalogue file that is valid except for a field the user fills in when switching it on (digest sources).
+    `.job` is the parsed job as far as it goes, for showing it in the catalogue."""
+    def __init__(self, message, job=None):
+        super().__init__(message)
+        self.job = job
 
 
 # Research (H-017): the instruction of a research job is its question. quick = a few minutes and a handful of sources,
@@ -182,7 +190,11 @@ def parse_job(name, text, repos=None, skills=None):
         if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9._/-]*$", str(job["script"] or "")) or ".." in str(job["script"]):
             raise ValueError("script moet een pad in de repo zijn, bijvoorbeeld scripts/iets.sh")
     if job["kind"] == "digest" and not job["sources"]:
-        raise ValueError("een digest heeft sources nodig (URL's of github:eigenaar/repo)")
+        raise NeedsInput("een digest heeft sources nodig (URL's of github:eigenaar/repo)", job)
+    if job["kind"] == "repo-watch" and not job["sources"]:
+        raise NeedsInput("een repo-waker heeft sources nodig (github:eigenaar/repo, een of meer)", job)
+    if job["kind"] == "repo-watch" and not all(str(s).startswith("github:") for s in job["sources"]):
+        raise ValueError("een repo-waker bekijkt alleen GitHub-repo's: github:eigenaar/repo")
     for s in job["sources"]:
         if not re.match(r"^(https?://\S+|github:[\w.-]+/[\w.-]+)$", s):
             raise ValueError(f"bron {s} is geen http(s)-URL of github:eigenaar/repo")
@@ -506,6 +518,12 @@ def gather(job, run_id):
         if all("(ophalen mislukt" in p for p in parts):
             raise RuntimeError("geen enkele bron kon worden opgehaald")
         return "\n\n".join(parts)
+    if job["kind"] == "repo-watch":
+        since = since_day(previous_run_time(job["name"], run_id), datetime.now(timezone.utc))
+        parts = [watch_repo(s.removeprefix("github:"), since) for s in job["sources"]]
+        if all("(ophalen mislukt" in p for p in parts):
+            raise RuntimeError("geen enkele repo kon worden opgehaald")
+        return "\n\n".join(parts)
     if job["kind"] == "script":
         refresh_cache(job["repo"], repo_list()[job["repo"]])
         code, out = task_cmd("script", f"j{run_id}", job["repo"], job["script"], *job["args"],
@@ -514,6 +532,39 @@ def gather(job, run_id):
             raise RuntimeError(out[-300:])
         return f"$ {job['script']} {' '.join(job['args'])}\n(exitcode {code})\n\n{out}"
     raise RuntimeError(f"een {job['kind']} draait niet lokaal")
+
+
+def since_day(previous, now_dt, max_days=31):
+    """The start (UTC, `...Z`) of the day, in TZ, of the previous run: what the repo watcher reports since. No previous
+    run: from the start of yesterday. Never further back than max_days."""
+    ref = datetime.fromisoformat(previous) if previous else now_dt - timedelta(days=1)
+    start = ref.astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = max(start, now_dt.astimezone(TZ) - timedelta(days=max_days))
+    return start.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def previous_run_time(name, run_id):
+    """When the last successful run of this job before run_id was created (None: there was none)."""
+    with db() as c:
+        row = c.execute("SELECT created FROM job_runs WHERE job=? AND status='ok' AND id<? ORDER BY id DESC LIMIT 1",
+                        (name, run_id)).fetchone()
+    return row["created"] if row else None
+
+
+def watch_repo(slug, since):
+    """New commits, pull requests and releases of a GitHub repo since `since`; 'geen activiteit' when there are none."""
+    try:
+        commits = gh("GET", f"/repos/{slug}/commits?since={since}&per_page=30") or []
+        pulls = [p for p in gh("GET", f"/repos/{slug}/pulls?state=all&sort=updated&direction=desc&per_page=30") or []
+                 if (p.get("updated_at") or "") >= since]
+        releases = [r for r in gh("GET", f"/repos/{slug}/releases?per_page=10") or []
+                    if not r.get("draft") and (r.get("published_at") or r.get("created_at") or "") >= since]
+    except Exception as e:  # noqa: BLE001
+        return f"## GitHub {slug}\n(ophalen mislukt: {e})"
+    lines = [f"commit {c['sha'][:7]} {c['commit']['message'].splitlines()[0]}" for c in commits]
+    lines += [f"PR #{p['number']} ({'gemerged' if p.get('merged_at') else p['state']}): {p['title']}" for p in pulls]
+    lines += [f"release {r.get('tag_name')}: {r.get('name') or ''} {r.get('html_url') or ''}".rstrip() for r in releases]
+    return f"## GitHub {slug}, sinds {since[:10]}\n" + ("\n".join(lines) or "geen activiteit")
 
 
 def fetch_source(src):
@@ -607,7 +658,7 @@ def run_local(run_id, job):
 def job_prompt(job, run_id):
     parts = [f"Dit is de geplande job '{job['name']}' ({JOB_KINDS[job['kind']]}), niet door de gebruiker getypt; hij "
              f"kijkt niet mee.\n\n{job['instruction']}"]
-    if job["kind"] in ("box-report", "digest"):
+    if job["kind"] in ("box-report", "digest", "repo-watch"):
         parts.append("Hieronder de verzamelde gegevens. Eindig met ANTWOORD: (je rapport of digest); commit niets.\n\n"
                      + gather(job, run_id)[:30000])
     elif job["kind"] == "research":
@@ -750,13 +801,13 @@ het bestand, in één ```job-blok, zonder verdere tekst. Formaat:
 name: korte-naam-met-streepjes
 when: het schema in gewone woorden, in het Nederlands
 schedule: "0 7 * * 1-5"   (alleen de vijf cron-velden: minuut uur dag maand weekdag; tijdzone {tz}; 0 = zondag)
-kind: box-report | repo-chore | digest | script
+kind: box-report | repo-chore | digest | script | repo-watch
 model: local | claude
 repo: alleen bij repo-chore (verplicht) en script (standaard homelab); een van: {repos}
 skills: [alleen bij model claude, en alleen uit: {skills}]
 script: alleen bij script: pad in de repo
 args: [alleen bij script, optioneel]
-sources: [alleen bij digest: https-URL's (RSS of webpagina) of github:eigenaar/repo]
+sources: [alleen bij digest en repo-watch (daar alleen github:eigenaar/repo): https-URL's (RSS of webpagina) of github:eigenaar/repo]
 deliver: page | ntfy | conversation   (optioneel; standaard page. Bij ntfy of conversation moet de instructie zeggen wat "niets te melden" is en dan met {marker} als eerste regel antwoorden)
 minutes: hoeveel minuten handwerk een run de gebruiker bespaart (schatting, geheel getal)
 ---
@@ -765,7 +816,7 @@ De instructie: wat de job doet en hoe het resultaat eruit moet zien, kort en con
 
 Soorten: box-report (rapport uit de staat van de box: health checks, deploys, LLM-gebruik, wijzigingen, backup),
 repo-chore (een klus in een repo die eindigt in een PR, bijvoorbeeld afhankelijkheden bijwerken of oude branches),
-digest (bronnen ophalen en samenvatten), script (een script uit een repo draaien en de uitvoer samenvatten).
+digest (bronnen ophalen en samenvatten), repo-watch (nieuwe commits, PR's en releases van GitHub-repos sinds de dag van de vorige run), script (een script uit een repo draaien en de uitvoer samenvatten).
 Model: local (het lokale model, gratis) als de job alleen tekst samenvat of eruit haalt die de job zelf verzamelt
 (box-report, digest, script); claude als er tools, code of een repo nodig zijn (repo-chore altijd claude).
 Laat velden die niet gelden weg. De instructie voor een lokale job is een opdracht aan een klein model: kort, één
@@ -835,6 +886,9 @@ def load_agents():
         entry = {"name": f.stem, "text": text, "on": f.stem in JOBS}
         try:
             entry["job"] = parse_job(f.stem, text, repos, skills)
+        except NeedsInput as e:
+            entry["fill"] = str(e)  # fine to switch on: the draft asks for the missing field
+            entry["job"] = e.job
         except (ValueError, OSError) as e:
             entry["error"] = str(e)
         out.append(entry)

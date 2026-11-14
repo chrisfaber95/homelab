@@ -575,7 +575,8 @@ def catalogue_html():
                   else form(f"/agents/{name}/on", "", "Aanzetten", cls="small"))
         rows.append(f'<div class="row"><div class="row-title">{name}<span>{action}</span></div><p class="muted">{what}</p>'
                     + meta(e(j["when"] or j["schedule"]), "model: " + ("lokaal" if j["model"] == "local" else "Claude"),
-                           "bezorgt: " + e(j["deliver"])) + '</div>')
+                           "bezorgt: " + e(j["deliver"]), "in te vullen bij aanzetten: " + e(a["fill"]) if a.get("fill") else "")
+                    + '</div>')
     return ('<h2>Catalogus</h2><p class="muted">Kant-en-klare agents uit <code>agents/</code> in de repo. Aanzetten toont '
             'eerst het jobbestand; pas na Bevestigen bestaat de job.</p>' + ("".join(rows) or "<p class=empty>Geen agents.</p>"))
 

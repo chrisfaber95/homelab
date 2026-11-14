@@ -33,6 +33,7 @@ skills: [deploy-debuggen]             # alleen bij model claude
 script: scripts/iets.sh               # alleen bij script
 args: [--kort]                        # optioneel, bij script
 sources: [https://..., github:chrisfaber95/homelab]   # alleen bij digest
+deliver: conversation                # optioneel: page (standaard) | ntfy | conversation; zie "Resultaat bezorgen"
 minutes: 10                           # hoeveel minuten handwerk een run je bespaart (voor F-024)
 paused: true                          # optioneel
 ---
@@ -127,8 +128,42 @@ Lokale jobs en je eigen inbox-taken tellen niet mee en wachten nooit. "Nu draaie
 ## Wanneer een job een melding stuurt
 
 Alleen als hij mislukt, een PR opent of bijwerkt, je een vraag stelt, of op een grens stopt (de daglimiet, of de
-grens van beurten en tijd). Al het andere, ook een gelukt rapport of digest, staat alleen op de pagina, in de
-geschiedenis van de job (tijd, resultaat, link naar het antwoord of de PR).
+grens van beurten en tijd). Een gelukt rapport of digest staat standaard alleen op de pagina, in de geschiedenis van
+de job (tijd, resultaat, link naar het antwoord of de PR). Wil je het resultaat ook ontvangen, zet dan `deliver`.
+
+## Resultaat bezorgen (`deliver`, H-017)
+
+`deliver` in de kop zegt waar een **gelukt** resultaat heen gaat:
+
+- `page` (standaard, ook als het veld ontbreekt): alleen de pagina. Een job zonder `deliver` gedraagt zich precies als
+  voorheen; bestaande bestanden hoeven niet te veranderen.
+- `ntfy`: een push met het resultaat (hooguit 4000 tekens; ntfy zelf houdt 4096 bytes aan) en een link naar de run. De
+  volledige tekst staat ook in het gesprek.
+- `conversation`: een melding in het gesprek (H-016, daar leest Discord), met de volledige tekst en een link naar de
+  run. De tekst wordt gefilterd zoals elk bericht in het gesprek (geheimen vervangen).
+
+De link gaat naar `/run/<id>` (lokale job) of `/task/<id>` (Claude-job). Bezorgen komt **erbij**: de meldingen bij een
+fout, PR, vraag of limiet blijven zoals ze waren. Een Claude-job bezorgt zijn antwoord (`ANTWOORD:`); eindigt hij in een
+PR, dan is dat de PR-melding. Mislukt het bezorgen zelf, dan blijft de run `ok` en komt er een regel in het journal.
+
+**Niets te melden.** Een job met `deliver: ntfy` of `conversation` moet in zijn eigen instructie zeggen wanneer er niets
+te melden is, en dan met **`NOTHING TO REPORT`** als eerste regel antwoorden (hoofdletters en leestekens eromheen
+tellen niet mee). Zo'n resultaat wordt niet bezorgd; de run en zijn resultaat staan wel in de geschiedenis. Zonder die
+marker in de instructie is het bestand ongeldig (de fout staat op de pagina). De regels uit de instructie met de marker
+toont de pagina van de job onder "Niets te melden". Het is dus geen verborgen regel in de code.
+
+```
+---
+when: elke ochtend om 7:30
+schedule: "30 7 * * *"
+kind: digest
+model: local
+sources: [github:chrisfaber95/homelab]
+deliver: conversation
+---
+Som op wat er gisteren in de repo gebeurde, één regel per punt. Gebeurde er niets: antwoord alleen met
+NOTHING TO REPORT als eerste regel.
+```
 
 **Schema en gemiste runs**: een job start binnen een minuut na zijn tijd. Stond de box uit, dan draait een gemiste job
 één keer zodra de box weer aan is, niet één keer per gemist moment. Een nieuwe of hervatte job begint bij zijn

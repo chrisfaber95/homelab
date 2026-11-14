@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from .config import CONF, HOME, TASK_CMD, _cancel, _lock, _procs, _round_started
+from .jobs import research_limits, research_run
 from .helpers import git, log_line, repo_lock, task_cmd
 from .memory import memory_for
 from .storage import get, update
@@ -38,6 +39,17 @@ eigen werkkopie van de repo {repo} op branch inbox/{id}; de gebruiker kijkt niet
   de instructies in markdown (stappen, valkuilen, commando's)
   De inbox maakt er een PR van; de gebruiker beslist. Een bestaande skill verander je nooit zelf: een verbetering
   stel je op dezelfde manier voor, onder dezelfde naam."""
+
+
+# A research run (H-017) gets this instead of SYSTEM_PROMPT: it reads and reports, and changes nothing. The tools it
+# gets enforce that (homelab-inbox-task run ... research); this says it in words.
+RESEARCH_SYSTEM_PROMPT = """Je werkt voor de homelab-inbox aan een onderzoeksvraag (taak {id}); de gebruiker kijkt niet mee.
+- Je leest en rapporteert. Je commit niets, maakt geen branch of PR, schrijft geen bestanden en doet geen machinewijziging
+  (ook geen `homelab-admin`); je tools laten dat ook niet toe.
+- Je tools: Read, Grep, Glob, WebSearch, WebFetch en `homelab-search` in Bash. Niets anders.
+- Volg de skill research-reports: eerst privé zoeken, dan het web; elke bewering een bron; niets gevonden zeggen en
+  opsommen wat je doorzocht, nooit gokken.
+- Je laatste bericht begint met `ANTWOORD:` en bevat het rapport zoals de prompt het vraagt."""
 
 
 def tool_brief(inp):
@@ -77,7 +89,8 @@ def write_prompt(t, text):
     share.mkdir(parents=True, exist_ok=True)
     os.chmod(share, 0o2750)
     (share / "prompt.txt").write_text(text)
-    (share / "system.txt").write_text(SYSTEM_PROMPT.format(repo=t["repo"], id=t["id"]) + memory_for(t))
+    system = RESEARCH_SYSTEM_PROMPT if research_run(t) else SYSTEM_PROMPT
+    (share / "system.txt").write_text(system.format(repo=t["repo"], id=t["id"]) + memory_for(t))
     for f in ("prompt.txt", "system.txt"):
         os.chmod(share / f, 0o640)
 
@@ -86,11 +99,13 @@ def stream_claude(task_id, mode):
     """Claude laten lopen en bewaken: beurten tellen, tijd, annuleren. Geeft (resultaat-json, beurten, gestopt?)."""
     t = get(task_id)
     errfile = tempfile.TemporaryFile(mode="w+")  # niet als pipe: een volle stderr-pipe zou Claude laten hangen
-    p = subprocess.Popen([*TASK_CMD, "run", str(task_id), t["session"], mode], stdout=subprocess.PIPE,
+    research = research_run(t)
+    p = subprocess.Popen([*TASK_CMD, "run", str(task_id), t["session"], mode, *(["research"] if research else [])], stdout=subprocess.PIPE,
                          stderr=errfile, text=True)
     with _lock:
         _procs[task_id] = p
-    max_turns, deadline = int(CONF["MAX_TURNS"]), time.monotonic() + 60 * int(CONF["MAX_MINUTES"])
+    minutes, max_turns = research_limits(research["mode"]) if research else (int(CONF["MAX_MINUTES"]), int(CONF["MAX_TURNS"]))
+    deadline = time.monotonic() + 60 * minutes
     turns, result, capped = t["turns"] or 0, None, None
     watchdog = threading.Thread(target=watch, args=(task_id, p, deadline), daemon=True)
     watchdog.start()
@@ -119,7 +134,7 @@ def stream_claude(task_id, mode):
         if task_id in _cancel:
             capped = "geannuleerd"
         elif getattr(p, "timed_out", False):
-            capped = f"{CONF['MAX_MINUTES']} minuten"
+            capped = f"{minutes} minuten"
     update(task_id, turns=turns)
     errfile.seek(0)
     err = errfile.read()[-300:]

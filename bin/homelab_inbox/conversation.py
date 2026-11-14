@@ -16,7 +16,7 @@ AUTHORS = ("chris", "claude", "box", "system")  # box = notifications, system = 
 KINDS = ("message", "question", "answer", "notification", "approval_request", "approval")
 
 
-PERMISSIONS = ("read", "write", "ask", "start_task", "answer", "approve", "run_job")
+PERMISSIONS = ("read", "write", "ask", "start_task", "answer", "approve", "run_job", "research")
 
 
 # Actions no chat client can ever do, whatever config/clients.json says: this is code, not configuration. Checked first

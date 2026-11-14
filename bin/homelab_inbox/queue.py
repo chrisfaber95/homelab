@@ -1,5 +1,6 @@
 """Queue: the scheduler, run_round / finish_round, cancel, and recovery after a restart."""
 import threading
+from datetime import datetime, timezone
 import time
 from collections import Counter
 
@@ -7,7 +8,7 @@ from .briefs import plan_task, review_pr, settle_briefs
 from . import conversation
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, STATUS_NL, _cancel, _lock, _round_started
 from .helpers import first_line, gh, git, kind_of, label, log_line, notify, page_url, pr_text, refresh_cache, repo_list, repo_lock, task_cmd, title_of
-from .jobs import deliver_result, propose_skill, split_skill
+from .jobs import deliver_result, job_of_task, propose_skill, report_header, report_problems, research_run, split_skill
 from .memory import LEARN_HINT, after_round, load_memory, split_memory
 from .rounds import push_branch, stop, stream_claude, write_prompt
 from .router import revive_followups, route_task, settle_routed
@@ -115,6 +116,8 @@ def finish_round(task_id, cache, text, result, capped):
             if not t["pr_number"]:
                 task_cmd("cleanup", task_id)
             return
+        if (run := research_run(t)) and not capped:
+            return finish_research(t, run, kind, body, text, note)
         if kind == "ANTWOORD" and not capped:
             # Een vraag maakt geen commit, branch of PR; eventuele commits blijven lokaal en worden weggegooid.
             update(task_id, status="answered", answer=body, ended=now(), note=note)
@@ -122,7 +125,7 @@ def finish_round(task_id, cache, text, result, capped):
                 conversation.note("claude", "inbox", "answer", body, page_url(task_id), f"task:{task_id}")
             task_cmd("cleanup", task_id)
             if t["job"]:
-                deliver_result(JOBS.get(t["job"]), t["run_id"], body, page_url(task_id))  # alleen als het bestand dat vraagt
+                deliver_result(job_of_task(t), t["run_id"], body, page_url(task_id))  # alleen als het bestand dat vraagt
                 return  # een job meldt alleen wat de gebruiker nodig heeft; het resultaat staat op de pagina
             return notify(f"Inbox {task_id}: antwoord", body, page_url(task_id), store=False)
         if kind == "VRAAG" and not capped:
@@ -133,6 +136,10 @@ def finish_round(task_id, cache, text, result, capped):
             update(task_id, status="refused", summary=body, ended=now(), note=note)
             task_cmd("cleanup", task_id)
             return notify(f"{label(t)}: geweigerd", body, page_url(task_id))
+        if run:  # a research run that hit its limit: nothing is pushed, whatever the working copy holds
+            task_cmd("cleanup", task_id)
+            update(task_id, status="capped", ended=now(), note=f"gestopt bij {capped}" + (f"; {note}" if note else ""))
+            return notify(f"{label(t)}: gestopt bij {capped}", f"{run['mode']}-onderzoek niet afgerond", page_url(task_id))
         commits = push_branch(task_id, cache)
         if capped:
             if not t["pr_number"]:
@@ -171,6 +178,23 @@ def finish_round(task_id, cache, text, result, capped):
         log(f"taak {task_id} afronden: {e}")
         update(task_id, status="failed", ended=now(), note=f"afronden mislukt: {e}"[:500])
         notify(f"{label(t)} mislukt", str(e), page_url(task_id))
+
+
+def finish_research(t, run, kind, body, text, note):
+    """The end of a research run (H-017): the report becomes the answer, with its mode and time taken on top, and goes
+    where the question came from. Never a commit, branch or PR: nothing is pushed and the working copy is thrown away."""
+    task_id = t["id"]
+    task_cmd("cleanup", task_id)
+    if kind != "ANTWOORD":
+        update(task_id, status="failed", ended=now(), summary=(body or text)[:500],
+               note="the research run gave no report (ANTWOORD:)" + (f"; {note}" if note else ""))
+        return notify(f"{label(t)} mislukt", (body or text)[:500] or "no report", page_url(task_id))
+    started = datetime.fromisoformat(t["started"] or run["created"])
+    report = report_header(run["mode"], (datetime.now(timezone.utc) - started).total_seconds()) + "\n\n" + body
+    if problems := report_problems(body):
+        note = "; ".join(filter(None, [note, "report check: " + ", ".join(problems)]))
+    update(task_id, status="answered", answer=report, ended=now(), note=note)
+    deliver_result(job_of_task(t), t["run_id"], report, page_url(task_id))
 
 
 def answer_task(t, text, source=None):

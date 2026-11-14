@@ -59,6 +59,10 @@ def db():
         CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);""")
     if "minutes" not in {r[1] for r in conn.execute("PRAGMA table_info(job_runs)")}:
         conn.execute("ALTER TABLE job_runs ADD COLUMN minutes INTEGER")  # F-024: bespaarde minuten, bij het starten
+    # H-017: a research run keeps its mode, where its report goes and the client it came from (NULL = the page or a schedule)
+    for col in ("mode", "deliver", "source"):
+        if col not in {r[1] for r in conn.execute("PRAGMA table_info(job_runs)")}:
+            conn.execute(f"ALTER TABLE job_runs ADD COLUMN {col} TEXT")
     return conn
 
 

@@ -25,6 +25,7 @@ class AutoMerge(unittest.TestCase):
         c.commit()
         self.calls = []
         self.denied = False
+        self.actions = None  # the Actions runs of the commit; None: the token can't read those either
         github.gh, self._gh = self.fake_gh, github.gh
         github.remember_task, self._rt = lambda i: None, github.remember_task
         github.task_cmd, self._tc = lambda *a: (0, ""), github.task_cmd
@@ -41,12 +42,31 @@ class AutoMerge(unittest.TestCase):
             if self.denied:
                 raise urllib.error.HTTPError(f"https://api.github.com{p}", 403, "Forbidden", {}, None)
             return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
+        if p.endswith("/actions/runs"):
+            if self.actions is None:
+                raise urllib.error.HTTPError(f"https://api.github.com{p}", 403, "Forbidden", {}, None)
+            return {"workflow_runs": self.actions}
         return {} if method == "PUT" or p.endswith("/status") else []
 
     def test_green_pr_is_merged(self):
         github.check_pr(storage.get(42), set())
         self.assertIn("PUT", self.calls)
         self.assertEqual(storage.get(42)["status"], "merged")
+
+    def test_token_without_check_runs_reads_the_actions_runs(self):
+        self.denied = True  # a fine-grained token: 403 on check-runs
+        self.actions = [{"status": "completed", "conclusion": "success"}]
+        github.check_pr(storage.get(42), set())
+        self.assertIn("PUT", self.calls)
+        self.assertEqual(storage.get(42)["status"], "merged")
+
+    def test_failed_actions_run_is_not_merged(self):
+        self.denied = True
+        self.actions = [{"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "failure"}]
+        github.check_pr(storage.get(42), set())
+        self.assertNotIn("PUT", self.calls)
+        self.assertEqual(storage.get(42)["review_ok"], 0)
+        self.assertIn("CI failed", storage.get(42)["review"])
 
     def test_unreadable_ci_is_reported_once_and_retried(self):
         sent = []

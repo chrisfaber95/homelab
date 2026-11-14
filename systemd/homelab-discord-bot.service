@@ -1,0 +1,34 @@
+[Unit]
+Description=homelab: Discord bot (H-016), a client of the inbox conversation; connects outward only, no listening port
+After=network-online.target homelab-inbox.service
+Wants=network-online.target
+# Without the token the bot stays off: enter it once (docs/discord.md).
+ConditionPathExists=/etc/homelab/discord-bot-token
+
+[Service]
+User=discord-bot
+Group=discord-bot
+StateDirectory=homelab-discord-bot
+# DISCORD_OWNER_ID (Chris's Discord account id) lives here, not in the repo.
+EnvironmentFile=-/etc/homelab/discord-bot.env
+Environment=INBOX_URL=http://127.0.0.1:8105 SEARCH_URL=http://127.0.0.1:8019
+# Read by systemd as root; the bot only sees them under $CREDENTIALS_DIRECTORY.
+LoadCredential=discord-token:/etc/homelab/discord-bot-token
+LoadCredential=chat-token:/etc/homelab/chat-discord-token
+ExecStart=/usr/local/lib/homelab-discord-bot/venv/bin/python -E /usr/local/lib/homelab-discord-bot/bot_run.py
+Restart=always
+RestartSec=10
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

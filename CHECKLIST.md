@@ -396,7 +396,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       restart `homelab-inbox` and the rows are still there. A client token (`/etc/homelab/chat-<client>-token`) is only
       needed once the Discord bot exists; test the door with `curl -H "Authorization: Bearer <token>" 'http://127.0.0.1:8105/api/chat/entries?after=0'`.
 - [ ] H-016 Discord bot: create the Discord application and enter the token once (`docs/discord.md`), then
-      `sudo bash /var/lib/homelab/repo/scripts/26-discord-bot.sh` (account `discord-bot`, own venv with hashed
+      `sudo bash /var/lib/homelab/repo/scripts/26-discord-bot.sh` (also run by `21-inbox.sh` on every rebuild; account `discord-bot`, own venv with hashed
       discord.py, unit `homelab-discord-bot`, no port). Check: in the DM a plain question gets a cited answer with a
       **Make this a task** button; `!status` works; a message from another account or a server channel does nothing (see the
       journal); `!drafts` buttons ask for a Confirm; with approvals off on the homelab page they say so.

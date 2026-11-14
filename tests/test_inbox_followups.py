@@ -5,6 +5,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -93,6 +94,37 @@ class Followups(unittest.TestCase):
         self.assertIn("mag niet: F-019", t["pending_input"])
         self.assertIn("it is fine: Chris said so", t["pending_input"])
         self.assertEqual([self.status(i) for i in (75, 76)], ["queued", "queued"])
+
+    def test_capped_round_keeps_its_working_copy_for_continue(self):
+        storage.update(74, status="running", rounds=1, pr_number=None)
+        calls = []
+        queue.task_cmd, tc = lambda *a, **k: (calls.append(a), (0, ""))[1], queue.task_cmd
+        queue.push_branch, pb = lambda i, cache: [], queue.push_branch
+        try:
+            queue.finish_round(74, None, "", None, "80 beurten")
+            self.assertEqual(self.status(74), "capped")
+            self.assertNotIn(("cleanup", 74), calls)
+            queue.retry_task(storage.get(74))
+        finally:
+            queue.task_cmd, queue.push_branch = tc, pb
+        t = storage.get(74)
+        self.assertEqual((t["status"], t["reprepare"]), ("queued", 0))
+        self.assertIn("asked to continue it. Your working copy is as you left it", t["pending_input"])
+
+    def test_sweep_removes_only_old_capped_working_copies(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat(timespec="seconds")
+        storage.update(74, status="capped", pr_number=None, ended=old)
+        storage.update(75, status="capped", ended=storage.now())
+        storage.update(76, status="failed", ended=old)
+        calls = []
+        queue.task_cmd, tc = lambda *a, **k: (calls.append(a), (0, ""))[1], queue.task_cmd
+        queue._swept.clear()
+        try:
+            queue.sweep_capped()
+            queue.sweep_capped()  # once per task
+        finally:
+            queue.task_cmd = tc
+        self.assertEqual(calls, [("has", 74), ("cleanup", 74)])
 
     def test_retry_note_of_a_task_that_never_ran_goes_in_its_text(self):
         storage.update(74, status="failed")

@@ -30,7 +30,9 @@ echo "== Tokens and settings in /etc/homelab"
 install -d -m 755 /etc/homelab
 # The inbox's token for the client `discord` (config/clients.json): the inbox reads it, the bot gets it as a credential.
 [[ -s /etc/homelab/chat-discord-token ]] || ( umask 077; openssl rand -hex 32 > /etc/homelab/chat-discord-token )
-chown root:inbox /etc/homelab/chat-discord-token
+# The inbox door (service homelab-inbox, account inbox-runner) compares the bot's token with this file, so that
+# account's group must be able to read it; otherwise every call of the bot gets a 401.
+chown root:inbox-runner /etc/homelab/chat-discord-token
 chmod 640 /etc/homelab/chat-discord-token
 if [[ ! -e /etc/homelab/discord-bot.env ]]; then
   install -m 600 -o root -g root /dev/null /etc/homelab/discord-bot.env
@@ -45,7 +47,8 @@ systemctl enable homelab-discord-bot.service
 
 echo "== Check"
 "$DEST/venv/bin/python" -c "import discord, sys; print('discord.py', discord.__version__)"
-[[ $(stat -c %a:%U /etc/homelab/chat-discord-token) == 640:root ]]
+[[ $(stat -c %a:%U:%G /etc/homelab/chat-discord-token) == 640:root:inbox-runner ]]
+sudo -u inbox-runner test -r /etc/homelab/chat-discord-token
 if grep -Eq '^DISCORD_OWNER_ID=[0-9]{5,}$' /etc/homelab/discord-bot.env && [[ -s /etc/homelab/discord-bot-token ]]; then
   systemctl restart homelab-discord-bot.service
   sleep 3

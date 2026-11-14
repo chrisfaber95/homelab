@@ -66,6 +66,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-019 root changes, ntfy | `bin/homelab-admin`, `changes/`, `scripts/19-admin.sh` | `config/machine.conf`, `config/admin.conf` | `docs/admin.md` |
 | F-020 monitor, overview, backups | `bin/homelab-monitor`, `bin/homelab-backup`, `scripts/20-monitor.sh` | `config/backup.conf`, `config/backup.list` | `docs/monitor.md` |
 | F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
+| H-016 conversation (store, client permissions, loopback door) | `bin/homelab_inbox/conversation.py` | `config/clients.json` | `docs/conversation.md` |
 | F-022 jobs and skills | `bin/homelab_inbox/jobs.py` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
 | H-012 search (index, query and answer, MCP tool, Search tab) | `search/`, `bin/homelab-search`, `bin/homelab-search-mcp`, `scripts/24-search.sh`, `systemd/homelab-search-*`, `bin/homelab_inbox/search.py` (tab proxy) | `config/search.json` | `docs/search.md` |
@@ -76,7 +77,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 
 `bin/homelab-inbox` only parses the command line and imports the modules in `bin/homelab_inbox/` (installed next to it
 by `scripts/21-inbox.sh`). Layers, each importing only from the ones above it: `config` (settings, shared state),
-`storage` (SQLite), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
+`storage` (SQLite), `conversation` (H-016), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
 round), `router`, `briefs` (H-001), `search` (Search tab proxy), `forge` (Start/Stop proxy), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
 `overview` (page data), `pages` (HTML), `server` (HTTP handler, serve). No import cycles: keep it that way.
 

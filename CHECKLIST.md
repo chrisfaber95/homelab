@@ -392,3 +392,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       `http://homelab.tail4eb878.ts.net:8105/search`: ask a question, tick **Hard question** once, filter on a project,
       tap a citation, tap **Bad answer** and see it under caller `search` in `llm-route usage`. `bin/homelab-exposure`
       passes on the box (now with the router, search API and page); `Test-NetConnection <lan-ip> -Port 8105` is `False`.
+- [ ] H-016 conversation: after the merge root re-runs `21-inbox.sh` (installs `config/clients.json`). Open a task from
+      the page and see it, its question and the notification in `sqlite3 /var/lib/homelab-inbox/inbox.db 'select id,author,client,kind from conversation'`;
+      restart `homelab-inbox` and the rows are still there. A client token (`/etc/homelab/chat-<client>-token`) is only
+      needed once the Discord bot exists; test the door with `curl -H "Authorization: Bearer <token>" 'http://127.0.0.1:8105/api/chat/entries?after=0'`.

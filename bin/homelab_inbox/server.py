@@ -7,6 +7,7 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from . import conversation
 from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
@@ -54,7 +55,50 @@ class Handler(BaseHTTPRequestHandler):
             self.send(403, page("geweigerd", "<p>Alleen vanaf je eigen apparaten op het tailnet.</p>"))
         return ok
 
+    def chat_door(self, method):
+        """The narrow door for chat clients (docs/conversation.md): loopback only, only /api/chat/entries, a client
+        token per request, and the client's permissions from config/clients.json. Everything else stays closed to the
+        box itself."""
+        url = urllib.parse.urlsplit(self.path)
+        if url.path != "/api/chat/entries":
+            return False
+        if self.client_address[0].removeprefix("::ffff:") not in ("127.0.0.1", "::1"):
+            self.send_upstream(403, {"error": "loopback only"})
+            return True
+        client = conversation.authenticate(self.headers.get("Authorization"))
+        if not client:
+            self.send_upstream(401, {"error": "unknown client or token"})
+            return True
+        if method == "GET":
+            q = urllib.parse.parse_qs(url.query)
+            try:
+                entries = conversation.client_read(client, int((q.get("after") or ["0"])[0]),
+                                                   int((q.get("limit") or ["200"])[0]))
+            except ValueError:
+                self.send_upstream(400, {"error": "after and limit are numbers"})
+                return True
+            if entries is None:
+                self.send_upstream(403, {"error": "refused: no permission 'read'"})
+            else:
+                self.send_upstream(200, {"entries": entries, "next": entries[-1]["id"] if entries else
+                                         int((q.get("after") or ["0"])[0] or 0)})
+            return True
+        try:
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 * 1024)))
+            kind, text, ref = str(body.get("kind", "message")), str(body["text"]), body.get("ref")
+            entry = conversation.client_append(client, kind, text, str(ref)[:80] if ref else None)
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            self.send_upstream(400, {"error": f"bad request: {e}"})
+            return True
+        if entry is None:
+            self.send_upstream(403, {"error": f"refused: {client} may not write '{kind}'"})
+        else:
+            self.send_upstream(200, {"entry": entry})
+        return True
+
     def do_GET(self):
+        if self.chat_door("GET"):
+            return
         if not self.guard():
             return
         url = urllib.parse.urlsplit(self.path)
@@ -127,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
 
     def do_POST(self):
+        if self.chat_door("POST"):
+            return
         if not self.guard():
             return
         # Tegen CSRF: het formulier moet van deze pagina komen (Origin) en het token bevatten.
@@ -151,6 +197,7 @@ class Handler(BaseHTTPRequestHandler):
                 cur = c.execute("INSERT INTO tasks (repo, text, status, created, session) VALUES (?,?,?,?,?)",
                                 (repo, text[:8000], "queued", now(), str(uuid.uuid4())))
                 tid = cur.lastrowid
+            conversation.note("chris", "page", "message", f"[{repo}] {text}", page_url(tid), f"task:{tid}")
             return self.send(303, "", location=f"/task/{tid}")
         if m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})/(build|park)", self.path):
             try:
@@ -158,6 +205,9 @@ class Handler(BaseHTTPRequestHandler):
                     set_brief_status(m.group(1), "parked", f"parked on the homelab page by {self.who}")
                     return self.send(303, "", location="/briefs")
                 tid = start_build(m.group(1), unattended=form.get("mode") == "without-me", who=self.who)
+                conversation.note("chris", "page", "approval", f"Approved {m.group(1)} and started the build"
+                                  + (" without me" if form.get("mode") == "without-me" else ""), page_url(tid),
+                                  f"brief:{m.group(1)}")
                 return self.send(303, "", location=f"/task/{tid}")
             except Exception as ex:
                 return self.send(400, briefs_page(error=str(ex)))
@@ -179,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
         t = get(int(m.group(1))) if m else None
         if not t:
             return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        if m.group(2) == "answer" and t["status"] in ("waiting", "answered") and form.get("answer", "").strip():
+            conversation.note("chris", "page", "message", form["answer"], page_url(t["id"]), f"task:{t['id']}")
         if m.group(2) == "answer" and t["status"] == "waiting" and form.get("answer", "").strip():
             update(t["id"], status="queued", answer=None, pending_input=(
                 f"Antwoord van de gebruiker op je vraag:\n\n{form['answer'].strip()[:8000]}\n\n"

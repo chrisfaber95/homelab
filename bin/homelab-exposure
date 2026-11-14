@@ -76,6 +76,36 @@ else
   report FAIL "exposure:inbox:guard" "the inbox handler has no guard() owner check"
 fi
 svc_ports=("$router_port" "$search_port" "$inbox_port")
+# --- H-018 kitt: the adapter listens on loopback only; the tailnet port is the gate in the inbox, which answers only the
+#     owner's own devices (Access.allowed) and sits on the Tailscale address, inside 8100-8199 (ufw: tailscale0 only) ---
+kitt_gate_port=$(sed -n 's/^KITT_GATE_PORT=//p' "$REPO/config/inbox.conf" | tr -d '"'); kitt_gate_port=${kitt_gate_port:-8121}
+kitt_gate_host=$(sed -n 's/^KITT_GATE_HOST=//p' "$REPO/config/inbox.conf" | tr -d '"')
+kitt_unit="$REPO/deploy/kitt.service"
+kitt_port=$(sed -n 's/^Environment=KITT_PORT=//p' "$kitt_unit" 2>/dev/null)
+if [[ $(sed -n 's/^Environment=KITT_HOST=//p' "$kitt_unit" 2>/dev/null) == 127.0.0.1 && $kitt_port =~ ^81[0-9][0-9]$ ]] \
+   && ! grep -qE '^Environment=KITT_HOST=(0\.0\.0\.0|::|\*)' "$kitt_unit"; then
+  report OK "exposure:kitt:adapter" "deploy/kitt.service: the adapter listens on 127.0.0.1:$kitt_port only"
+else
+  report FAIL "exposure:kitt:adapter" "deploy/kitt.service must set KITT_HOST=127.0.0.1 and a KITT_PORT in 8100-8199"
+fi
+if [[ $kitt_gate_host == "$TS_IP" && $kitt_gate_port =~ ^81[0-9][0-9]$ && $kitt_gate_port != "$kitt_port" ]]; then
+  report OK "exposure:kitt:gate" "the gate listens on $kitt_gate_host:$kitt_gate_port only (KITT_GATE_HOST in config/inbox.conf)"
+else
+  report FAIL "exposure:kitt:gate" "KITT_GATE_HOST must be $TS_IP and KITT_GATE_PORT in 8100-8199, not the adapter's port"
+fi
+if grep -q 'Access.allowed' "$REPO/bin/homelab_inbox/gate.py" \
+   && grep -qE 'ufw allow in on tailscale0 to any port 8100:8199' "$REPO/scripts/18-projects.sh"; then
+  report OK "exposure:kitt:filter" "the gate runs the homelab page's owner check; 8100-8199 is open on tailscale0 only"
+else
+  report FAIL "exposure:kitt:filter" "gate.py has no Access.allowed check, or 18-projects.sh has no tailscale0-only rule for 8100-8199"
+fi
+if grep -q 'peer_uid' "$REPO/bin/homelab_inbox/kitt.py" && grep -q 'self.kitt_door' "$REPO/bin/homelab_inbox/server.py"; then
+  report OK "exposure:kitt:door" "the inbox's kitt door checks the connection's account and Chris's identity"
+else
+  report FAIL "exposure:kitt:door" "the inbox's kitt door has no account check"
+fi
+ports+=("$kitt_gate_port")
+svc_ports+=("$kitt_gate_port")
 
 while IFS="|" read -r svc ip port; do
   name="exposure:$svc:$port"
@@ -113,6 +143,17 @@ if (( live )); then
       fi
     fi
   done
+fi
+
+if (( live )) && [[ $kitt_port =~ ^[0-9]+$ ]]; then
+  adapter=$(ss -Htln "sport = :$kitt_port" | awk '{print $4}')
+  if [[ -z $adapter ]]; then
+    report FAIL "exposure:live:$kitt_port" "nothing listens on $kitt_port (is kitt running?)"
+  elif [[ $(grep -v -x -F "127.0.0.1:$kitt_port" <<<"$adapter" || true) ]]; then
+    report FAIL "exposure:live:$kitt_port" "kitt's adapter listens on $(paste -sd' ' <<<"$adapter"), expected only 127.0.0.1:$kitt_port"
+  else
+    report OK "exposure:live:$kitt_port" "kitt's adapter listens on 127.0.0.1:$kitt_port only"
+  fi
 fi
 
 if (( live )) && [[ -n ${lan:-} && $lan != "$TS_IP" ]]; then

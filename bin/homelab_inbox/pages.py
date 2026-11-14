@@ -505,6 +505,20 @@ def discord_html():
             + row("discord_approvals", "Approvals from Discord", "build buttons and their confirm") + '</section>')
 
 
+def kitt_html():
+    """The switch for kitt (H-018): off, and the app shows itself as disconnected. What it may do is its permission list in
+    config/clients.json."""
+    on = conversation.switch("kitt")
+    allowed = conversation.clients().get("kitt", set())
+    return ('<section id="kitt" class="sec-discord"><div class="section-head"><h2>Kitt</h2>'
+            '<p class="note">the cockpit app</p></div><div class="switch-row"><div><strong>Kitt</strong> '
+            '<span class="note">chat, agents, dashboard, logs and approvals in the app</span><br>'
+            f'<span id="switch-kitt" role="status">{"On" if on else "Off"}</span>'
+            f' <span class="note">may: {html.escape(", ".join(sorted(allowed)) or "nothing")}</span></div>'
+            + form(f"/discord/kitt/{'off' if on else 'on'}", "", "Switch off" if on else "Switch on", ghost=on)
+            + '</div></section>')
+
+
 def overview_page():
     h = health()
     sentence, cls = status_sentence(h)
@@ -525,7 +539,7 @@ def overview_page():
             f'</div><div>'
             f'<section class="sec-services"><div class="section-head"><h2>Services</h2><p class="note">only over '
             f'Tailscale</p></div>{services_html()}</section>'
-            f'{forge_html()}{discord_html()}'
+            f'{forge_html()}{discord_html()}{kitt_html()}'
             f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
             f'{usage_html()}</section>'
             f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'

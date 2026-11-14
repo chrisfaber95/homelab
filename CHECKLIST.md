@@ -373,6 +373,10 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 
 - [ ] After the merge, root runs `18-projects.sh` (and `25-forge.sh`). Then, once, by hand as the forge account: install the Claude CLI, `claude` login and `gh auth login` (docs/projects.md, forge). `homelab-deploy status` shows forge; the homelab page shows a Forge block that says Stopped; Start runs it, Stop ends it, and `sudo systemctl restart homelab-app-forge` (via homelab-admin) brings it back Stopped. From Windows with Tailscale off `Test-NetConnection <lan-ip> -Port 8120` is `False`.
 
+## H-018: kitt
+
+- [ ] After the merge, `homelab-admin` runs `18-projects.sh` (the unit) and `21-inbox.sh` (the gate and the door). `homelab-deploy status` shows kitt; `systemctl is-enabled homelab-app-kitt` says enabled (it also starts again after a reboot). `http://homelab:8121` opens from your phone and shows Kitt under Services on the homelab page. From the LAN address (`curl http://<lan-ip>:8121/`) there is no answer, and from a device of another tailnet user (or from the box: `curl http://100.85.70.34:8121/`) a 403. `bin/homelab-exposure` passes. Take `approve` out of kitt in `config/clients.json`: the bell lists, its buttons say approvals are off. Switch Kitt off on the homelab page: the app shows it is disconnected. `docs/kitt.md`.
+
 ## H-012: search index (index side)
 
 - [ ] After the merge: `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (copies the inbox transcripts to

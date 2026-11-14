@@ -113,7 +113,7 @@ def refusals(limit=100):
                                            (limit,)).fetchall()]
 
 
-SWITCHES = ("discord", "discord_approvals")  # on the homelab page; stored in the kv table, read on every request
+SWITCHES = ("discord", "discord_approvals", "kitt")  # on the homelab page; stored in the kv table, read on every request
 
 
 def switch(name):
@@ -138,7 +138,10 @@ def state():
 
 
 def switched_off(client, action=None):
-    """Why a switch blocks this client (and action), or None. Only the Discord client is behind the switches."""
+    """Why a switch blocks this client (and action), or None. Discord and kitt are behind switches; kitt's approvals
+    are governed by its permission list alone (config/clients.json)."""
+    if client == "kitt":
+        return None if switch("kitt") else "Kitt is switched off on the homelab page"
     if client != "discord":
         return None
     if not switch("discord"):

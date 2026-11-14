@@ -105,4 +105,5 @@ Scrubbing alone takes 0.08 ms for 1000 characters; the rest is the SQLite write 
 ntfy POST itself (an HTTP call with a 10 s timeout) and notifications that come a few times per task, 8 ms is not
 noticeable, so nothing is made asynchronous. The test fails if the added median exceeds 50 ms.
 
-The Discord bot, a client of this conversation: `docs/discord.md`.
+The Discord bot, a client of this conversation: `docs/discord.md`. Kitt, the cockpit app, is a client too, with its own
+door (no token; recognised by its service account) and a switch on the homelab page: `docs/kitt.md`.

@@ -28,7 +28,8 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
   Docker gaat niet om ufw heen. Bind bij voorkeur aan het Tailscale-adres (`"100.85.70.34:8109:3000"`).
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
-  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114), 8120 forge (Tailscale address).
+  the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114), 8120 forge (Tailscale address),
+  8121 kitt (the gate in the inbox, Tailscale address; the adapter itself on 127.0.0.1:8122, `docs/kitt.md`).
   Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next
@@ -193,6 +194,14 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
   a missing field only empties its part of the row.
 - **After a rebuild**: run `scripts/18-projects.sh`; the account, config and unit come back, the code comes from the
   deploy, and a restore brings the state and logins back. Without a restore, do the logins again.
+
+## kitt (H-018)
+
+The OpenJarvis frontend in KITT colours (`chrisfaber95/kitt`, private): a cockpit for the box. `service` repo:
+`homelab-app-kitt.service` (`deploy/kitt.service`) runs `npm start`, the adapter on `127.0.0.1:8122`. The address is
+**`http://homelab:8121`**, the gate in the inbox, which answers only your own tailnet devices. The app keeps no state,
+so there is nothing to back up and nothing to do after a rebuild. All of it, the permission list and the switch:
+`docs/kitt.md`.
 
 ## Herbouwen op een lege box
 

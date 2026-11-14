@@ -6,7 +6,7 @@ import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import chat, conversation
+from . import chat, conversation, gate, kitt
 from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
@@ -107,6 +107,33 @@ class Handler(BaseHTTPRequestHandler):
             self.send_upstream(200, {"entry": entry})
         return True
 
+    def kitt_door(self, method):
+        """kitt's adapter (H-018, docs/kitt.md): loopback only, and only when the connection is owned by kitt's own
+        service account and carries Chris's identity from the gate. Anything else with kitt's header is refused here;
+        a call without it falls through to the normal check, which refuses the box itself."""
+        if not self.headers.get("X-Homelab-Client"):
+            return False
+        url = urllib.parse.urlsplit(self.path)
+        if why := kitt.identify(self.client_address, self.server.server_address[1], self.headers, Access.owner):
+            log(f"kitt door: refused {method} {url.path} ({why})")
+            self.send_upstream(403, {"error": f"refused: {why}"})
+            return True
+        try:
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 * 1024)) or "{}") \
+                if method == "POST" else {}
+            if not isinstance(body, dict):
+                raise ValueError("not an object")
+        except ValueError as e:
+            self.send_upstream(400, {"error": f"bad request: {e}"})
+            return True
+        try:
+            result = kitt.route(method, url.path, urllib.parse.parse_qs(url.query), body)
+        except Exception as e:  # noqa: BLE001
+            log(f"kitt door {method} {url.path}: {e}")
+            result = (500, {"error": "the action failed; see the inbox journal"})
+        self.send_upstream(*(result or (404, {"error": "not a call kitt may make"})))
+        return True
+
     def chat_action(self, client, method):
         """POST /api/chat/action {"action": ..., ...}: the explicit actions of chat.py, each checked against the
         client's permissions there. Free text never reaches this: the client names the action."""
@@ -136,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             return 500, {"error": "the action failed; see the inbox journal"}
 
     def do_GET(self):
-        if self.chat_door("GET"):
+        if self.kitt_door("GET") or self.chat_door("GET"):
             return
         if not self.guard():
             return
@@ -212,7 +239,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
 
     def do_POST(self):
-        if self.chat_door("POST"):
+        if self.kitt_door("POST") or self.chat_door("POST"):
             return
         if not self.guard():
             return
@@ -224,10 +251,10 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
         if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
             return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
-        if m := re.fullmatch(r"/discord/(discord|discord_approvals)/(on|off)", self.path):
+        if m := re.fullmatch(r"/discord/(discord|discord_approvals|kitt)/(on|off)", self.path):
             conversation.set_switch(m.group(1), m.group(2) == "on")
             log(f"switch {m.group(1)} {m.group(2)} by {self.who}")
-            return self.send(303, "", location="/#discord")
+            return self.send(303, "", location="/#kitt" if m.group(1) == "kitt" else "/#discord")
         if m := re.fullmatch(r"/api/forge/(start|stop)", self.path):
             return self.send_upstream(*forge.control(m.group(1), self.who))
         if self.path == "/api/search/ask":
@@ -434,6 +461,7 @@ def serve():
     recover()
     load_memory()
     Access.init()
+    gate.start()
     for target in (scheduler, poll_github, job_scheduler):
         threading.Thread(target=target, daemon=True).start()
     srv = Server(("::", int(CONF["INBOX_PORT"])), Handler)

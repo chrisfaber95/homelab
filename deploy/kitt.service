@@ -1,0 +1,34 @@
+# homelab: kitt (H-018), the OpenJarvis frontend in KITT colours: a cockpit for the box. Tailnet only.
+# The adapter listens on loopback only (127.0.0.1:8122; it refuses a wildcard). The tailnet side, 100.85.70.34:8121, is the
+# gate in homelab-inbox (bin/homelab_inbox/gate.py): it answers only Chris's own devices (the same check as the homelab
+# page) and forwards to this unit, so another tailnet user, the LAN and the box itself are refused. ufw already opens
+# 8100-8199 on tailscale0 only. The app keeps no data: no StateDirectory, nothing to back up.
+# The adapter calls the inbox door on loopback (KITT_BOX_URL); the inbox recognises it by this unit's account.
+# /etc/kitt/env (optional, no secrets) may override the variables below.
+[Unit]
+Description=kitt (homelab, H-018)
+After=network-online.target tailscaled.service homelab-inbox.service
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+RuntimeDirectory=kitt
+WorkingDirectory=/srv/homelab/releases/kitt/current
+Environment=KITT_HOST=127.0.0.1
+Environment=KITT_PORT=8122
+Environment=KITT_BOX_URL=http://127.0.0.1:8105
+Environment=KITT_ROUTER_URL=http://127.0.0.1:8018
+Environment=KITT_CLIENT_ID=kitt
+Environment=NODE_ENV=production
+Environment=HOME=/run/kitt
+EnvironmentFile=-/etc/kitt/env
+ExecStart=/usr/bin/npm start --silent
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -18,14 +18,24 @@ ROOT = Path(__file__).resolve().parent.parent
 HOME = tempfile.mkdtemp()
 TOKENS = tempfile.mkdtemp()
 os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
-                  CHAT_TOKEN_DIR=TOKENS, INBOX_ALLOW_ALL="1")
-os.environ["CLIENTS_JSON"] = json.dumps({"clients": {
+                  INBOX_ALLOW_ALL="1")
+CLIENTS = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer", "approve"]},
     "jarvis": {"permissions": ["read"]}}})
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import conversation, helpers, pages, queue, server, storage  # noqa: E402
 
 LONG = "A long result sentence. " * 400  # about 9000 characters: far beyond ntfy's 300 and one Discord message
+
+
+def setUpModule():  # the clients and tokens of this file only: other test files set their own in the same process
+    global _env
+    _env = mock.patch.dict(os.environ, CLIENTS_JSON=CLIENTS, CHAT_TOKEN_DIR=TOKENS)
+    _env.start()
+
+
+def tearDownModule():
+    _env.stop()
 
 
 def last():

@@ -314,7 +314,7 @@ def run_job(run_id, job):
     except Exception as e:
         log(f"job {job['name']}: {e}")
         update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
-        notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+        notify(f"Job {job['name']} mislukt", str(e), job_url(job["name"]))
 
 
 def gather(job, run_id):
@@ -422,7 +422,7 @@ def run_local(run_id, job):
         else:
             log_line(key, "error", str(e))
             update_run(run_id, status="failed", ended=now(), note=str(e)[:500])
-            notify(f"Job {job['name']} mislukt", str(e)[:300], job_url(job["name"]))
+            notify(f"Job {job['name']} mislukt", str(e), job_url(job["name"]))
     finally:
         _cancel_runs.discard(run_id)
 
@@ -556,10 +556,10 @@ def propose_skill(t, proposal):
         with _lock, db() as c:
             c.execute("INSERT INTO skill_prs (name, task_id, pr_url, created) VALUES (?,?,?,?)",
                       (name, t["id"], pr["html_url"], now()))
-        notify(f"Skill-voorstel: {name}", desc.strip()[:300], pr["html_url"])
+        notify(f"Skill-voorstel: {name}", desc.strip(), pr["html_url"])
     except Exception as e:
         log(f"skill-voorstel {name}: {e}")
-        notify(f"Skill-voorstel {name} mislukt", str(e)[:300], page_url(t["id"]))
+        notify(f"Skill-voorstel {name} mislukt", str(e), page_url(t["id"]))
 
 
 DRAFT_SYSTEM = """Je stelt een job-bestand op voor de homelab-inbox (F-022). Je hebt geen tools; je antwoordt alleen met

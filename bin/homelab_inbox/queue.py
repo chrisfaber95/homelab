@@ -90,7 +90,7 @@ def run_round(task_id):
         update(task_id, status="failed", ended=now(), note=str(e)[:500])
         if not t["pr_number"]:
             task_cmd("cleanup", task_id)
-        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+        notify(f"{label(t)} mislukt", str(e), page_url(task_id))
         return after_round(task_id, [])
     update(task_id, restarts=0)
     text, blocks = split_memory((result or {}).get("result") or "")
@@ -123,15 +123,15 @@ def finish_round(task_id, cache, text, result, capped):
             task_cmd("cleanup", task_id)
             if t["job"]:
                 return  # een job meldt alleen wat de gebruiker nodig heeft; het resultaat staat op de pagina
-            return notify(f"Inbox {task_id}: antwoord", body[:300], page_url(task_id), store=False)
+            return notify(f"Inbox {task_id}: antwoord", body, page_url(task_id), store=False)
         if kind == "VRAAG" and not capped:
             update(task_id, status="waiting", question=body, note=note)
             conversation.note("claude", "inbox", "question", body, page_url(task_id), f"task:{task_id}")
-            return notify(f"{label(t)}: vraag", body[:300], page_url(task_id), store=False)
+            return notify(f"{label(t)}: vraag", body, page_url(task_id), store=False)
         if kind == "GEWEIGERD" and not capped:
             update(task_id, status="refused", summary=body, ended=now(), note=note)
             task_cmd("cleanup", task_id)
-            return notify(f"{label(t)}: geweigerd", body[:300], page_url(task_id))
+            return notify(f"{label(t)}: geweigerd", body, page_url(task_id))
         commits = push_branch(task_id, cache)
         if capped:
             if not t["pr_number"]:
@@ -147,14 +147,14 @@ def finish_round(task_id, cache, text, result, capped):
                 task_cmd("cleanup", task_id)
             update(task_id, status="failed", ended=now(), summary=body or text[:500],
                    note="Claude gaf geen KLAAR/ANTWOORD/VRAAG en maakte geen commits" + (f"; {note}" if note else ""))
-            return notify(f"{label(t)} mislukt", (body or text)[:300], page_url(task_id))
+            return notify(f"{label(t)} mislukt", (body or text), page_url(task_id))
         slug = repo_list()[t["repo"]]
         summary = body or text[:500]
         if t["pr_number"]:
             update(task_id, status="pr_open", summary=summary, ended=now(), note=note, review=None)
             if t["brief"]:  # H-001: the reviewer notifies (or sends it back once) instead
                 return threading.Thread(target=review_pr, args=(task_id, cache), daemon=True).start()
-            return notify(f"{label(t)}: PR #{t['pr_number']} bijgewerkt", summary[:300], t["pr_url"])
+            return notify(f"{label(t)}: PR #{t['pr_number']} bijgewerkt", summary, t["pr_url"])
         pr = gh("POST", f"/repos/{slug}/pulls", {
             "title": f"{title_of(t)}"[:100], "head": f"inbox/{task_id}", "base": "main",
             "body": f"{summary}\n\n**Taak** (via de homelab-inbox, #{task_id}):\n> " + pr_text(t).replace("\n", "\n> ")
@@ -165,11 +165,11 @@ def finish_round(task_id, cache, text, result, capped):
                ended=now(), last_comment_at=now(), note=note, review=None)
         if t["brief"]:
             return threading.Thread(target=review_pr, args=(task_id, cache), daemon=True).start()
-        notify(f"{label(t)}: PR #{pr['number']}", summary[:300], pr["html_url"])
+        notify(f"{label(t)}: PR #{pr['number']}", summary, pr["html_url"])
     except Exception as e:
         log(f"taak {task_id} afronden: {e}")
         update(task_id, status="failed", ended=now(), note=f"afronden mislukt: {e}"[:500])
-        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+        notify(f"{label(t)} mislukt", str(e), page_url(task_id))
 
 
 def cancel_task(t):

@@ -11,6 +11,7 @@ import uuid
 import yaml
 
 from .config import ACCEPTABLE, BRIEF, CONF, HOME, NEW_REPOS, SETUP_PATHS, _cancel, _lock
+from . import conversation
 from .helpers import NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, task_cmd
 from .router import children, repo_profiles
 from .storage import db, get, log, now, update
@@ -275,7 +276,8 @@ def plan_task(task_id):
         kind, value, manual = parse_plan(result.get("result") or "", repos, limit)
         if kind == "question":
             update(task_id, status="waiting", question=value)
-            return notify(f"{label(t)}: question about {b['id']}", value[:300], page_url(task_id))
+            conversation.note("claude", "inbox", "question", value, page_url(task_id), f"task:{task_id}")
+            return notify(f"{label(t)}: question about {b['id']}", value, page_url(task_id), store=False)
         ids = {}
         with _lock, db() as c:
             for v in value:
@@ -294,7 +296,7 @@ def plan_task(task_id):
     except Exception as e:
         log(f"taak {task_id}: planner: {e}")
         update(task_id, status="failed", ended=now(), note=str(e)[:500])
-        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+        notify(f"{label(t)} mislukt", str(e), page_url(task_id))
     finally:
         shutil.rmtree(share, ignore_errors=True)
 
@@ -401,7 +403,7 @@ def review_pr(task_id, cache):
     parent = get(t["parent"]) if t["parent"] else None
     if parent and parent["unattended"]:
         verdict += ". Build without me: this PR waits for you" + (" (homelab)" if t["repo"] in NEVER_SELF_MERGE else "")
-    notify(f"{label(t)}: PR #{t['pr_number']}", f"{t['summary'] or ''}\n{verdict}"[:300], t["pr_url"])
+    notify(f"{label(t)}: PR #{t['pr_number']}", f"{t['summary'] or ''}\n{verdict}", t["pr_url"])
 
 
 def handoff(parent):
@@ -466,4 +468,4 @@ def settle_briefs():
         except Exception as e:
             log(f"taak {p['id']}: handoff: {e}")
             update(p["id"], handoff=f"failed: {e}"[:300])
-            notify(f"{label(p)}: handoff failed", str(e)[:300], page_url(p["id"]))
+            notify(f"{label(p)}: handoff failed", str(e), page_url(p["id"]))

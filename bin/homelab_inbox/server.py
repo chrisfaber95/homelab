@@ -60,7 +60,7 @@ class Handler(BaseHTTPRequestHandler):
         token per request, and the client's permissions from config/clients.json. Everything else stays closed to the
         box itself."""
         url = urllib.parse.urlsplit(self.path)
-        if url.path != "/api/chat/entries":
+        if url.path not in ("/api/chat/entries", "/api/chat/state"):
             return False
         if self.client_address[0].removeprefix("::ffff:") not in ("127.0.0.1", "::1"):
             self.send_upstream(403, {"error": "loopback only"})
@@ -68,6 +68,15 @@ class Handler(BaseHTTPRequestHandler):
         client = conversation.authenticate(self.headers.get("Authorization"))
         if not client:
             self.send_upstream(401, {"error": "unknown client or token"})
+            return True
+        if url.path == "/api/chat/state":  # any authenticated client may ask; clients poll it to see the switches
+            if method != "GET":
+                self.send_upstream(405, {"error": "GET only"})
+            else:
+                self.send_upstream(200, conversation.state())
+            return True
+        if why := conversation.switched_off(client):  # not logged as a refusal: a stopped client polls
+            self.send_upstream(403, {"error": f"refused: {why}", **conversation.state()})
             return True
         if method == "GET":
             q = urllib.parse.parse_qs(url.query)
@@ -183,6 +192,10 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
         if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
             return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
+        if m := re.fullmatch(r"/discord/(discord|discord_approvals)/(on|off)", self.path):
+            conversation.set_switch(m.group(1), m.group(2) == "on")
+            log(f"switch {m.group(1)} {m.group(2)} by {self.who}")
+            return self.send(303, "", location="/#discord")
         if m := re.fullmatch(r"/api/forge/(start|stop)", self.path):
             return self.send_upstream(*forge.control(m.group(1), self.who))
         if self.path == "/api/search/ask":

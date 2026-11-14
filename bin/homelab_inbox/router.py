@@ -6,6 +6,7 @@ import shutil
 import uuid
 
 from .config import ACCEPTABLE, ACTIVE, CONF, HOME, STATUS_NL, _cancel, _lock
+from . import conversation
 from .helpers import first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
 from .memory import remember_task
 from .storage import db, get, log, now, update
@@ -111,7 +112,8 @@ def route_task(task_id):
                                     + ". Welke houd ik, of splits je het zelf?")
         if kind == "vraag":
             update(task_id, status="waiting", question=value)
-            return notify(f"{label(t)}: vraag", value[:300], page_url(task_id))
+            conversation.note("claude", "inbox", "question", value, page_url(task_id), f"task:{task_id}")
+            return notify(f"{label(t)}: vraag", value, page_url(task_id), store=False)
         ids = {}
         with _lock, db() as c:
             for v in value:
@@ -128,7 +130,7 @@ def route_task(task_id):
     except Exception as e:
         log(f"taak {task_id}: router: {e}")
         update(task_id, status="failed", ended=now(), note=str(e)[:500])
-        notify(f"{label(t)} mislukt", str(e)[:300], page_url(task_id))
+        notify(f"{label(t)} mislukt", str(e), page_url(task_id))
     finally:
         shutil.rmtree(share, ignore_errors=True)
 
@@ -219,7 +221,7 @@ def settle_routed():
                          + (f", PR #{k['pr_number']} {k['pr_url']}" if k["pr_url"] else "") + (f" - {what}" if what else ""))
         summary = "\n".join(lines)
         update(p["id"], ended=now(), summary=summary)
-        notify(f"{label(p)}: klaar", summary[:300], page_url(p["id"]))
+        notify(f"{label(p)}: klaar", summary, page_url(p["id"]))
         try:
             remember_task(p["id"])
         except Exception as e:

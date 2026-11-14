@@ -26,7 +26,9 @@ Tests: `tests/test_discord_bot.py` (a fake Discord layer, no network).
   found". Under it is a **Make this a task** button (a task on `auto`). Nothing decides by itself that text is a task. The
   question is also appended to the conversation as a `question` entry.
 - **Commands** (`!` prefix or slash): `task <repo|auto> <text>`, `status`, `jobs`, `run <job>` (slash: `/runjob`),
-  `drafts`, `approve <brief> [without-me]`. A reply to a message from Claude's question continues that task. A message
+  `drafts`, `approve <brief> [without-me]`, `research [quick|deep] <question>` (slash: `/research` with a mode
+  choice; quick is the default). It starts one read-only Claude run (counts against the daily cap for Claude jobs); the
+  report with its sources arrives later as a relayed conversation entry. A reply to a message from Claude's question continues that task. A message
   like "approve H-016" is a question and starts nothing.
 - **Approvals**: `!drafts` shows Approve & build and Approve & build without me as buttons; each (or the command) only asks
   the inbox for a confirmation, then shows a **Confirm** button that expires (`CONFIRM_TTL_SECONDS`, default 5 min). Only

@@ -67,6 +67,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-020 monitor, overview, backups | `bin/homelab-monitor`, `bin/homelab-backup`, `scripts/20-monitor.sh` | `config/backup.conf`, `config/backup.list` | `docs/monitor.md` |
 | F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
 | H-016 conversation (store, client permissions, loopback door) | `bin/homelab_inbox/conversation.py` | `config/clients.json` | `docs/conversation.md` |
+| H-018 kitt (cockpit app: unit, gate on the tailnet, door for its adapter) | `deploy/kitt.service`, `bin/homelab_inbox/{gate,kitt}.py` | `config/clients.json` (client `kitt`), `config/inbox.conf` (`KITT_*`) | `docs/kitt.md` |
 | H-016 Discord bot (separate service, own account and venv, outward only) | `discord-bot/` (`bot_core.py` behaviour, `bot_run.py` discord.py glue, `requirements.txt` with hashes), `scripts/26-discord-bot.sh`, `systemd/homelab-discord-bot.service` | `/etc/homelab/discord-bot.env` (not in the repo) | `docs/discord.md` |
 | F-022 jobs and skills, H-017 catalogue (`agents/`) | `bin/homelab_inbox/jobs.py`, `agents/` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
@@ -80,7 +81,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 by `scripts/21-inbox.sh`). Layers, each importing only from the ones above it: `config` (settings, shared state),
 `storage` (SQLite), `conversation` (H-016), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
 round), `router`, `briefs` (H-001), `search` (Search tab proxy), `forge` (Start/Stop proxy), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
-`overview` (page data), `pages` (HTML), `server` (HTTP handler, serve). No import cycles: keep it that way.
+`overview` (page data), `kitt` (the door for kitt's adapter, H-018), `pages` (HTML), `gate` (the tailnet gate in front of kitt), `server` (HTTP handler, serve). No import cycles: keep it that way.
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`
 (8104 redirects there); ntfy on port 8102 (topic `homelab`); claude-dashboard on `https://homelab:8101`.

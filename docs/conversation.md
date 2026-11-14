@@ -103,3 +103,5 @@ the box, 2026-11-14; ntfy replaced by a log line, so these are the added cost on
 Scrubbing alone takes 0.08 ms for 1000 characters; the rest is the SQLite write (open, commit to disk). Against the
 ntfy POST itself (an HTTP call with a 10 s timeout) and notifications that come a few times per task, 8 ms is not
 noticeable, so nothing is made asynchronous. The test fails if the added median exceeds 50 ms.
+
+The Discord bot, a client of this conversation: `docs/discord.md`.

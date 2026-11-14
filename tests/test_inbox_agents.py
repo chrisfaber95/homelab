@@ -32,6 +32,12 @@ class Catalogue(unittest.TestCase):
         self.assertTrue(agents)
         self.assertTrue(all("error" not in a for a in agents), agents)
 
+    def test_scheduled_research_agent_is_a_research_job_delivered_to_the_conversation(self):
+        with mock.patch.object(jobs, "AGENTS_DIR", ROOT / "agents"):
+            job = {a["name"]: a for a in jobs.load_agents()}["research-weekly"]["job"]
+        self.assertEqual((job["kind"], job["mode"], job["deliver"]), ("research", "quick", "conversation"))
+        self.assertTrue(job["schedule"])
+
     def test_broken_file_does_not_hide_the_others(self):
         (self.dir / "good.md").write_text(GOOD)
         (self.dir / "bad.md").write_text("no header")

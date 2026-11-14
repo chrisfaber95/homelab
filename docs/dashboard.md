@@ -30,6 +30,13 @@ zin of alles in orde is, wat er nu draait en welke job hierna komt. De tabs **Ta
 - **Gezondheid** (alleen lezen, uit F-020): de checks die niet in orde zijn, alle checks onder "Alle checks", de
   deploys en de laatste backup.
 
+## Onderzoek (`/research`, H-017)
+
+A form with the question and a quick/deep choice (`POST /research/ask`, `server.py`); below it the history of research
+runs, each with its report and sources on its task page. Asked from here, the report stays on the page; from Discord it
+comes back in the conversation; as a scheduled job (`kind: research`, example `agents/research-weekly.md`) it goes where
+its `deliver` says. See `docs/jobs.md`, section Onderzoek.
+
 ## Toegang
 
 Zoals in F-021: alleen apparaten van jouw Tailscale-login, niet het LAN, niet het internet. De pagina laadt alleen

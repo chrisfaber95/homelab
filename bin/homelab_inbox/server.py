@@ -11,11 +11,11 @@ from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
-from .jobs import dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
+from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -126,6 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                   "state": lambda: chat.tasks_state(client),
                   "jobs": lambda: chat.jobs_list(client),
                   "run_job": lambda: chat.run_job(client, body.get("job")),
+                  "research": lambda: chat.research(client, body.get("question"), body.get("mode") or "quick"),
                   "drafts": lambda: chat.drafts(client),
                   "approve": lambda: chat.approval_request(client, body.get("brief"), body.get("mode")),
                   "confirm": lambda: chat.approval_confirm(client, body.get("confirm"))}.get(action)
@@ -191,6 +192,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, task_page(t))
         if self.path == "/jobs":
             return self.send(200, jobs_page())
+        if self.path in ("/research", f"/job/{RESEARCH_JOB}") and RESEARCH_JOB not in JOBS:
+            return self.send(200, research_page())
         if self.path == "/skills":
             return self.send(200, skills_page())
         if self.path == "/briefs":
@@ -252,6 +255,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, briefs_page(error=str(ex)))
         if m := re.fullmatch(r"/run/(\d+)/cancel", self.path):
             return self.cancel_run(int(m.group(1)))
+        if self.path == "/research/ask":
+            code, res = ask_research(form.get("question", ""), form.get("mode", "quick"))
+            if code != 200:
+                return self.send(code, research_page(error=res["error"], question=form.get("question", "")))
+            return self.send(303, "", location="/research")
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
         if self.path.startswith("/agents/"):

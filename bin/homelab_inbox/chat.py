@@ -11,7 +11,7 @@ from . import conversation
 from .briefs import brief_by_id, live_build, start_build
 from .config import ACTIVE, AUTO, CONF, JOBS, TZ, _lock
 from .helpers import first_line, notify, page_url, repo_list
-from .jobs import dispatch
+from .jobs import ask_research, dispatch
 from .queue import answer_task
 from .storage import db, get, log, new_task, now
 
@@ -112,6 +112,20 @@ def run_job(client, name):
     run_id = dispatch(job, now(), manual=True)
     conversation.note("chris", client, "message", f"Ran job {job['name']} now", page_url(), f"job:{job['name']}")
     return 200, {"run": run_id, "job": job["name"]}
+
+
+def research(client, question, mode):
+    """A research question from a client (H-017): one read-only Claude run; the report comes back in the conversation.
+    It counts against the daily cap for Claude jobs and is refused with a message above it."""
+    if not conversation.allowed(client, "research"):
+        return _refused(client, "research")
+    code, body = ask_research(question, mode, source=client)
+    if code == 200:
+        conversation.note("chris", client, "message", f"[research:{mode}] {str(question).strip()}", body["url"],
+                          f"job:research:{body['run']}")
+    elif code == 429:
+        conversation.note("system", "inbox", "notification", body["error"])
+    return code, body
 
 
 def drafts(client):

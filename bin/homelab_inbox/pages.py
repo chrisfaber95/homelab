@@ -14,7 +14,7 @@ from .briefs import build_left_nothing, builds, live_build, load_briefs, split_f
 from . import conversation
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
-from .jobs import JOB_KINDS, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
+from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
 from .router import blocked_by, blocked_followups, children
@@ -310,10 +310,14 @@ def next_run(job):
     return day_time(job["cron"].next_after(datetime.now(timezone.utc)))
 
 
+def job_link(name):
+    return "/research" if name == RESEARCH_JOB and name not in JOBS else f"/job/{html.escape(name)}"
+
+
 def run_row(r, show_job=False):
     e = html.escape
     status, summary, link, pr = run_view(r)
-    head = f'<a href="/job/{e(r["job"])}">{e(r["job"])}</a>' if show_job else ""
+    head = f'<a href="{job_link(r["job"])}">{e(r["job"])}</a>' if show_job else ""
     return (f'<div class="row"><div class="row-title">{head}<a href="{link}">{local(r["due"])}</a>'
             f'<span class="st run-{status}">{e(RUN_NL.get(status, status))}</span></div>'
             + meta("lokaal model" if r["model"] == "local" else "Claude", "nu gedraaid" if r["manual"] else "",
@@ -536,6 +540,9 @@ def job_facts(job):
             ("Volgende keren", "gepauzeerd" if job["paused"] else e(times)),
             ("Soort", e(JOB_KINDS[job["kind"]])),
             ("Model", "lokaal (gratis)" if job["model"] == "local" else "Claude (telt mee voor de daglimiet)")]
+    if job["mode"]:
+        rows.append(("Modus", {"quick": "quick: een paar minuten, een handvol bronnen",
+                               "deep": "deep: tot de grens van een inbox-taak"}[job["mode"]]))
     if job["repo"]:
         rows.append(("Repo", e(job["repo"])))
     if job["script"]:
@@ -595,6 +602,7 @@ def jobs_page():
                           f'<span>{e(first_line(d["request"]))}</span></div></div>' for d in drafts)
     body = (f'<h1>Jobs</h1><p class="muted">Claude-runs door jobs vandaag: {claude_runs_today()} van {cap}. '
             f'Tijden in {TZ.key}.</p>'
+            + '<p><a href="/research">Onderzoeksvraag stellen</a></p>'
             + form("/jobs/draft", '<label for="jobtext">Wat moet de job doen, en wanneer?</label><textarea name="text" '
                    'id="jobtext" required placeholder="Bijvoorbeeld: elke werkdag om 7:00, vertel me wat er vannacht '
                    'misging"></textarea>', "Job opstellen")
@@ -603,6 +611,24 @@ def jobs_page():
             + f'<h2>Alle jobs</h2>{"".join(rows) or "<p class=empty>Nog geen jobs.</p>"}'
             + f'<h2>Laatste runs</h2>{"".join(run_row(r, True) for r in job_runs(limit=20)) or "<p class=empty>Nog geen runs.</p>"}')
     return page("jobs", body, refresh=any(d["status"] == "drafting" for d in drafts))
+
+
+def research_page(error=None, question=""):
+    """Ask a research question and see the reports (H-017): the answer with its sources is on the task page."""
+    e = html.escape
+    opts = "".join(f'<option value="{m}">{m}</option>' for m in RESEARCH_MODES)
+    runs = [r for r in job_runs(RESEARCH_JOB, 30)]
+    body = ('<h1>Onderzoek</h1><p class="muted">Een vraag, een rapport met bronnen. Eerst de privézoekindex, dan het web. '
+            '<b>quick</b>: een paar minuten, een handvol bronnen. <b>deep</b>: tot de grens van een inbox-taak. '
+            f'Elke vraag telt als een Claude-run voor de daglimiet ({claude_runs_today()} van '
+            f'{int(CONF.get("JOB_CLAUDE_CAP", 10))} vandaag). Alleen lezen: er komt nooit een commit of PR.</p>'
+            + (f'<p class="st failed">{e(error)}</p>' if error else "")
+            + form("/research/ask", '<label for="rq">Vraag</label><textarea name="question" id="rq" required>'
+                   f'{e(question)}</textarea><label for="rm">Modus</label><select name="mode" id="rm">{opts}</select>',
+                   "Onderzoek starten")
+            + f'<h2>Rapporten</h2>{"".join(run_row(r) for r in runs) or "<p class=empty>Nog geen vragen.</p>"}'
+            + '<p class="muted">Geplande onderzoeken staan als job (<code>kind: research</code>) op de tab Jobs.</p>')
+    return page("onderzoek", body, refresh=any(run_view(r)[0] in ("queued", "running", "claude") for r in runs))
 
 
 def job_page(name, error=None, text=None):
@@ -657,7 +683,7 @@ def run_page(r):
     e = html.escape
     status, summary, _, _ = run_view(r)
     cancel = form(f"/run/{r['id']}/cancel", "", "Annuleren", ghost=True) if r["status"] == "running" else ""
-    return page(f"run {r['id']}", f'<h1>Job <a href="/job/{e(r["job"])}">{e(r["job"])}</a></h1>'
+    return page(f"run {r['id']}", f'<h1>Job <a href="{job_link(r["job"])}">{e(r["job"])}</a></h1>'
                 f'<div class="row-title"><span>{local(r["due"])}</span><span class="st run-{status}">'
                 f'{e(RUN_NL.get(status, status))}</span><span>{"lokaal model" if r["model"] == "local" else "Claude"}'
                 f'</span></div><pre>{e(r["summary"] or "")}</pre>'

@@ -38,6 +38,14 @@ if [[ -n $bad_rules ]]; then
 else
   report OK "exposure:ufw-rules" "every ufw allow in scripts/ is on tailscale0 (SSH from the LAN excepted)"
 fi
+# --- H-016 Discord bot: connects outward only, so it must have no listener, no ufw rule and no wildcard address ---
+if grep -nE '\.listen\(|\.bind\(|HTTPServer|TCPSite|run_app|start_server|web\.Application' "$REPO"/discord-bot/*.py >/dev/null 2>&1; then
+  report FAIL "exposure:discord-bot:no-listener" "discord-bot/ contains server code; the bot may only connect outward"
+elif grep -vE '^[[:space:]]*#' "$REPO/scripts/26-discord-bot.sh" | grep -q ufw; then
+  report FAIL "exposure:discord-bot:no-listener" "scripts/26-discord-bot.sh touches ufw; the bot opens no port"
+else
+  report OK "exposure:discord-bot:no-listener" "discord-bot/ has no server code and its script opens no port"
+fi
 check_service() {  # name port script server-file
   local name=$1 port=$2 script=$3 server=$4
   if grep -E 'ufw allow in on tailscale0 to any port' "$REPO/scripts/$script" | grep -qE "port \"?(\\\$[A-Z_]+|$port)\"? "; then

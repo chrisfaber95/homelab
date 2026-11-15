@@ -182,6 +182,13 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
   clones in `work/`) and copies `config/forge.env` to `/etc/forge/env` once (no secrets; the limits are edited
   there, then restart the service). `scripts/18-projects.sh` calls it before it installs the unit. State in
   `/var/lib/forge`; `config/backup.list` keeps `state.json` and the logins.
+- **Build tools for its projects**: `scripts/25-forge.sh` also installs a C toolchain, Rust (Ubuntu's `rustup`; the
+  stable toolchain lives in `/var/lib/forge/.rustup`, update it with `sudo -u forge -H rustup update` from `/`) and
+  PostgreSQL. PostgreSQL listens on its **unix socket only** (`listen_addresses = ''`, set before the
+  package is installed in `/etc/postgresql-common/createcluster.d/` and again in the cluster's
+  `conf.d/homelab-socket-only.conf`): no TCP port, so nothing to reach from the LAN, the tailnet or a container. The
+  role `forge` logs in over the socket as itself (peer authentication, no password) and may create and drop its own
+  databases; forge's builds and tests use those. Their contents are test data and are not in the backup.
 - **Logins, once, by hand** (they need your browser): `sudo -iu forge` is not possible (nologin shell), so use
   `sudo -u forge -H bash`, then cd out of your own home first, then install the Claude CLI there (`curl -fsSL https://claude.ai/install.sh | bash`), run
   `claude` and log in, and run `gh auth login` for the GitHub account that owns `chrisfaber95/` (it needs to create

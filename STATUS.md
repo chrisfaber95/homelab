@@ -87,6 +87,8 @@ Running and checked: F-016, F-017 (`llama3.1:8b`), F-018, F-019 and F-020; `home
    world and is not backed up. A path in `config/backup.list` would not be enough, because `homelab-backup` copies
    files while Postgres keeps running; it needs a nightly `pg_dump` to a file and that file in the list
    (`docs/projects.md`, section pixel-quest).
+   The same goes for the `ashfall` database of forge's world (`docs/projects.md`, section ashfall-world): the world is
+   seeded, so a loss regrows the same map but drops its history since the first start.
 
 Still for the user to test (also in `CHECKLIST.md`):
 - F-016: SSH from another network; lid closed.

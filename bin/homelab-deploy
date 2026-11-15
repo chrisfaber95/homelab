@@ -15,6 +15,7 @@ nep-systemctl).
 Exit van status: 0 als alles in orde is, 1 als een deploy of sync faalt of de lus niet meer loopt.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -67,11 +68,11 @@ def log(name, message):
     print(f"{name}: {message}", flush=True)
 
 
-def run(cmd, cwd=None, timeout=300):
+def run(cmd, cwd=None, timeout=300, env=None):
     """Draai een commando; bij een fout een StepError met de laatste regels uitvoer."""
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})})
     except subprocess.TimeoutExpired:
         raise StepError(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''}: na {timeout} s afgebroken")
     if p.returncode != 0:
@@ -196,10 +197,18 @@ def unit_state(name):
     return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
 
 
-def make_release(name, sha):
+def build_mark(name, kind):
+    """What .homelab-built holds: the hash of deploy/<name>.build, or empty without one. A release built another way
+    (an older homelab-deploy that didn't know the script, or an older script) doesn't count as built."""
+    script = build_script(name)
+    return hashlib.sha256(script.read_bytes()).hexdigest() if kind == "service" and script.is_file() else ""
+
+
+def make_release(name, kind, sha):
     """Een kopie van de commit (git archive) in releases/<naam>/<sha>; een al gebouwde release blijft staan."""
     release = RELEASES / name / sha
-    if (release / ".homelab-built").exists():
+    mark = release / ".homelab-built"
+    if mark.exists() and mark.read_text().strip() == build_mark(name, kind):
         return release, True
     shutil.rmtree(release, ignore_errors=True)
     release.parent.mkdir(parents=True, exist_ok=True)
@@ -215,13 +224,25 @@ def make_release(name, sha):
     return release, False
 
 
+def build_script(name):
+    """deploy/<name>.build in the homelab repo: the build of a service repo that is not a plain npm project."""
+    return REPOS / HOMELAB / "deploy" / f"{name}.build"
+
+
 def build(name, kind, release):
+    script = build_script(name)
     if kind == "compose":
         compose(name, release, "build", timeout=BUILD_TIMEOUT)
+    elif kind == "service" and script.is_file():
+        # Run in the release as deploy. BUILD_CACHE survives releases (e.g. cargo's target dir), so a new commit
+        # doesn't compile every dependency again.
+        cache = DEPLOY_ROOT / "cache" / name
+        cache.mkdir(parents=True, exist_ok=True)
+        run(["bash", str(script)], cwd=release, timeout=BUILD_TIMEOUT, env={"BUILD_CACHE": str(cache)})
     elif (release / "package.json").is_file():
         run(["npm", "ci", "--no-audit", "--no-fund"], cwd=release, timeout=BUILD_TIMEOUT)
         run(["npm", "run", "build", "--if-present"], cwd=release, timeout=BUILD_TIMEOUT)
-    (release / ".homelab-built").touch()
+    (release / ".homelab-built").write_text(build_mark(name, kind))
 
 
 def point_current(name, sha):
@@ -260,7 +281,7 @@ def deploy(name, kind, sha, state):
     log(name, f"deploy {sha[:7]} (nu {previous[:7] if previous else 'niets'})")
     result = {"at": now(), "sha": sha, "ok": False, "message": ""}
     try:
-        release, built = make_release(name, sha)
+        release, built = make_release(name, kind, sha)
         if not built:
             build(name, kind, release)
     except StepError as e:
@@ -319,6 +340,7 @@ def remove(name, state):
         return  # volgende ronde opnieuw proberen
     shutil.rmtree(REPOS / name, ignore_errors=True)
     shutil.rmtree(RELEASES / name, ignore_errors=True)
+    shutil.rmtree(DEPLOY_ROOT / "cache" / name, ignore_errors=True)
     (STATE / f"{name}.json").unlink(missing_ok=True)
 
 

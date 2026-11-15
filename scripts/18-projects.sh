@@ -128,6 +128,19 @@ EOF
 echo "== Account for forge (H-015): before its unit starts"
 bash "$REPO/scripts/25-forge.sh"
 
+echo "== Rust for deploy: builds service repos with a deploy/<name>.build (ashfall-world)"
+# 25-forge.sh installed Ubuntu's rustup (proxies in /usr/bin); the toolchain itself goes in /var/lib/deploy/.rustup,
+# fetched as deploy, never as root. Only when missing, so a re-run never changes the compiler under a build.
+# clippy and rustfmt because a repo's rust-toolchain.toml may ask for them, and rustup won't fetch them mid-build.
+if ! as_deploy rustup which cargo >/dev/null 2>&1; then
+  as_deploy rustup toolchain install stable --profile minimal -c clippy -c rustfmt
+  as_deploy rustup default stable
+fi
+as_deploy cargo --version >/dev/null
+
+echo "== Account and database for ashfall-world (H-015): before its unit starts"
+bash "$REPO/scripts/27-ashfall.sh"
+
 echo "== Services uit deploy/"
 installed=()
 changed=()

@@ -106,6 +106,19 @@ else
 fi
 ports+=("$kitt_gate_port")
 svc_ports+=("$kitt_gate_port")
+# --- H-015 ashfall-world: the Rust server binds the --host it is given, on the Tailscale address in 8100-8199 ---
+ashfall_unit="$REPO/deploy/ashfall-world.service"
+if [[ -e $ashfall_unit ]]; then
+  ashfall_exec=$(sed -n 's/^ExecStart=//p' "$ashfall_unit")
+  ashfall_port=$(sed -nE 's/.*--port ([0-9]+).*/\1/p' <<<"$ashfall_exec")
+  if [[ $ashfall_exec == *"--host $TS_IP "* && $ashfall_port =~ ^81[0-9][0-9]$ ]] \
+     && grep -q '^IPAddressDeny=any' "$ashfall_unit"; then
+    report OK "exposure:ashfall:bind" "deploy/ashfall-world.service: listens on $TS_IP:$ashfall_port only, tailnet and loopback only"
+    ports+=("$ashfall_port")
+  else
+    report FAIL "exposure:ashfall:bind" "deploy/ashfall-world.service must pass --host $TS_IP, a --port in 8100-8199 and IPAddressDeny=any"
+  fi
+fi
 
 while IFS="|" read -r svc ip port; do
   name="exposure:$svc:$port"

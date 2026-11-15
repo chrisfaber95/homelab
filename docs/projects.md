@@ -23,6 +23,14 @@ GitHub main ──(elke 20 s: git ls-remote, read-only token)──> /srv/homela
 | `compose` | het compose-bestand in de root bouwen en starten in de rootless Docker van het account `deploy` |
 | `service` | met een `package.json`: `npm ci` en `npm run build`; dan `homelab-app-<naam>.service` herstarten |
 
+A `service` repo that is not a plain npm project (Rust, a client in a subfolder) gets a build script in this repo:
+`deploy/<name>.build`. homelab-deploy runs it with `bash` as `deploy`, in the new release, instead of the npm default,
+with `BUILD_CACHE=/srv/homelab/cache/<name>`: a directory that survives releases (for example cargo's target dir), so a
+new commit only compiles what changed. The script copies what the unit runs into the release. `deploy` has its own
+stable Rust toolchain (`scripts/18-projects.sh`). The script lives here, next to the unit, so how the box builds and
+runs a repo is decided in this repo, not by the app's authors (forge, for its world). The build itself still runs the
+app's own code (npm scripts, cargo build scripts), exactly like the npm default does.
+
 Changing a repo from `sync` to `compose` or `service` builds and starts its current commit in the next round, without
 a new push: a repo with no release on disk does not count as deployed.
 
@@ -32,7 +40,8 @@ a new push: a repo with no release on disk does not count as deployed.
   In gebruik: 8101 claude-dashboard, 8102 ntfy, 8103 bevestigpagina, 8104 overzicht, 8105 inbox/dashboard,
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
   the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114), 8120 forge (Tailscale address),
-  8121 kitt (the gate in the inbox, Tailscale address; the adapter itself on 127.0.0.1:8122, `docs/kitt.md`).
+  8121 kitt (the gate in the inbox, Tailscale address; the adapter itself on 127.0.0.1:8122, `docs/kitt.md`),
+  8123 ashfall-world (Tailscale address).
   Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next
@@ -194,9 +203,10 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
   `claude` and log in, and run `gh auth login` for the GitHub account that owns `chrisfaber95/` (it needs to create
   private repos and PRs there). There is no Claude API key anywhere. Without the logins forge starts but its
   builds fail and show up in its log.
-- **Repos**: only the `forge` line is in `config/repos.conf`. Forge's own project repos are never registered and
-  forge never writes to a repo it did not create. It only opens two kinds of PR here, which you merge: this
-  Start/Stop block and link, and per finished web project one PR with its deploy line and page link.
+- **Repos**: forge never registers its own project repos in `config/repos.conf` and never writes to a repo it did
+  not create. It only opens two kinds of PR here, which you merge: this Start/Stop block and link, and per finished
+  web project one PR with its deploy line and page link (written in forge, not yet called by its cycle). Its world,
+  `ashfall-world`, was added by hand: see below.
 - **What the inbox expects of forge**: `python3 -m forge` from `src/`, `FORGE_BIND_HOST`, `FORGE_PORT` and
   `FORGE_STATE_DIR`, and the endpoints `GET /api/state` (`status` or `running`, plus `step`, `project`, `activity`,
   `started_at`, `paused`, `pause_reason`, `paused_until`), `GET /api/log?from=<sequence>` (`lines`, `next`,
@@ -204,6 +214,34 @@ reviews and merges them, and moves on, inside hard limits. `service` repo: `home
   a missing field only empties its part of the row.
 - **After a rebuild**: run `scripts/18-projects.sh`; the account, config and unit come back, the code comes from the
   deploy, and a restore brings the state and logins back. Without a restore, do the logins again.
+
+## ashfall-world (H-015)
+
+Forge's own world (`chrisfaber95/ashfall-world`, private): a seeded archipelago that keeps running by itself, with a
+calendar, settlements and a chronicle. A Rust server (axum, sqlx) runs the simulation, keeps it in PostgreSQL and serves
+the TypeScript client. Forge builds it; the box runs `main` of it, so every merge forge makes is live within a minute
+plus the build (the first build compiles every dependency: several minutes; later ones reuse the cache).
+
+- **Address**: **`http://homelab:8123`**, bound to the Tailscale address `100.85.70.34` only. ufw's 8100-8199 rule on
+  `tailscale0` covers it.
+- **Build**: `deploy/ashfall-world.build` (here, not in the app repo): `npm ci` and `npm run build` in `client/`, then
+  `cargo build --release --locked -p ashfall-server` with the target dir in `/srv/homelab/cache/ashfall-world`, and the
+  binary copied to `bin/` of the release. No database is needed to build.
+- **Unit**: `deploy/ashfall-world.service` as the account `ashfall` (no login, no home), not as `forge`: the world's
+  server never sees forge's Claude and GitHub logins. On SIGTERM it commits the current tick and exits; on start it
+  catches up on the ticks it missed (at most 1440).
+- **Database**: `ashfall` in the local PostgreSQL that `scripts/25-forge.sh` set up (unix socket only, no TCP port).
+  `scripts/27-ashfall.sh` (called by `18-projects.sh`) makes the role `ashfall`: it logs in as itself over the socket
+  (peer authentication, no password), owns only the database `ashfall` and can't create others. It is separate from
+  the role `forge`, so forge's builds and tests can't touch the live world. Migrations run at every start.
+- **Not backed up.** A file copy of a live PostgreSQL is not reliably restorable (the same as pixel-quest). The world is
+  seeded, so losing the database regrows the same map; what is lost is its history (ticks, populations, the
+  chronicle) since the first start. The fix, if it matters: a nightly `pg_dump ashfall` to a file in
+  `config/backup.list`.
+- **Start over** (a new world): as root, `systemctl stop homelab-app-ashfall-world`, `runuser -u postgres -- dropdb
+  ashfall`, `bash scripts/27-ashfall.sh`, `systemctl start homelab-app-ashfall-world`.
+- **After a rebuild**: `scripts/18-projects.sh` brings back the toolchain, account, database and unit; the code comes
+  from the deploy.
 
 ## kitt (H-018)
 

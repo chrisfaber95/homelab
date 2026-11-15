@@ -1,0 +1,38 @@
+# homelab: ashfall-world (H-015), forge's own world: a Rust server that runs the simulation, keeps it in PostgreSQL and
+# serves the TypeScript client. Built by deploy/ashfall-world.build. Tailnet only: bound to the Tailscale address, port
+# 8123 (ufw's 8100-8199 rule on tailscale0). The database `ashfall` and the role `ashfall` (peer authentication over the
+# unix socket, no TCP, no password) come from scripts/27-ashfall.sh; they are separate from forge's own role.
+[Unit]
+Description=ashfall-world, forge's world (homelab, H-015)
+After=network-online.target tailscaled.service postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+User=ashfall
+Group=ashfall
+WorkingDirectory=/srv/homelab/releases/ashfall-world/current
+Environment=DATABASE_URL=postgres://ashfall@localhost/ashfall?host=/var/run/postgresql
+Environment=ASHFALL_CLIENT_DIR=/srv/homelab/releases/ashfall-world/current/client/dist
+ExecStart=/srv/homelab/releases/ashfall-world/current/bin/ashfall-server --host 100.85.70.34 --port 8123
+Restart=on-failure
+RestartSec=5
+# SIGTERM: the server stops ticking, commits the current tick and exits.
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# The server has no client filter of its own: talk to loopback and the tailnet only (PostgreSQL is a unix socket).
+IPAddressDeny=any
+IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

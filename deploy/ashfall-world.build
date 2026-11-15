@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# homelab: how homelab-deploy builds ashfall-world (H-015, forge's world): the TypeScript client, then the Rust server.
+# Runs as deploy in the fresh release (cwd), with BUILD_CACHE set to a directory that survives releases; cargo's target
+# dir lives there, so a new commit only compiles what changed. The binary is copied into the release, because the
+# cache changes under the running service on the next build. The unit is deploy/ashfall-world.service.
+# Rust for deploy comes from scripts/18-projects.sh. No database is needed to build (no sqlx query! macros).
+set -euo pipefail
+: "${BUILD_CACHE:?BUILD_CACHE is not set: run this through homelab-deploy}"
+
+(cd client && npm ci --no-audit --no-fund && npm run build)
+CARGO_TARGET_DIR="$BUILD_CACHE/target" cargo build --release --locked -p ashfall-server
+install -D -m 755 "$BUILD_CACHE/target/release/ashfall-server" bin/ashfall-server
+
+test -s client/dist/index.html
+bin/ashfall-server --version >/dev/null

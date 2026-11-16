@@ -251,6 +251,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] Op GitHub een fine-grained token voor de inbox: All repositories, Contents, Pull requests and Workflows: Read and write; Checks, Commit statuses and Actions: Read-only (the inbox reads CI before it merges a build without me; without Workflows it cannot push a task that adds a `.github/workflows/` file).
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (vraagt om beide tokens).
   - [ ] `http://homelab.tail4eb878.ts.net:8105` op de telefoon: een vraag-taak geeft een antwoord, een code-taak een PR.
+- [ ] H-021 (frontend): `scripts/21-inbox.sh` bouwt `frontend/dist` als wegwerpgebruiker (geen npm als root) en controleert `/usr/local/lib/homelab/frontend/dist/index.html`. Na de merge `scripts/21-inbox.sh` opnieuw draaien (de rerun-regel doet dat); controleer met `ls -l /usr/local/lib/homelab/frontend/dist`.
 - [ ] F-022 (jobs en skills): zie `docs/jobs.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `jobs` tegen).
   - [ ] Op de pagina, tab Jobs: een job in woorden opstellen, bevestigen; hij staat op de branch `jobs` en "Nu draaien"

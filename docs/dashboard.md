@@ -54,3 +54,12 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`. Logs van taken en runs staan in
 `/var/lib/homelab-inbox/logs/` (één bestand per taak of run). Testen zonder root: zie de docstring van
 `bin/homelab-inbox` (de HTML staat in `bin/homelab_inbox/pages.py`, de gegevens in `overview.py`, de HTTP-handler in `server.py`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
+
+## Ported pages (H-021)
+
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/jobs`; empty by default)
+lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
+`frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
+`FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
+listed path has no `frontend/dist/index.html`, the Python page is served and a warning goes to the journal.
+Tests: `tests/test_inbox_ported_pages.py`.

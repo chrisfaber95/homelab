@@ -1,14 +1,16 @@
 """The HTTP server: access check, request handler, serve()."""
 import hmac
 import json
+import mimetypes
 import re
 import threading
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import chat, conversation, gate, kitt
 from .briefs import brief_by_id, set_brief_status, start_build
-from .config import ACTIVE, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
+from .config import ACTIVE, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
@@ -19,6 +21,29 @@ from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, 
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
+
+
+def ported_index(path):
+    """frontend/dist/index.html for a ported path, or None (not ported, or no build: then pages.py renders it)."""
+    if path not in PORTED_PAGES:
+        return None
+    index = FRONTEND_DIST / "index.html"
+    if not index.is_file():
+        log(f"warning: PORTED_PAGES lists {path} but {index} is missing; serving the Python page instead")
+        return None
+    return index.read_bytes()
+
+
+def dist_asset(path):
+    """(bytes, content type) of a built asset under STATIC_PREFIX, or None. Never leaves FRONTEND_DIST."""
+    if not path.startswith(STATIC_PREFIX):
+        return None
+    root = FRONTEND_DIST.resolve()
+    f = (root / urllib.parse.unquote(path[len(STATIC_PREFIX):])).resolve()
+    if not f.is_relative_to(root) or not f.is_file():
+        return None
+    ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+    return f.read_bytes(), ctype + ("; charset=utf-8" if ctype.startswith("text/") or ctype.endswith("javascript") else "")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -168,6 +193,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard():
             return
         url = urllib.parse.urlsplit(self.path)
+        if (index := ported_index(url.path)) is not None:
+            return self.send(200, index)
+        if (asset := dist_asset(url.path)) is not None:
+            return self.send(200, asset[0], asset[1], cache="private, max-age=3600")
         if m := re.fullmatch(r"/static/((?:fonts/)?[A-Za-z0-9-]+\.(css|js|woff2))", url.path):
             f = WEB / m.group(1)
             if f.is_file():

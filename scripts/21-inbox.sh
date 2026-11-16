@@ -139,6 +139,15 @@ ask_token() { # ask_token <bestand> <eigenaar> <uitleg> <testfunctie>
   for attempt in 1 2 3; do
     if [[ -s $file ]]; then chown "$owner:$owner" "$file"; chmod 600 "$file"; fi
     if [[ -s $file ]] && $test; then echo "Het token in $file werkt."; return 0; fi
+    # No terminal (the automatic re-run by homelab-admin after a merge, or cron): never prompt and never write the
+    # file. Reading /dev/tty fails there, and writing the empty answer used to wipe a working token after a single
+    # failed check (2026-11-16). Retry the check a few times for a passing hiccup, then stop and leave the file as is.
+    if [[ -n ${HOMELAB_RERUN:-} ]] || ! { : </dev/tty; } 2>/dev/null; then
+      if [[ -s $file ]] && (( attempt < 3 )); then sleep 15; continue; fi
+      echo "The token in $file does not work and there is no terminal to ask for a new one; the file was left as is." >&2
+      echo "Run it by hand to paste a new token: sudo bash $REPO/scripts/21-inbox.sh" >&2
+      exit 1
+    fi
     (( attempt == 3 )) && { echo "Het token voor $file werkt na drie pogingen niet." >&2; exit 1; }
     [[ -s $file ]] && echo "Het token in $file werkt niet."
     echo "$help"
@@ -153,6 +162,8 @@ ask_token() { # ask_token <bestand> <eigenaar> <uitleg> <testfunctie>
     done
     echo
     echo "Ontvangen: ${#t} tekens, begint met '${t:0:12}'."
+    # Nothing pasted: keep whatever is in the file rather than replacing it with an empty token.
+    if [[ -z $t ]]; then echo "Nothing received; $file was left as is."; continue; fi
     (umask 077 && printf '%s\n' "$t" > "$file")
     unset t
   done

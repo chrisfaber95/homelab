@@ -16,7 +16,7 @@ from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
-from .overview import CHANGES_LOG, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
+from .overview import CHANGES_LOG, change_text, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
 from .router import blocked_by, blocked_followups, children
 from .storage import db, log, tasks
 
@@ -401,14 +401,6 @@ def usage_html():
 
 
 CHECK_NL = {"OK": "in orde", "WARN": "let op", "FAIL": "faalt"}
-
-
-def change_text(c):
-    if c.get("kind") in ("instant", "refused"):
-        what = f"{c.get('action')} {' '.join(c.get('args') or [])}"
-    else:
-        what = f"{c.get('change', 'machine.conf')}: {c.get('summary') or c.get('result', '')}"
-    return what.strip()[:90]
 
 
 def health_html(h):

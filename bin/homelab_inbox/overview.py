@@ -5,8 +5,8 @@ import urllib.request
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
-from . import forge
-from .config import CONF, JOBS, TZ, _round_started
+from . import conversation, forge
+from .config import CONF, JOBS, SERVICES, TZ, _round_started
 from .helpers import first_line, label, read_json
 from .jobs import JOB_KINDS, LLM_URL, RUN_NL, run_view
 from .storage import db, tasks
@@ -231,3 +231,56 @@ def usage():
             saved[kind] = saved.get(kind, 0) + mins
     return {"days": days, "llm": llm, "claude_jobs": per_day(claude_jobs), "inbox": per_day(inbox),
             "cap": int(CONF.get("JOB_CLAUDE_CAP", 10)), "saved": saved}
+
+
+def change_text(c):
+    if c.get("kind") in ("instant", "refused"):
+        what = f"{c.get('action')} {' '.join(c.get('args') or [])}"
+    else:
+        what = f"{c.get('change', 'machine.conf')}: {c.get('summary') or c.get('result', '')}"
+    return what.strip()[:90]
+
+
+def overview_json():
+    """Everything the Overview page (pages.overview_page) shows, as data for GET /api/overview. Texts are the same
+    Dutch sentences the HTML page uses; times are ISO strings (UTC offset kept), not "vandaag 07:00"."""
+    h = health()
+    sentence, cls = status_sentence(h)
+    items, queued = live_items()
+    lanes, ticks = timeline()
+    u = usage()
+    now_dt = datetime.now(TZ)
+
+    def lane(l):
+        job = l["job"]
+        state = ("deleted" if not job else "error" if "error" in job else "paused" if job["paused"] else "active")
+        return {"name": l["name"], "state": state,
+                "model": job["model"] if state in ("active", "paused") else None,
+                "when": (job["when"] or job["schedule"]) if state in ("active", "paused") else None,
+                "marks": l["marks"]}
+    checks = {n: {"status": c.get("status", "?"), "text": c.get("text", ""), "since": c.get("since")}
+              for n, c in h["checks"].items()}
+    deploys = [{"name": d["name"], "ok": (d.get("last_deploy") or {}).get("ok") if d.get("last_deploy") else None,
+                "at": (d.get("last_deploy") or {}).get("at"), "sha": d.get("deployed_sha"),
+                "sync_error": d.get("sync_error")} for d in h["deploys"]]
+    b = h["backup"]
+    backup = ({"ok": bool(b.get("ok")), "at": b.get("at"), "free_bytes": b.get("free_bytes", 0),
+               "free_pct": b.get("free_pct")} if b else None)
+    return {
+        "status": {"sentence": sentence, "class": cls, "at": now_dt.isoformat(timespec="seconds"),
+                   "activity": activity_sentence(items, queued)},
+        "live": {"items": items, "queued": queued},
+        "timeline": {"lanes": [lane(l) for l in lanes], "ticks": ticks, "now_x": TL_NOW},
+        "changes": [{"ok": bool(c.get("ok")), "text": change_text(c), "at": c.get("at"), "user": c.get("user", ""),
+                     "reason": (c.get("reason") or "")[:80]} for c in h["changes"]],
+        "services": [{"name": s["name"], "address": s["address"], "note": s["note"]} for s in SERVICES],
+        "forge_link": next((s["address"] for s in SERVICES if s["name"] == "Forge"), ""),
+        "switches": {"discord": conversation.switch("discord"),
+                     "discord_approvals": conversation.switch("discord_approvals"),
+                     "discord_on": conversation.state()["discord"],
+                     "kitt": conversation.switch("kitt"),
+                     "kitt_may": sorted(conversation.clients().get("kitt", set()))},
+        "usage": {"days": [d.isoformat() for d in u["days"]], "llm": u["llm"], "claude_jobs": u["claude_jobs"],
+                  "inbox": u["inbox"], "cap": u["cap"], "saved_minutes": u["saved"]},
+        "health": {"checks": checks, "last": h["last"], "deploys": deploys, "backup": backup},
+    }

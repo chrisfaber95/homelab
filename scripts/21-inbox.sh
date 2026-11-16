@@ -6,9 +6,9 @@
 # - Drie tokens: Claude Code voor inbox (claude setup-token), GitHub voor inbox-runner, ntfy voor inbox-runner.
 # - Jobs en skills (F-022) zitten in dezelfde dienst; jobs en geheugen (F-023) staan op de branches jobs en memory
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
-# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab_inbox/ (de modules), bin/homelab-admin, bin/homelab-health, web/ of config/inbox.conf.
+# Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab_inbox/ (de modules), bin/homelab-admin, bin/homelab-health, web/, frontend/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
-# homelab-rerun: root bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
+# homelab-rerun: root bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web frontend config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -124,6 +124,41 @@ install -m 644 "$REPO"/web/fonts/* "$DEST/web/fonts/"
 install -d -m 755 "$DEST/bin/homelab_inbox"
 rsync -rtp --delete --exclude=__pycache__ --chmod=D755,F644 "$REPO/bin/homelab_inbox/" "$DEST/bin/homelab_inbox/"
 ln -sfn "$DEST/bin/homelab-inbox" /usr/local/bin/homelab-inbox
+
+echo "== Frontend bouwen (H-021): npm nooit als root"
+# npm ci and the build run as a throwaway user (systemd-run, DynamicUser), with --ignore-scripts so no package script runs.
+# The sources are copied to a staging folder first, so the build never writes in the repo (root's clone) and sees
+# nothing but frontend/. The only writable place for the build is its own StateDirectory (ProtectSystem=strict,
+# ProtectHome, PrivateTmp, no new privileges). Root only copies the finished dist out; the files end up root-owned,
+# 755/644, which inbox-runner (the service) can read. Nothing is installed until the build and its check passed.
+command -v node >/dev/null && command -v npm >/dev/null || apt-get install -y -qq nodejs npm
+BUILD_NAME=homelab-frontend-build
+BUILD_STATE=/var/lib/private/$BUILD_NAME   # StateDirectory of a DynamicUser unit
+STAGE=$(mktemp -d /var/tmp/homelab-frontend-src.XXXXXX)
+trap 'rm -rf "$STAGE"' EXIT
+rsync -rt --delete --exclude=node_modules --exclude=dist --chmod=D755,F644 "$REPO/frontend/" "$STAGE/"
+rm -rf "$BUILD_STATE"   # a clean build every time: no leftovers of an earlier run
+systemd-run --quiet --wait --pipe --collect --unit="$BUILD_NAME" \
+  -p DynamicUser=yes -p StateDirectory="$BUILD_NAME" -p WorkingDirectory="/var/lib/$BUILD_NAME" \
+  -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p NoNewPrivileges=yes \
+  -p BindReadOnlyPaths="$STAGE:/run/frontend-src" \
+  -p Environment=HOME="/var/lib/$BUILD_NAME" -p Environment=npm_config_cache="/var/lib/$BUILD_NAME/.npm" \
+  -p Environment=CI=1 -p TimeoutStartSec=900 \
+  /bin/bash -euo pipefail -c 'cp -r /run/frontend-src/. . && npm ci --ignore-scripts --no-audit --no-fund && npm run build' \
+  || { echo "The frontend build failed (see the output above)." >&2; exit 1; }
+BUILT="$BUILD_STATE/dist"
+if [[ ! -s $BUILT/index.html ]]; then
+  echo "The frontend build did not produce a non-empty $BUILT/index.html." >&2
+  exit 1
+fi
+install -d -m 755 "$DEST/frontend"
+rsync -rt --delete --no-owner --no-group --chmod=D755,F644 "$BUILT/" "$DEST/frontend/dist/"
+chown -R root:root "$DEST/frontend"
+rm -rf "$BUILD_STATE" "$STAGE"
+trap - EXIT
+[[ -s $DEST/frontend/dist/index.html ]] || { echo "$DEST/frontend/dist/index.html is missing or empty after the install." >&2; exit 1; }
+runuser -u inbox-runner -- test -r "$DEST/frontend/dist/index.html" \
+  || { echo "inbox-runner cannot read $DEST/frontend/dist/index.html." >&2; exit 1; }
 
 echo "== sudo: inbox-runner mag alleen homelab-inbox-task als inbox draaien"
 cat > /etc/sudoers.d/homelab-inbox.tmp <<EOF

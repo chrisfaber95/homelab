@@ -79,3 +79,10 @@ lists the pages that the TypeScript frontend has taken over. For a GET on a list
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
 listed path has no `frontend/dist/index.html`, the Python page is served and a warning goes to the journal.
 Tests: `tests/test_inbox_ported_pages.py`.
+
+Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs
+`npm ci --ignore-scripts` and `npm run build` there as a throwaway user (`systemd-run`, `DynamicUser`, unit
+`homelab-frontend-build`; its own state folder is the only writable path, `ProtectSystem=strict`). Never as root. Root
+then copies `dist` to `/usr/local/lib/homelab/frontend/dist` (root-owned, 755/644, readable by `inbox-runner`) and checks
+that `index.html` exists, is non-empty and is readable by the service; the script fails otherwise and installs nothing
+from a failed build. The build needs network access to the npm registry.

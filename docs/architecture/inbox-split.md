@@ -217,8 +217,8 @@ Legend: **Agent** = who builds it. Dependencies name slice ids or decisions (Qn,
 **C1 Route, data and store inventory.**
 Goal: one exact list to build against. Built: `backend/openapi.yaml` with every route of `server.py` and
 `kitt.route` (method, access: page, chat door or kitt door, request, response, errors), machine endpoints exact; a
-section in this file listing every table and column and every file store under `RUNNER_HOME` with its current
-writers. Check alone: a test that every route regex in `server.py` and `kitt.py` appears in the OpenAPI file. Depends:
+section in `docs/architecture/inbox-data.md` listing every table and column and every file store under
+`RUNNER_HOME` with its current writers. Check alone: `tests/test_inbox_openapi.py` fails when a route regex in `server.py` or `kitt.py` is missing from the OpenAPI file (`x-code`). Depends:
 none. Rollback: revert (docs only). Risk: low. Agent: `api-database-engineer`. User: no.
 
 **C2 Contract tests for the machine endpoints.**

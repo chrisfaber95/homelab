@@ -1,0 +1,1448 @@
+openapi: 3.0.3
+info:
+  title: homelab-inbox (current Python server)
+  version: "0.1.0-contract"
+  description: |
+    The contract of the inbox as it is TODAY (bin/homelab_inbox/server.py and kitt.py), written down before the
+    migration to a TypeScript frontend and a Spring Boot backend (docs/architecture/inbox-split.md, slice C1).
+    Nothing here is a wish: status codes, field names and error bodies were copied from the handlers.
+
+    Every operation has `x-access`:
+
+    - `page`: the homelab page. The caller must be a device of the tailnet owner (`pages.Access`); the box itself
+      (loopback or its own tailnet address) gets 403 with an HTML page. A POST also needs the CSRF checks below.
+      Within `page`, `x-machine: true` marks the JSON endpoints that scripts and the page's JavaScript rely on
+      (`/api/live`, `/api/log/*`, `/api/forge*`, `/api/search/*`); those are copied exactly.
+    - `chat door`: `/api/chat/*`, loopback only, `Authorization: Bearer <token>` per client
+      (`/etc/homelab/chat-<name>-token`), permissions from `config/clients.json`. Used by the Discord bot.
+    - `kitt door`: loopback only, selected by the header `X-Homelab-Client` (any value), then identified as kitt
+      (`kitt.identify`). Used by kitt's adapter. Handled before the chat door and before the page check.
+
+    Dispatch order for GET and POST: kitt door, chat door, page check. Other methods (PUT, DELETE, HEAD, OPTIONS,
+    PATCH) are not implemented: the Python server answers 501 (`BaseHTTPRequestHandler`).
+
+    Quirks that a replacement must keep (or deliberately change in a later slice):
+
+    - Several page GET routes match `self.path` (path plus query string), so `GET /task/5?x=1` is a 404 where
+      `GET /memory?q=x` works. Routes that use `url.path` ignore the query. Each operation says which.
+    - Page POST bodies are `application/x-www-form-urlencoded`, read up to 64 KiB, first value of a repeated key.
+    - Every response from `Handler.send` carries `Cache-Control: no-store` (static files: `private, max-age=86400`),
+      the Content-Security-Policy `default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src
+      'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+      `X-Frame-Options: DENY` and `Referrer-Policy: same-origin`. JSON from `send_upstream` is
+      `application/json; charset=utf-8`; `/api/live` and `/api/log/<t|r>N` are plain `application/json`.
+    - Text of errors and pages is partly Dutch (existing text stays as it is).
+    - `x-code` lines list the literal route strings of the Python source for each path; the test
+      `tests/test_inbox_openapi.py` fails when a route of server.py or kitt.py is missing here.
+  license:
+    name: private
+servers:
+  - url: http://homelab.tail4eb878.ts.net:8105
+    description: page access (tailnet owner only)
+  - url: http://127.0.0.1:8105
+    description: chat door and kitt door (loopback only)
+x-code: ["/jobs/", "/job/", "/draft/", "/agents/", "/memory/"]
+x-code-note: "Prefixes dispatched by do_POST via self.path.startswith(...) to post_jobs, post_agent and post_memory; the concrete routes are below."
+tags:
+  - {name: page, description: "HTML pages and forms of the homelab page"}
+  - {name: machine, description: "JSON endpoints that must keep path and body exactly"}
+  - {name: chat door, description: "Discord bot, loopback, bearer token"}
+  - {name: kitt door, description: "kitt adapter, loopback, header and peer uid"}
+paths:
+  # ------------------------------------------------------------------------------------------------ static
+  /static/{file}:
+    x-code: ["/static/((?:fonts/)?[A-Za-z0-9-]+\\.(css|js|woff2))"]
+    get:
+      tags: [page]
+      summary: A file from web/ (css, js, woff2)
+      x-access: page
+      description: |
+        Matches `/static/((?:fonts/)?[A-Za-z0-9-]+\.(css|js|woff2))` on `url.path`; the file is `web/<group 1>`.
+        If the file does not exist the handler does NOT answer here: it falls through the remaining routes and ends in
+        the generic 404 page.
+      parameters:
+        - {name: file, in: path, required: true, schema: {type: string}, description: "e.g. app.css, app.js, fonts/x.woff2"}
+      responses:
+        "200":
+          description: "The file. `Cache-Control: private, max-age=86400`."
+          content:
+            text/css; charset=utf-8: {schema: {type: string}}
+            text/javascript; charset=utf-8: {schema: {type: string}}
+            font/woff2: {schema: {type: string, format: binary}}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  # ------------------------------------------------------------------------------------------------ machine (page access)
+  /api/live:
+    x-code: ["/api/live"]
+    get:
+      tags: [machine]
+      summary: What runs now ("Nu bezig") and the activity sentence
+      x-access: page
+      x-machine: true
+      description: Polled by the page every few seconds. Content type is plain `application/json` (no charset).
+      responses:
+        "200":
+          description: Running items, number of queued tasks (of the 100 newest), and one Dutch sentence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, queued, activity]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/LiveItem"}
+                  queued: {type: integer, description: "queued tasks among the 100 newest"}
+                  activity: {type: string, description: "e.g. 'Niets bezig. Volgende job: x, ...'"}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+  /api/log/{key}:
+    x-code: ["/api/log/{forge.LIVE_KEY}", "/api/log/([tr])(\\d+)"]
+    get:
+      tags: [machine]
+      summary: Live log of a task (t<id>), a job run (r<id>) or forge (f1), from a line offset
+      x-access: page
+      x-machine: true
+      description: |
+        Three routes share this path shape, matched in this order on `url.path`:
+
+        1. `/api/log/f1` (`forge.LIVE_KEY`): forge's own log through `forge.log(from)`; JSON is
+           `application/json; charset=utf-8`; upstream failure is 502 `{"error": {"message": ...}}`.
+        2. `/api/log/t<digits>` (task) and `/api/log/r<digits>` (job run): lines of `logs/<key>.log` from line
+           `from`, at most 500 per call. Content type `application/json`. An unknown id is not an error: `lines` is
+           empty and `done` is true. `done` is true when the task is not `queued`/`running` (or the run not
+           `queued`/`running`), or does not exist, and no lines are left after this chunk.
+
+        Any other key (for example `t` without digits) is not a route: generic 404 page.
+        A non-numeric `from` raises ValueError inside the handler (no try/except): the connection ends without a
+        proper response (no status line is written by the application). A negative `from` is clamped to 0.
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string, pattern: "^(f1|[tr][0-9]+)$"}}
+        - {name: from, in: query, required: false, schema: {type: integer, default: 0}, description: "first line index (forge: sequence)"}
+      responses:
+        "200":
+          description: A chunk of log lines.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: "#/components/schemas/LogChunk"}
+                  - {$ref: "#/components/schemas/ForgeLogChunk"}
+        "502": {$ref: "#/components/responses/ForgeUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /api/forge:
+    x-code: ["/api/forge"]
+    get:
+      tags: [machine]
+      summary: Forge's state (proxied from FORGE_URL/api/state)
+      x-access: page
+      x-machine: true
+      responses:
+        "200":
+          description: Forge's state as the page needs it.
+          content:
+            application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/ForgeState"}}
+        "502": {$ref: "#/components/responses/ForgeUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+  /api/forge/{action}:
+    x-code: ["/api/forge/(start|stop)"]
+    post:
+      tags: [machine]
+      summary: Start or stop forge (the page's Start and Stop buttons)
+      x-access: page
+      x-machine: true
+      description: |
+        Needs the page POST checks (Origin and CSRF form field, see components). The body fields are otherwise ignored.
+        The inbox calls `POST FORGE_URL/api/<action>` with `{}`, prints `forge <action> by <device>` to the journal,
+        drops its 2-second cache and answers with the new state (same as `GET /api/forge`). The route regex only
+        matches `start` and `stop`, so the 400 `Unknown action.` of `forge.control` is unreachable through HTTP.
+      parameters:
+        - {name: action, in: path, required: true, schema: {type: string, enum: [start, stop]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/CsrfForm"}
+      responses:
+        "200":
+          description: Forge's state after the action.
+          content:
+            application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/ForgeState"}}
+        "502":
+          description: Forge unreachable, or it refused (HTTP >= 400 from forge).
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/UpstreamError"}
+              examples:
+                unreachable: {value: {error: {message: "Forge is not reachable (is homelab-app-forge running?)."}}}
+                refused: {value: {error: {message: "Forge refused start (HTTP 409): no reason given"}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /api/search/filters:
+    x-code: ["/api/search/filters"]
+    get:
+      tags: [machine]
+      summary: Search filters (proxied from SEARCH_URL/v1/filters)
+      x-access: page
+      x-machine: true
+      description: |
+        Status and body of the search API are passed through (`search.call`). A dead or garbled upstream becomes 502
+        `{"error": {"message": "The search service is unreachable: <detail>"}}`; an upstream HTTP error with a non-JSON
+        body becomes `{"error": {"message": "Upstream answered HTTP <code>."}}` with that code. The search API's own
+        200 body is `{"projects": [...], "types": [...], ...}`; its errors are `{"error": {"message", "request_id"?}}`.
+      responses:
+        "200": {description: "Upstream body", content: {application/json; charset=utf-8: {schema: {type: object, additionalProperties: true}}}}
+        "502": {$ref: "#/components/responses/UpstreamUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+  /api/search/results:
+    x-code: ["/api/search/results"]
+    get:
+      tags: [machine]
+      summary: Search results (proxied from SEARCH_URL/v1/search)
+      x-access: page
+      x-machine: true
+      description: |
+        The inbox sends `q` plus those of `project`, `type`, `source` that are non-empty. `q` defaults to the empty
+        string. Other query parameters are dropped. Status and body of the search API are passed through
+        (`{"query": q, "results": [...]}` on 200).
+      parameters:
+        - {name: q, in: query, required: false, schema: {type: string, default: ""}}
+        - {name: project, in: query, required: false, schema: {type: string}}
+        - {name: type, in: query, required: false, schema: {type: string}}
+        - {name: source, in: query, required: false, schema: {type: string}}
+      responses:
+        "200": {description: "Upstream body", content: {application/json; charset=utf-8: {schema: {type: object, additionalProperties: true}}}}
+        "502": {$ref: "#/components/responses/UpstreamUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbidden"}
+  /api/search/ask:
+    x-code: ["/api/search/ask"]
+    post:
+      tags: [machine]
+      summary: Ask a question of the private search (proxied to SEARCH_URL/v1/ask)
+      x-access: page
+      x-machine: true
+      description: |
+        Form fields (after the CSRF check): `question` (required, trimmed, cut to 2000 characters), optional filters
+        `project`, `type`, `source`, and `hard` (`1`, `true` or `on` sets `hard: true`). Waits up to 330 s for the
+        upstream. Status and body of the search API are passed through; its 200 body is
+        `{"found": bool, "answer": ..., "citations": [{"n", "path", "location", "link"?}], "request_id"?, ...}`.
+      parameters:
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf, question]
+              properties:
+                csrf: {type: string}
+                question: {type: string}
+                project: {type: string}
+                type: {type: string}
+                source: {type: string}
+                hard: {type: string, enum: ["1", "true", "on"]}
+      responses:
+        "200": {description: "Upstream body", content: {application/json; charset=utf-8: {schema: {type: object, additionalProperties: true}}}}
+        "400":
+          description: Empty question.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/UpstreamError"}
+              example: {error: {message: "Type a question first."}}
+        "502": {$ref: "#/components/responses/UpstreamUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /api/search/feedback:
+    x-code: ["/api/search/feedback"]
+    post:
+      tags: [machine]
+      summary: Thumbs-down for the router request behind an answer (proxied to ROUTER_URL/v1/feedback)
+      x-access: page
+      x-machine: true
+      description: |
+        `request_id` must match `[A-Za-z0-9_-]{6,64}`. The inbox sends `{"request_id": ..., "note": <first 1000
+        characters or null>}`. Status and body of the router are passed through (200 body of the router).
+      parameters:
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf, request_id]
+              properties:
+                csrf: {type: string}
+                request_id: {type: string, pattern: "^[A-Za-z0-9_-]{6,64}$"}
+                note: {type: string}
+      responses:
+        "200": {description: "Router body", content: {application/json; charset=utf-8: {schema: {type: object, additionalProperties: true}}}}
+        "400":
+          description: Missing or malformed request id.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/UpstreamError"}
+              example: {error: {message: "That answer has no request id to mark."}}
+        "502": {$ref: "#/components/responses/UpstreamUnreachable"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  # ------------------------------------------------------------------------------------------------ pages (GET)
+  /:
+    x-code: ["/"]
+    get:
+      tags: [page]
+      summary: Overview (Overzicht), the homelab page
+      x-access: page
+      description: Matched on `self.path` (a query string gives 404).
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /taken:
+    x-code: ["/taken"]
+    get:
+      tags: [page]
+      summary: Tasks list and the new-task form
+      x-access: page
+      description: Matched on `url.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
+  /search:
+    x-code: ["/search"]
+    get:
+      tags: [page]
+      summary: Search tab
+      x-access: page
+      description: Matched on `url.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
+  /ssh:
+    x-code: ["/ssh"]
+    get:
+      tags: [page]
+      summary: SSH tab (form to add a public key)
+      x-access: page
+      description: Matched on `url.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
+    post:
+      tags: [page]
+      summary: Ask homelab-admin to add an SSH key
+      x-access: page
+      description: |
+        Calls the homelab-admin socket with `{"cmd": "sshkey", "label": name, "key": key, "by": <device>}`. On success
+        the same page is returned with 200 and the result; on a refusal 400 with the message. A pasted private key is
+        never echoed back (the key field is blanked).
+      parameters: [{$ref: "#/components/parameters/Origin"}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf]
+              properties:
+                csrf: {type: string}
+                name: {type: string}
+                key: {type: string}
+      responses:
+        "200": {$ref: "#/components/responses/Html"}
+        "400": {description: "HTML page with the error (`text` of the admin answer, or 'mislukt')", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /memory:
+    x-code: ["/memory"]
+    get:
+      tags: [page]
+      summary: Memory (Geheugen) list
+      x-access: page
+      description: Matched on `url.path`; `q` is cut to 200 characters.
+      parameters: [{name: q, in: query, required: false, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
+  /memory/e/{id}:
+    x-code: ["/memory/e/(.+)", "/memory/e/(.+)/(save|delete)"]
+    get:
+      tags: [page]
+      summary: One memory entry
+      x-access: page
+      description: |
+        The id contains slashes (`voorkeuren/<about>/<name>`, `feiten/...`, `geschiedenis/<yyyy-mm>/taak-<n>`); in the
+        template it stands for the whole remainder after `/memory/e/`. Matched on `self.path`. An unknown id falls
+        through to the generic 404.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}, allowReserved: true}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /memory/e/{id}/{action}:
+    x-code: ["/memory/e/(.+)/(save|delete)"]
+    post:
+      tags: [page]
+      summary: Edit (save) or erase (delete) a memory entry
+      x-access: page
+      description: |
+        One commit on the `memory` branch of DATA_REPO on behalf of the owner. `text` is required, max 4000 characters,
+        and must not look like a secret (`SECRET_RE`). Success: 303 to `/memory/e/<id>` (save) or `/memory` (delete).
+        Unknown entry: 404 page. Validation error: 400 with the entry page and the message.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, allowReserved: true}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [save, delete]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/TextForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Entry page with error (de tekst is leeg / hooguit 4000 tekens / lijkt een token ...)", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /memory/add:
+    x-code: ["/memory/add"]
+    post:
+      tags: [page]
+      summary: Add a memory entry
+      x-access: page
+      description: |
+        Form: `kind` (`voorkeuren` or `feiten`), `about` (`algemeen`, `box` or a repo name), `name` (trimmed; the id
+        `kind/about/name` must match `MEM_ID_RE`), `text` (as above). 303 to `/memory/e/<id>`; 400 with the memory page
+        and a message (including "bestaat al" when the id exists).
+      parameters: [{$ref: "#/components/parameters/Origin"}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf, kind, about, name, text]
+              properties:
+                csrf: {type: string}
+                kind: {type: string, enum: [voorkeuren, feiten]}
+                about: {type: string}
+                name: {type: string}
+                text: {type: string, maxLength: 4000}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Memory page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /task/{id}:
+    x-code: ["/task/(\\d+)"]
+    get:
+      tags: [page]
+      summary: Task page
+      x-access: page
+      description: "Matched on `self.path` (no query string). Unknown id: 404 page."
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /task/{id}/{action}:
+    x-code: ["/task/(\\d+)/(accept|answer|cancel|attended|retry)"]
+    post:
+      tags: [page]
+      summary: Task actions (accept, answer, cancel, attended, retry)
+      x-access: page
+      description: |
+        Always answers 303 to `/task/<id>` when the task exists, also when the action did nothing (for example a
+        cancel on a finished task, or a retry that is not allowed). Unknown task or unknown action: 404 page.
+        `answer` takes the form field `answer`; `retry` takes an optional `note`. `attended` only has effect on a brief
+        build (`repo` = `brief`) that is unattended.
+      parameters:
+        - {$ref: "#/components/parameters/NumericId"}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [accept, answer, cancel, attended, retry]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf]
+              properties:
+                csrf: {type: string}
+                answer: {type: string}
+                note: {type: string}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /tasks:
+    x-code: ["/tasks"]
+    post:
+      tags: [page]
+      summary: Create a task
+      x-access: page
+      description: |
+        Form `repo` (a repo of the list, or `auto`) and `text` (trimmed, non-empty). Creates the row with `source`
+        NULL, writes a `chris`/`page` message to the conversation, and redirects to `/task/<id>`. Otherwise 400
+        ("Kies een repo uit de lijst en beschrijf de taak.").
+      parameters: [{$ref: "#/components/parameters/Origin"}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf, repo, text]
+              properties: {csrf: {type: string}, repo: {type: string}, text: {type: string}}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Error page", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /jobs:
+    x-code: ["/jobs"]
+    get:
+      tags: [page]
+      summary: Jobs tab
+      x-access: page
+      description: Matched on `self.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /jobs/draft:
+    x-code: ["/jobs/draft"]
+    post:
+      tags: [page]
+      summary: Start a job draft from a description
+      x-access: page
+      description: |
+        `text` (CRLF normalised, trimmed, cut to 4000) starts a draft and redirects to `/draft/<id>`. An empty text
+        falls through to the generic 404 page.
+      parameters: [{$ref: "#/components/parameters/Origin"}]
+      requestBody: {$ref: "#/components/requestBodies/TextForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /research:
+    x-code: ["/research", "/job/{RESEARCH_JOB}"]
+    get:
+      tags: [page]
+      summary: Research page (also served at /job/research when no job of that name exists)
+      x-access: page
+      description: |
+        `self.path in ("/research", f"/job/{RESEARCH_JOB}")` and `RESEARCH_JOB not in JOBS`. When a real job named
+        like RESEARCH_JOB exists, `/job/<name>` shows that job instead and `/research` is a 404.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /research/ask:
+    x-code: ["/research/ask"]
+    post:
+      tags: [page]
+      summary: Ask a research question
+      x-access: page
+      description: |
+        Form `question`, `mode` (default `quick`; `quick` or `deep`). Success 303 to `/research`. Errors come from
+        `jobs.ask_research`: 400 (empty question or bad mode) and 429 (daily Claude cap), rendered as the research page
+        with the message.
+      parameters: [{$ref: "#/components/parameters/Origin"}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf, question]
+              properties: {csrf: {type: string}, question: {type: string}, mode: {type: string, default: quick}}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Research page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "429": {description: "Research page with the daily-limit message", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /skills:
+    x-code: ["/skills"]
+    get:
+      tags: [page]
+      summary: Skills tab
+      x-access: page
+      description: Matched on `self.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /briefs:
+    x-code: ["/briefs"]
+    get:
+      tags: [page]
+      summary: Briefs tab
+      x-access: page
+      description: Matched on `self.path`.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /briefs/{id}:
+    x-code: ["/briefs/([A-Z]-\\d{3,4})"]
+    get:
+      tags: [page]
+      summary: One brief
+      x-access: page
+      description: Id like `H-020`. Matched on `self.path`; an unknown brief is a 404 page.
+      parameters: [{$ref: "#/components/parameters/BriefId"}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /briefs/{id}/{action}:
+    x-code: ["/briefs/([A-Z]-\\d{3,4})/(build|park)"]
+    post:
+      tags: [page]
+      summary: Approve and build a draft brief, or park it
+      x-access: page
+      description: |
+        `park` commits `status: parked` to main of the product repo and redirects to `/briefs`. `build` starts a build
+        (`mode=without-me` makes it unattended), writes an `approval` entry to the conversation and redirects to
+        `/task/<build id>`. Any failure (not a draft, already being built, ...) is 400 with the briefs page and the
+        message.
+      parameters:
+        - {$ref: "#/components/parameters/BriefId"}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [build, park]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf]
+              properties: {csrf: {type: string}, mode: {type: string, enum: [without-me]}}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Briefs page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  /job/{name}:
+    x-code: ["/job/([a-z0-9-]+)"]
+    get:
+      tags: [page]
+      summary: One job
+      x-access: page
+      description: Matched on `self.path`; only when the job exists in `JOBS`, else 404 page.
+      parameters: [{$ref: "#/components/parameters/JobName"}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /job/{name}/{action}:
+    x-code: ["/job/([a-z0-9-]+)/(run|pause|resume|delete|save|change)"]
+    post:
+      tags: [page]
+      summary: Run, pause, resume, delete, save or change a job
+      x-access: page
+      description: |
+        Unknown job: 404 page. `change` with text starts a draft with the job as base (303 `/draft/<id>`); `run`
+        dispatches it now; `pause`/`resume` commit to the `jobs` branch; `save` with text validates and commits;
+        `delete` commits the removal and redirects to `/jobs`. Everything else (including `run` on a job with an error)
+        redirects to `/job/<name>`. An exception is 400 with the job page and the message.
+      parameters:
+        - {$ref: "#/components/parameters/JobName"}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [run, pause, resume, delete, save, change]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/TextForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Job page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /draft/{id}:
+    x-code: ["/draft/(\\d+)"]
+    get:
+      tags: [page]
+      summary: A job draft
+      x-access: page
+      description: "Matched on `self.path`; unknown draft: 404 page."
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /draft/{id}/{action}:
+    x-code: ["/draft/(\\d+)/(confirm|cancel)"]
+    post:
+      tags: [page]
+      summary: Confirm or cancel a job draft
+      x-access: page
+      description: |
+        Only for a draft with status `ready`; otherwise 404 page. `cancel` 303 to `/jobs`. `confirm` validates `text`,
+        commits the job and 303 to `/job/<name>`; a validation error is 400 with the draft page and the message.
+      parameters:
+        - {$ref: "#/components/parameters/NumericId"}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [confirm, cancel]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/TextForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "400": {description: "Draft page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /run/{id}:
+    x-code: ["/run/(\\d+)"]
+    get:
+      tags: [page]
+      summary: A job run
+      x-access: page
+      description: "Matched on `self.path` (no query string). Unknown run: 404 page."
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /run/{id}/cancel:
+    x-code: ["/run/(\\d+)/cancel"]
+    post:
+      tags: [page]
+      summary: Cancel a local job run
+      x-access: page
+      description: |
+        Unknown run: 404 page. A run that belongs to a Claude task redirects to `/task/<task id>` without doing
+        anything. A running local run is cancelled (and its script killed); then 303 to `/run/<id>`.
+      parameters:
+        - {$ref: "#/components/parameters/NumericId"}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/CsrfForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /agents/{name}/on:
+    x-code: ["/agents/([a-z0-9-]+)/on"]
+    post:
+      tags: [page]
+      summary: Switch on a catalogue agent (makes a draft)
+      x-access: page
+      description: "303 to `/draft/<id>`; unknown or broken agent: 404 page (\"Onbekende of kapotte agent.\"). Any other path under `/agents/` is also that 404."
+      parameters:
+        - {$ref: "#/components/parameters/JobName"}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/CsrfForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+        "404": {$ref: "#/components/responses/PageNotFound"}
+  /discord/{switch}/{state}:
+    x-code: ["/discord/(discord|discord_approvals|kitt)/(on|off)"]
+    post:
+      tags: [page]
+      summary: Switch Discord, Discord approvals or kitt on or off
+      x-access: page
+      description: |
+        Stores `switch:<name>` in the `kv` table and logs `switch <name> <state> by <device>`. 303 to `/#kitt` for the
+        kitt switch, `/#discord` for the others.
+      parameters:
+        - {name: switch, in: path, required: true, schema: {type: string, enum: [discord, discord_approvals, kitt]}}
+        - {name: state, in: path, required: true, schema: {type: string, enum: ["on", "off"]}}
+        - {$ref: "#/components/parameters/Origin"}
+      requestBody: {$ref: "#/components/requestBodies/CsrfForm"}
+      responses:
+        "303": {$ref: "#/components/responses/Redirect"}
+        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
+  # ------------------------------------------------------------------------------------------------ chat door
+  /api/chat/entries:
+    x-code: ["/api/chat/entries"]
+    get:
+      tags: [chat door]
+      summary: Read the conversation from a cursor
+      x-access: chat door
+      x-machine: true
+      description: |
+        Order of checks (shared by the three chat routes): peer is loopback, else 403 `loopback only`; bearer token
+        names a client in `config/clients.json`, else 401; the client's switch is on (Discord: `discord` switch; kitt:
+        `kitt` switch), else 403 with the switch state; then the permission `read`.
+        `after` and `limit` default to 0 and 200 (empty values count as the default); the store clamps limit to
+        1..1000. `next` is the id of the last entry returned, or `after` when there are none.
+      security: [{chatBearer: []}]
+      parameters:
+        - {name: after, in: query, required: false, schema: {type: integer, default: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 200}}
+      responses:
+        "200":
+          description: Entries with id > after, oldest first.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [entries, next]
+                properties:
+                  entries: {type: array, items: {$ref: "#/components/schemas/ConversationEntry"}}
+                  next: {type: integer}
+        "400": {$ref: "#/components/responses/ChatBadNumbers"}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403": {$ref: "#/components/responses/ChatForbidden"}
+    post:
+      tags: [chat door]
+      summary: Append an entry as Chris
+      x-access: chat door
+      x-machine: true
+      description: |
+        JSON body (read up to 64 KiB; `Content-Length` is trusted): `kind` (default `message`; `message` needs
+        permission `write`, `question` needs `ask`, `answer` needs `answer`), `text` (required), `ref` (optional,
+        cut to 80 characters). The client always writes as author `chris`. The text is scrubbed of secrets and cut to
+        20,000 characters; an empty text after trimming is a 400 `bad request: the text is empty`. Any other kind is a
+        refusal (logged in `conversation_refusals` as `append:<kind>`).
+      security: [{chatBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                kind: {type: string, enum: [message, question, answer], default: message}
+                text: {type: string}
+                ref: {type: string, nullable: true}
+      responses:
+        "200":
+          description: The stored entry.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [entry]
+                properties: {entry: {$ref: "#/components/schemas/ConversationEntry"}}
+        "400":
+          description: "Body is not JSON, `text` missing, text empty, or the body is not an object. Message is `bad request: <python exception text>`."
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/Error"}
+              examples:
+                missing: {value: {error: "bad request: 'text'"}}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403":
+          description: Not loopback, switched off, or no permission for this kind.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/Error"}
+              examples:
+                loopback: {value: {error: "loopback only"}}
+                kind: {value: {error: "refused: discord may not write 'notification'"}}
+  /api/chat/state:
+    x-code: ["/api/chat/state"]
+    get:
+      tags: [chat door]
+      summary: The switches clients may know
+      x-access: chat door
+      x-machine: true
+      description: |
+        Any authenticated client may ask (no permission needed, and it is answered even when the client's own switch is
+        off: clients poll it to see the switches). Other methods that reach the door (POST) get 405 `GET only`.
+      security: [{chatBearer: []}]
+      responses:
+        "200":
+          description: Switch state.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/ChatState"}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403": {description: "Not loopback", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "loopback only"}}}}
+    post:
+      tags: [chat door]
+      summary: Not allowed (405)
+      x-access: chat door
+      x-machine: true
+      security: [{chatBearer: []}]
+      responses:
+        "405": {description: Only GET, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "GET only"}}}}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403": {description: "Not loopback", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "loopback only"}}}}
+  /api/chat/action:
+    x-code: ["/api/chat/action"]
+    post:
+      tags: [chat door]
+      summary: An explicit action of chat.py
+      x-access: chat door
+      x-machine: true
+      description: |
+        JSON body `{"action": <name>, ...}`. Free text never selects an action. Checks: loopback, token, the client's
+        switch (403 with `refused: <why>` plus the state), then `FORBIDDEN` actions (`ssh_key`, `memory_edit`,
+        `merge_homelab`: 403 `refused: <action> cannot be done from a chat client`, whatever the config says), then the
+        action. Each action checks its own permission; a refusal is
+        `403 {"error": "refused: <why>"}` where `<why>` is the switch reason (for example `Discord is switched off on
+        the homelab page`, `approvals from Discord are off`) or `<client> may not <action with spaces>`.
+        An unexpected exception is 500 `{"error": "the action failed; see the inbox journal"}`. A GET (or any method
+        but POST) is 405 `POST only`.
+
+        | action | permission | extra fields | 200 body |
+        |---|---|---|---|
+        | `task` | `start_task` | `repo` (repo list or `auto`), `text` | `{"task": id, "url"}` |
+        | `answer` | `answer` | `task` (id), `text` | `{"task": id, "url"}` |
+        | `state` | `read` | | `{"tasks": [{id, status, repo, what, source, url}]}` |
+        | `jobs` | `read` | | `{"jobs": [{name, kind, when, paused, error}]}` |
+        | `run_job` | `run_job` | `job` | `{"run": id, "job": name}` |
+        | `research` | `research` | `question`, `mode` (default `quick`) | `{"run": id, "mode", "url"}` |
+        | `drafts` | `read` | | `{"briefs": [{id, title}]}` |
+        | `approve` | `approve` | `brief`, `mode` (`build` or `without-me`) | `{"confirm": token, "brief", "mode", "title", "expires_in"}` |
+        | `confirm` | `approve` | `confirm` (token) | `{"task": id, "url", "brief", "mode"}` |
+
+        Error bodies per action (status: message): `task` 400 `give a repo from the list (or 'auto') and a task text`,
+        429 `daily limit reached: <n> task(s) per day may start from <Client>; nothing was started`;
+        `answer` 404 `no such task`, 409 `task <id> is not waiting for an answer`;
+        `run_job` 404 `no runnable job '<name>'`;
+        `research` 400 `give a question and a mode: quick or deep`, 429 `daily limit reached: <n> Claude runs today;
+        research and Claude jobs share it. Nothing was started; ask again tomorrow.`;
+        `approve` 400 `give a brief id and a mode: build or without-me`, 409 `<id> is not a draft brief` or
+        `<id> is already being built`, 429 (the task cap message);
+        `confirm` 404 `unknown confirm token`, 410 `this confirmation is expired; nothing was approved` (or
+        `already used` / `already failed`), 409 with the failure text (cap, no longer a draft, build refused).
+        Unknown action: 400 `unknown action '<x>'`. Missing or invalid JSON: 400 `bad request: <python exception text>`.
+        The confirm token is valid for `CONFIRM_TTL_SECONDS` (300) and for one use by the same client.
+      security: [{chatBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: {type: string, enum: [task, answer, state, jobs, run_job, research, drafts, approve, confirm, ssh_key, memory_edit, merge_homelab]}
+                repo: {type: string}
+                text: {type: string}
+                task: {type: integer}
+                job: {type: string}
+                question: {type: string}
+                mode: {type: string}
+                brief: {type: string}
+                confirm: {type: string}
+              additionalProperties: true
+      responses:
+        "200":
+          description: Body depends on the action (table above).
+          content:
+            application/json; charset=utf-8:
+              schema: {type: object, additionalProperties: true}
+        "400": {description: "bad request / unknown action / action specific validation", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403": {$ref: "#/components/responses/ChatForbidden"}
+        "404": {description: "no such task / no runnable job / unknown confirm token", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "409": {description: "task not waiting / brief not a draft / already building / approval failed", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "410": {description: "confirmation expired or already used", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "429": {description: "daily limit", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "500": {description: "the action failed", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "the action failed; see the inbox journal"}}}}
+    get:
+      tags: [chat door]
+      summary: Not allowed (405)
+      x-access: chat door
+      x-machine: true
+      description: Past the token and switch checks any method other than POST is 405.
+      security: [{chatBearer: []}]
+      responses:
+        "405": {description: POST only, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "POST only"}}}}
+        "401": {$ref: "#/components/responses/ChatUnauthorized"}
+        "403": {$ref: "#/components/responses/ChatForbidden"}
+  # ------------------------------------------------------------------------------------------------ kitt door
+  /api/clients/kitt:
+    x-code: ["/api/clients/kitt"]
+    get:
+      tags: [kitt door]
+      summary: kitt's switch and capabilities
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Every kitt-door call: header `X-Homelab-Client` present (any value) enters the door. Then
+        `kitt.identify` must return None: header equals `kitt` (else 403 `refused: not the kitt client`), the TCP peer
+        is loopback and owned by kitt's service account `KITT_ACCOUNT` (default `homelab-app-kitt`, read from
+        `/proc/net/tcp*`; else 403 `refused: not from kitt's service account`), and `Tailscale-User-Login` equals the
+        tailnet owner (else 403 `refused: not Chris at the app`). A refusal is logged and answered
+        `{"error": "refused: <why>"}`. A POST body is JSON, read up to 64 KiB, an empty body counts as `{}`; invalid JSON
+        or a non-object is 400 `bad request: <python exception text>`. An unexpected exception is 500
+        `{"error": "the action failed; see the inbox journal"}`. A call that is not one of the routes below is
+        404 `{"error": "not a call kitt may make"}`. Handlers refuse with 403 `{"error": <why>}`, where `<why>` is
+        `Kitt is switched off on the homelab page` or `kitt may not <permission with spaces>` (for approvals: `approvals
+        from kitt are off`).
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      responses:
+        "200":
+          description: Capabilities; all false while the switch is off.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [enabled, permissions]
+                properties:
+                  enabled: {type: boolean}
+                  permissions:
+                    type: object
+                    required: [chat, jobs, approvals, usage, logs]
+                    properties:
+                      chat: {type: boolean, description: "read, write, ask"}
+                      jobs: {type: boolean, description: "read, run_job"}
+                      approvals: {type: boolean, description: "approve"}
+                      usage: {type: boolean, description: "read"}
+                      logs: {type: boolean, description: "read"}
+        "403": {$ref: "#/components/responses/KittRefused"}
+        "404": {$ref: "#/components/responses/KittUnknown"}
+  /api/conversation:
+    x-code: ["/api/conversation"]
+    get:
+      tags: [kitt door]
+      summary: Read the thread from a cursor (after)
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Needs `read`. `after` is a number (a non-number counts as 0); at most 200 entries. Entries are mapped by
+        `kitt.entry`: a `message` becomes `task` when its ref starts with `task:` or `job:`, else `question`; a kind
+        outside `question, task, answer, notification, approval_request, approval` becomes `notification`; a client other
+        than `discord`, `kitt`, `page` becomes `box`.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+        - {name: after, in: query, required: false, schema: {type: integer, default: 0}}
+      responses:
+        "200":
+          description: Entries and the new cursor (`after` when empty).
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [entries, cursor]
+                properties:
+                  entries: {type: array, items: {$ref: "#/components/schemas/KittEntry"}}
+                  cursor: {type: integer}
+        "403": {$ref: "#/components/responses/KittRefused"}
+    post:
+      tags: [kitt door]
+      summary: Send a question or a task typed in kitt
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Body `{"kind": "question"|"task", "text": ...}`. A `task` is started like a Discord task
+        (`chat.start_task("kitt", "auto", text)`, same cap, permission `start_task`; its errors pass through: 403
+        `refused: ...`, 429 daily limit) and answered with its entry. A `question` needs `ask`, is stored, and answered
+        later in the thread by the private search (background thread). 502 if a started task is not in the thread.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, text]
+              properties:
+                kind: {type: string, enum: [question, task]}
+                text: {type: string}
+      responses:
+        "200":
+          description: The new entry.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [entry]
+                properties: {entry: {$ref: "#/components/schemas/KittEntry"}}
+        "400": {description: "send a question or a task with a text (or bad request: ...)", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "send a question or a task with a text"}}}}
+        "403": {$ref: "#/components/responses/KittRefused"}
+        "429": {description: Daily task limit, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "502": {description: Task started but not in the thread, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "the task started but is not in the thread"}}}}
+  /api/logs:
+    x-code: ["/api/logs"]
+    get:
+      tags: [kitt door]
+      summary: Recent logs (tasks and runs without a task)
+      x-access: kitt door
+      x-machine: true
+      description: Needs `read`. The 30 newest tasks (not `queued`) and the 30 newest job runs without a task, sorted by `startedAt` descending, at most 40.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      responses:
+        "200":
+          description: Log list.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [logs]
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, title, kind, state, startedAt]
+                      properties:
+                        id: {type: string, pattern: "^[tr][0-9]+$"}
+                        title: {type: string, maxLength: 120}
+                        kind: {type: string, enum: [task, job]}
+                        state: {type: string, enum: [running, failed, finished]}
+                        startedAt: {type: string}
+        "403": {$ref: "#/components/responses/KittRefused"}
+  /api/logs/{key}:
+    x-code: ["/api/logs/([^/]+)"]
+    get:
+      tags: [kitt door]
+      summary: A chunk of one log
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Needs `read`. `key` must match `[tr]\d+`, and the task or run must exist, else 404 `no such log`. Lines are
+        rendered as `HH:MM:SS [kind] text` (strings, unlike `/api/log/<key>` which returns objects). At most 500 lines
+        per call; `next` is the offset to ask for next.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+        - {name: key, in: path, required: true, schema: {type: string, pattern: "^[tr][0-9]+$"}}
+        - {name: from, in: query, required: false, schema: {type: integer, default: 0}, description: "a non-number counts as 0"}
+      responses:
+        "200":
+          description: Lines and state.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [lines, next, state]
+                properties:
+                  lines: {type: array, items: {type: string}}
+                  next: {type: integer}
+                  state: {type: string, enum: [running, failed, finished]}
+        "403": {$ref: "#/components/responses/KittRefused"}
+        "404": {description: no such log, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "no such log"}}}}
+  /api/approvals:
+    x-code: ["/api/approvals"]
+    get:
+      tags: [kitt door]
+      summary: "The bell: draft briefs and tasks waiting for an answer"
+      x-access: kitt door
+      x-machine: true
+      description: Needs `read`. Draft briefs first, then waiting tasks by id.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      responses:
+        "200":
+          description: Items.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, title, at]
+                      properties:
+                        id: {type: string, description: "a brief id, or `question:<task id>`"}
+                        kind: {type: string, enum: [brief, question]}
+                        title: {type: string}
+                        at: {type: string}
+        "403": {$ref: "#/components/responses/KittRefused"}
+  /api/approvals/{item}:
+    x-code: ["/api/approvals/([^/]+)"]
+    post:
+      tags: [kitt door]
+      summary: Approve a draft brief
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Body `{"decision": "approve" | "approve_unattended"}` (build, or build without me). Runs both steps of the
+        approval (`chat.approval_request` then `approval_confirm`), so their errors pass through. Errors: 400 `kitt
+        approves with approve or approve_unattended; denying is not offered`; 409 `only a brief is approved; answer a
+        question from Claude in the thread` (item is not a brief id); 403 `approvals from kitt are off` or the switch
+        reason; and from the two steps: 409 (not a draft, already being built, approval failed), 429 (cap), 404/410
+        (token; not expected here).
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+        - {name: item, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties: {decision: {type: string, enum: [approve, approve_unattended]}}
+      responses:
+        "200":
+          description: Build started.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [task, url, brief, mode]
+                properties:
+                  task: {type: integer}
+                  url: {type: string}
+                  brief: {type: string}
+                  mode: {type: string, enum: [build, without-me]}
+        "400": {description: Unknown decision, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "403": {$ref: "#/components/responses/KittRefused"}
+        "409": {description: Not a brief, not a draft, already building, or approval failed, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "429": {description: Daily task limit, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+  /api/jobs:
+    x-code: ["/api/jobs"]
+    get:
+      tags: [kitt door]
+      summary: Job cards
+      x-access: kitt door
+      x-machine: true
+      description: Needs `read`. All jobs sorted by name; a broken job file has `error` set and empty fields.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      responses:
+        "200":
+          description: Jobs.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs: {type: array, items: {$ref: "#/components/schemas/JobCard"}}
+        "403": {$ref: "#/components/responses/KittRefused"}
+  /api/jobs/{name}/{action}:
+    x-code: ["/api/jobs/([a-z0-9-]+)/(run|pause|resume)"]
+    post:
+      tags: [kitt door]
+      summary: Run now, pause or resume a job
+      x-access: kitt door
+      x-machine: true
+      description: |
+        Needs `run_job`. Unknown or broken job: 404 `no usable job '<name>'`. `run` is `chat.run_job` (its 403 text
+        is `refused: <why>`; success `{"run": id, "job": name}`). `pause` and `resume` commit to the `jobs` branch and
+        write a `chris`/`kitt` message to the thread; success `{"job": name, "paused": bool}`. Creating, editing and
+        deleting jobs are not offered.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+        - {name: name, in: path, required: true, schema: {type: string, pattern: "^[a-z0-9-]+$"}}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [run, pause, resume]}}
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                oneOf:
+                  - {type: object, required: [run, job], properties: {run: {type: integer}, job: {type: string}}}
+                  - {type: object, required: [job, paused], properties: {job: {type: string}, paused: {type: boolean}}}
+        "403": {$ref: "#/components/responses/KittRefused"}
+        "404": {description: No usable job, content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}, example: {error: "no usable job 'x'"}}}}
+  /api/health:
+    x-code: ["/api/health"]
+    get:
+      tags: [kitt door]
+      summary: Health checks of the box
+      x-access: kitt door
+      x-machine: true
+      description: Needs `read`. Checks sorted by name; a status other than OK/WARN/FAIL becomes `warn`.
+      parameters:
+        - {$ref: "#/components/parameters/KittClient"}
+        - {$ref: "#/components/parameters/TailscaleUser"}
+      responses:
+        "200":
+          description: Checks.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [checks]
+                properties:
+                  checks:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, status, text]
+                      properties:
+                        name: {type: string}
+                        status: {type: string, enum: [ok, warn, fail]}
+                        text: {type: string}
+        "403": {$ref: "#/components/responses/KittRefused"}
+components:
+  securitySchemes:
+    chatBearer:
+      type: http
+      scheme: bearer
+      description: "Token in /etc/homelab/chat-<client>-token (directory overridable with CHAT_TOKEN_DIR); compared with hmac.compare_digest."
+  parameters:
+    Origin:
+      name: Origin
+      in: header
+      required: true
+      schema: {type: string}
+      description: "Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too)."
+    NumericId: {name: id, in: path, required: true, schema: {type: string, pattern: "^[0-9]+$"}}
+    BriefId: {name: id, in: path, required: true, schema: {type: string, pattern: "^[A-Z]-[0-9]{3,4}$"}}
+    JobName: {name: name, in: path, required: true, schema: {type: string, pattern: "^[a-z0-9-]+$"}}
+    KittClient:
+      name: X-Homelab-Client
+      in: header
+      required: true
+      schema: {type: string, enum: [kitt]}
+    TailscaleUser:
+      name: Tailscale-User-Login
+      in: header
+      required: true
+      schema: {type: string}
+      description: "Set by the gate (gate.py); must equal the tailnet owner's login."
+  requestBodies:
+    CsrfForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required: [csrf]
+            properties:
+              csrf: {type: string, description: "HMAC token of pages.csrf_token(); mismatch gives 403 'Verlopen formulier; ververs de pagina.'"}
+    TextForm:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required: [csrf]
+            properties:
+              csrf: {type: string}
+              text: {type: string, description: "CRLF normalised and trimmed"}
+  responses:
+    Html:
+      description: HTML page.
+      content:
+        text/html; charset=utf-8: {schema: {type: string}}
+    Redirect:
+      description: See Other.
+      headers:
+        Location: {schema: {type: string}}
+    PageForbidden:
+      description: "Caller is not the tailnet owner or comes from the box itself: HTML page 'geweigerd' ('Alleen vanaf je eigen apparaten op het tailnet.')."
+      content:
+        text/html; charset=utf-8: {schema: {type: string}}
+    PageForbiddenCsrf:
+      description: |
+        403 HTML page 'geweigerd': not the owner (as above), 'Verkeerde herkomst.' (Origin does not match Host) or
+        'Verlopen formulier; ververs de pagina.' (CSRF token wrong).
+      content:
+        text/html; charset=utf-8: {schema: {type: string}}
+    PageNotFound:
+      description: "HTML page 'niet gevonden' ('Niet gevonden.')."
+      content:
+        text/html; charset=utf-8: {schema: {type: string}}
+    ForgeUnreachable:
+      description: Forge does not answer or answers garbage.
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/UpstreamError"}
+          example: {error: {message: "Forge is not reachable (is homelab-app-forge running?)."}}
+    UpstreamUnreachable:
+      description: The search service (or router) is unreachable or answered garbage.
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/UpstreamError"}
+          example: {error: {message: "The search service is unreachable: <detail>"}}
+    ChatBadNumbers:
+      description: "`after` or `limit` is not a number."
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/Error"}
+          example: {error: "after and limit are numbers"}
+    ChatUnauthorized:
+      description: No token, or a token no client has (the attempt is logged as a refusal of `unknown`/`authenticate`).
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/Error"}
+          example: {error: "unknown client or token"}
+    ChatForbidden:
+      description: |
+        Not loopback (`loopback only`); the client's switch is off or it lacks the permission
+        (`refused: <why>`). A switch refusal also carries `discord` and `discord_approvals`.
+      content:
+        application/json; charset=utf-8:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: {type: string}
+              discord: {type: boolean}
+              discord_approvals: {type: boolean}
+          examples:
+            loopback: {value: {error: "loopback only"}}
+            switchedOff: {value: {error: "refused: Discord is switched off on the homelab page", discord: false, discord_approvals: false}}
+            permission: {value: {error: "refused: no permission 'read'"}}
+    KittRefused:
+      description: |
+        Identity refused (`refused: not the kitt client` / `not from kitt's service account` / `not Chris at the app`)
+        or the handler refuses (`Kitt is switched off on the homelab page`, `kitt may not <permission>`,
+        `approvals from kitt are off`).
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/Error"}
+    KittUnknown:
+      description: Not one of kitt's routes (also a known path with another method).
+      content:
+        application/json; charset=utf-8:
+          schema: {$ref: "#/components/schemas/Error"}
+          example: {error: "not a call kitt may make"}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties: {error: {type: string}}
+      description: "Error body of the chat door and kitt door."
+    UpstreamError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties: {message: {type: string}}
+      description: "Error body of /api/forge*, /api/search/* and forge's log (an upstream may add fields, e.g. request_id)."
+    ChatState:
+      type: object
+      required: [discord, discord_approvals]
+      properties:
+        discord: {type: boolean}
+        discord_approvals: {type: boolean, description: "true only while `discord` is on and approvals are on"}
+    ConversationEntry:
+      type: object
+      required: [id, time, author, client, kind, text, link, ref]
+      properties:
+        id: {type: integer}
+        time: {type: string, description: "UTC ISO 8601, seconds"}
+        author: {type: string, enum: [chris, claude, box, system]}
+        client: {type: string, description: "discord, kitt, page, inbox, ..."}
+        kind: {type: string, enum: [message, question, answer, notification, approval_request, approval]}
+        text: {type: string, maxLength: 20000}
+        link: {type: string, nullable: true}
+        ref: {type: string, nullable: true, description: "task:<id>, job:<name>, brief:<id>, question:<id>, job:research:<run>"}
+    KittEntry:
+      type: object
+      required: [id, at, author, client, kind, text]
+      properties:
+        id: {type: integer}
+        at: {type: string}
+        author: {type: string}
+        client: {type: string, enum: [discord, kitt, page, box]}
+        kind: {type: string, enum: [question, task, answer, notification, approval_request, approval]}
+        text: {type: string}
+    JobCard:
+      type: object
+      required: [name, schedule, model, deliver, paused, running, lastResult, nextRun, error]
+      properties:
+        name: {type: string}
+        schedule: {type: string}
+        model: {type: string}
+        deliver: {type: string}
+        paused: {type: boolean}
+        running: {type: boolean}
+        lastResult:
+          nullable: true
+          type: object
+          required: [state, at, summary]
+          properties:
+            state: {type: string, enum: [ok, failed]}
+            at: {type: string}
+            summary: "{type: string, maxLength: 300}"
+        nextRun: {type: string, nullable: true, description: "ISO 8601; null while paused or broken"}
+        error: {type: string, nullable: true}
+    LiveItem:
+      type: object
+      required: [key, title, what, repo, model, url, cancel, started]
+      properties:
+        key: {type: string, description: "t<id> task, r<id> local run, f1 forge"}
+        title: {type: string}
+        what: {type: string}
+        repo: {type: string}
+        model: {type: string}
+        url: {type: string, description: "/task/<id>, /run/<id>, or the forge page URL"}
+        cancel: {type: string, nullable: true, description: "POST path, null for forge"}
+        started: {type: string}
+    LogLine:
+      type: object
+      required: [at, kind, text]
+      properties:
+        at: {type: string}
+        kind: {type: string, description: "info, claude, tool, result, error, out (forge: info, claude, tool, error)"}
+        text: {type: string, maxLength: 600}
+    LogChunk:
+      type: object
+      required: [lines, next, done]
+      properties:
+        lines: {type: array, items: {$ref: "#/components/schemas/LogLine"}}
+        next: {type: integer}
+        done: {type: boolean}
+    ForgeLogChunk:
+      type: object
+      required: [lines, next, done]
+      description: "At most 500 lines; `next` is forge's own `next` when it is an integer, else `from` + number of lines; `done` is true when forge is not running."
+      properties:
+        lines: {type: array, items: {$ref: "#/components/schemas/LogLine"}}
+        next: {type: integer}
+        done: {type: boolean}
+    ForgeState:
+      type: object
+      required: [running, step, project, activity, started, paused, pause_reason, paused_until]
+      properties:
+        running: {type: boolean}
+        step: {nullable: true}
+        project: {type: string, nullable: true}
+        activity: {type: string, nullable: true}
+        started: {type: string, nullable: true}
+        paused: {type: boolean}
+        pause_reason: {type: string, nullable: true}
+        paused_until: {type: string, nullable: true}

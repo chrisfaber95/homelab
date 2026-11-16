@@ -84,6 +84,19 @@ class OpenApiCoversRoutes(unittest.TestCase):
             self.assertTrue(any(re.match(r"\s+x-access: (page|chat door|kitt door)$", l) for l in block),
                             f"operation at line {i + 1} has no x-access")
 
+    def test_spec_is_valid_yaml_with_the_openapi_shape(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        spec = yaml.safe_load(SPEC.read_text())
+        self.assertTrue(str(spec["openapi"]).startswith("3."))
+        for path, item in spec["paths"].items():
+            for method in ("get", "post"):
+                if method in item:
+                    self.assertIn("responses", item[method], f"{method.upper()} {path}")
+                    self.assertIn(item[method]["x-access"], ("page", "chat door", "kitt door"), f"{method.upper()} {path}")
+
 
 if __name__ == "__main__":
     unittest.main()

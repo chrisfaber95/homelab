@@ -1,0 +1,12 @@
+{
+  "action": "plan",
+  "args": [
+    "plan",
+    "r524"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "plan-ok",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"system for plan\", \"--model\", \"claude-fable-5-2\", \"--fallback-model\", \"claude-opus-5-5\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/r524\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"prompt for plan\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

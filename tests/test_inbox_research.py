@@ -250,7 +250,7 @@ class Permissions(unittest.TestCase):
 
     def test_review_prompt_goes_in_on_stdin(self):
         """A prompt as an argument fails above 128 KiB (Argument list too long); REVIEW_MAX_DIFF allows more."""
-        block = self.SCRIPT.split("draft|route|review)", 1)[1].split(";;", 1)[0]
+        block = self.SCRIPT.split("draft|route|plan|review)", 1)[1].split(";;", 1)[0]
         self.assertIn('< "$prompt"', block)
         self.assertNotIn('"$(cat "$prompt")"', block)
 

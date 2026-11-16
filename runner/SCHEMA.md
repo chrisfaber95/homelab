@@ -100,11 +100,14 @@ one more line `[gestopt na <minutes> minuten]`. stderr: only the refusals below 
 Exit: the script's own exit code; 65 the script did not run (`onbekende repo`, `ongeldig pad`, `<path> staat niet in
 <repo>`); 124 timeout (not recorded in a fixture: the configured minutes cannot be shortened in a test).
 
-### `route <id>`, `draft <id>`, `review <id>`
+### `route <id>`, `plan <id>`, `draft <id>`, `review <id>`
 
-Claude without tools, for the router (`r<task>`), job drafts (`d<draft>`) and brief reviews (`v<task>`). Reads
-`share/<id>/prompt.txt` (on stdin) and `share/<id>/system.txt`, works in a temporary `work/<id>` that is removed after.
-The command is `claude -p --append-system-prompt <system> --tools "" --output-format json`.
+Claude without tools, for the router (`r<task>`), the brief planner (`plan`, `r<task>`), job drafts (`d<draft>`) and
+brief reviews (`v<task>`). Reads `share/<id>/prompt.txt` (on stdin) and `share/<id>/system.txt`, works in a temporary
+`work/<id>` that is removed after.
+The command is `claude -p --append-system-prompt <system> [--model <m> [--fallback-model <f>]] --tools "" --output-format json`.
+`plan` adds `--model $PLAN_MODEL` and `review` adds `--model $REVIEW_MODEL` when set in `config/inbox.conf`, plus
+`--fallback-model $FALLBACK_MODEL` when that is set too; `route` and `draft` never pass a model.
 stdout: Claude's one JSON document (`--output-format json`): an object with `is_error` and `result` (the text). Callers cut
 the string at the first `{`, parse it, and fail on a non-zero exit or `is_error`.
 Exit: Claude's exit code; 1 when `prompt.txt` or `system.txt` is missing (`cat` fails).
@@ -119,7 +122,7 @@ code is that of the command the script ran and can be any value.
 | any | 0 | Done (for `has`, `behind`, `bundle`, `sync` the meaning is in the action rows). |
 | any | 2 | Refused before doing anything: bad task number, unknown action, bad or unknown argument, no working copy (`ongeldig taaknummer`, `onbekende actie`, `onbekende repo`, `ongeldige soort run`, `ongeldige sessie`, `geen werkkopie`). |
 | prepare, sync | 128 | Git failed (clone, fetch, checkout): its own code (not recorded in a fixture). |
-| run, route, draft, review | 1 | Claude's own exit code (any value; 1 is the usual failure). `route`, `draft` and `review` also give 1 when the prompt files are missing. |
+| run, route, plan, draft, review | 1 | Claude's own exit code (any value; 1 is the usual failure). `route`, `plan`, `draft` and `review` also give 1 when the prompt files are missing. |
 | bundle | 1 | No working copy (`cd` fails), not `geen werkkopie` and not exit 2. |
 | bundle | 3 | No new commits on `inbox/<id>`: nothing to push. |
 | sync | 1 | The merge failed without conflicts and was aborted. |

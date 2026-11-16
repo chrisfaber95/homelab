@@ -33,3 +33,4 @@ Items added by the build setup for briefs H-012, H-016 and H-017. A later setup 
 | home-chat-intent | skill | written for H-019 | - | H-019 |
 | frontend-developer | agent | written for the inbox split | - | task 167 |
 | architect | agent | written for the inbox split | - | task 167 |
+| api-database-engineer | agent | written for the inbox split | - | task 167 |

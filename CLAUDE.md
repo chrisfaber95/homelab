@@ -110,6 +110,7 @@ Added for brief H-017 (agents: deep research, delivery and a catalogue):
 Added for the inbox split (plan: `docs/architecture/inbox-split.md`):
 - `architect` (agent): where code belongs and the contracts between frontend (TypeScript), backend (Spring Boot) and Python runners; writes plans in `docs/architecture/`.
 - `frontend-developer` (agent): the frontend in TypeScript, against the JSON API of the plan.
+- `api-database-engineer` (agent): the REST API and the PostgreSQL database of the Spring Boot backend (Flyway migrations, the SQLite import, the OpenAPI contract).
 
 Added for brief H-019 (Home: a Home Assistant front in kitt, the homelab page and chat):
 - `home-actions` (skill, written for H-019): the picked list, the fixed set of home actions, per-client permission and off-switch, the Home Assistant token in `/etc/homelab`, and what is logged.

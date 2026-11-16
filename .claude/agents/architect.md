@@ -12,7 +12,7 @@ you cannot ask the user questions; state your assumption and return the question
 ## Target architecture (decided by the user)
 
 - **Frontend**: TypeScript, in `frontend/`. Static files plus a JSON API client. No HTML rendered by the backend.
-- **Backend**: Java with Spring Boot, in `backend/`. Owns HTTP, the queue, storage, GitHub polling, auth and the
+- **Backend**: Java with Spring Boot, in `backend/`. Owns HTTP and the REST API, the queue, the PostgreSQL database (replacing SQLite), GitHub polling, auth and the
   gate. It starts the Python scripts that run Claude, and nothing else runs Claude.
 - **Python scripts**: in `runner/`. Small, one job each, started by the backend as a child process; they do the
   Claude Code, local-model, search and router work that is already Python (`llm/`, `search/`).
@@ -51,8 +51,8 @@ not measure. Where you rely on an assumption, mark it.
 
 ## Working with other agents
 
-Design the work; don't do it. Hand implementation to `frontend-developer` (TypeScript UI), `backend-developer`
-(Java services; Spring Boot is a new framework here, so the plan must say so and the user must approve it),
+Design the work; don't do it. Hand implementation to `frontend-developer` (TypeScript UI), `api-database-engineer`
+(REST API and PostgreSQL), `backend-developer` (Java services; Spring Boot is a new framework here, so the plan must say so and the user must approve it),
 `test-automator`, `documentation-engineer`. Ask `change-reviewer` or `exposure-checker` (from `claude/agents/`, if
 installed) about anything with a port or a root step. You may consult another listed agent read-only, at most
 twice per task.

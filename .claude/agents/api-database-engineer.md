@@ -41,7 +41,7 @@ ask the user questions; state an assumption and return the question instead.
 
 ## Verification and safety
 
-Run the tests and build (`./gradlew test build` or what exists) and report what you saw; say "not run" when it can't
+Run the tests and build (`./mvnw test verify` in `backend/`, or what exists) and report what you saw; say "not run" when it can't
 run, never present a placeholder as passing. Don't touch the running inbox, its service or the live database. Stop only a
 server you started yourself, found by its port or pid file. Don't commit or push. Report new dependencies with
 versions. Scripts and units go through `scripts/` with a `# homelab-rerun:` line and the `exposure-checker`; root

@@ -172,7 +172,7 @@ merges or exposes the wrong thing); they move last, with the Python behaviour pi
 - Ports: the backend takes 8105 at cut-over (the existing ufw rule on `tailscale0` stays); on a spare port during the
   migration, with its own rule, bound to the Tailscale address or loopback only.
 - Build: `scripts/27-backend.sh` installs a pinned JDK from Ubuntu packages (`homelab-admin package`, so it needs
-  `config/machine.conf`), builds with Gradle or Maven wrapper offline from a pinned lockfile, and installs `frontend/dist`
+  `config/machine.conf`), builds with Maven (the Maven wrapper, `mvnw`, with pinned plugin and dependency versions in `backend/pom.xml`), and installs `frontend/dist`
   and the jar. Node is needed to build the frontend; use the version Ubuntu or the project's deploy path already has.
   Dependencies are pinned and listed with versions in the PR.
 - RAM and disk on the laptop phase (24 GB, 250 GB): a Spring Boot service with a capped heap (`-Xmx256m` as the
@@ -197,9 +197,9 @@ merges or exposes the wrong thing); they move last, with the Python behaviour pi
 0. **Database**: confirm PostgreSQL, and choose how Java reaches it: unix socket via junixsocket (preferred) or a
    loopback listener with a password.
 
-1. **Go-ahead for Java 21 and Spring Boot** as a new framework on the box (CLAUDE.md asks before new ones), and for
-   Gradle vs Maven (assumed: Gradle with the wrapper).
-2. **Frontend tooling**: assumed Vite + plain TypeScript (no UI framework). A framework such as React or Lit is
+1. **Go-ahead for Java 21 and Spring Boot** as a new framework on the box (CLAUDE.md asks before new ones).
+   Decided in review: the build tool is **Maven**.
+2. **Frontend tooling**: Vite + plain TypeScript (no UI framework), confirmed in review. A framework such as React or Lit is
    possible; the `frontend-developer` agent will not add one without being told.
 3. **Stop after step 1?** Step 1 alone already takes the frontend out of Python. Whether to continue to Java after
    seeing it is the user's call; the plan is built so that stopping there is fine.

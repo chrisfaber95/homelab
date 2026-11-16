@@ -1,0 +1,16 @@
+{
+  "action": "run",
+  "args": [
+    "run",
+    "511",
+    "11111111-2222-3333-4444-555555555555",
+    "new"
+  ],
+  "env": {
+    "INBOX_CLAUDE_TOKEN": "<tmp>/token"
+  },
+  "exit_code": 0,
+  "name": "run-with-token-file",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"the prompt\", \"--append-system-prompt\", \"the system\", \"--session-id\", \"11111111-2222-3333-4444-555555555555\", \"--permission-mode\", \"auto\", \"--output-format\", \"stream-json\", \"--verbose\"], \"auto_memory_disabled\": true, \"cwd\": \"<tmp>/task/work/511/repo\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"\", \"subtype\": \"success\", \"token_set\": true, \"type\": \"result\"}\n"
+}

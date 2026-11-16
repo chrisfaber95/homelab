@@ -1,0 +1,9 @@
+{
+  "action": "",
+  "args": [],
+  "env": {},
+  "exit_code": 2,
+  "name": "no-arguments",
+  "stderr": "ongeldig taaknummer\n",
+  "stdout": ""
+}

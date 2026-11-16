@@ -1,0 +1,12 @@
+{
+  "action": "bundle",
+  "args": [
+    "bundle",
+    "504"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "bundle-ok",
+  "stderr": "",
+  "stdout": "abc1234 Add a thing\n"
+}

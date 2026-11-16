@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Fake homelab-inbox-task (H-020 C3): replays the recorded outputs in tests/fixtures/runner/ for the given action and
+arguments (same stdout, stderr and exit code), so the inbox can be tested without sudo, git clones or Claude.
+Use it as TASK_CMD (TASK_CMD=/path/to/this/script). Arguments no fixture covers: exit 99 and a message on stderr.
+RUNNER_FIXTURES overrides the fixture directory."""
+import json
+import os
+import sys
+from pathlib import Path
+
+DIR = Path(os.environ.get("RUNNER_FIXTURES") or Path(__file__).resolve().parent.parent / "fixtures/runner")
+
+
+def main(args):
+    for f in sorted(DIR.glob("*.json")):
+        fx = json.loads(f.read_text())
+        if fx["args"] == args:
+            sys.stdout.write(fx["stdout"])
+            sys.stderr.write(fx["stderr"])
+            return fx["exit_code"]
+    sys.stderr.write(f"fake homelab-inbox-task: no fixture for {args}\n")
+    return 99
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

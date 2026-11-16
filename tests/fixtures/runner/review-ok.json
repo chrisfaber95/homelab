@@ -1,0 +1,12 @@
+{
+  "action": "review",
+  "args": [
+    "review",
+    "v522"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "review-ok",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"system for review\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/v522\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"prompt for review\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

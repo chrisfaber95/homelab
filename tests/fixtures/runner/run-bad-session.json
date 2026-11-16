@@ -1,0 +1,14 @@
+{
+  "action": "run",
+  "args": [
+    "run",
+    "510",
+    "not-a-session",
+    "new"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "run-bad-session",
+  "stderr": "ongeldige sessie\n",
+  "stdout": ""
+}

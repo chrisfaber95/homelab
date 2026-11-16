@@ -1,0 +1,12 @@
+{
+  "action": "has",
+  "args": [
+    "has",
+    "596"
+  ],
+  "env": {},
+  "exit_code": 1,
+  "name": "has-no",
+  "stderr": "",
+  "stdout": ""
+}

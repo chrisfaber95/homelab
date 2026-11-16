@@ -1,0 +1,15 @@
+{
+  "action": "run",
+  "args": [
+    "run",
+    "510",
+    "11111111-2222-3333-4444-555555555555",
+    "new",
+    "other"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "run-bad-kind",
+  "stderr": "ongeldige soort run\n",
+  "stdout": ""
+}

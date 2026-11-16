@@ -1,0 +1,12 @@
+{
+  "action": "prepare",
+  "args": [
+    "prepare",
+    "abc"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "bad-task-number",
+  "stderr": "ongeldig taaknummer\n",
+  "stdout": ""
+}

@@ -1,0 +1,12 @@
+{
+  "action": "has",
+  "args": [
+    "has",
+    "x5"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "task-number-wrong-prefix",
+  "stderr": "ongeldig taaknummer\n",
+  "stdout": ""
+}

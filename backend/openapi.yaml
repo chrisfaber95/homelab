@@ -1397,7 +1397,7 @@ components:
           properties:
             state: {type: string, enum: [ok, failed]}
             at: {type: string}
-            summary: "{type: string, maxLength: 300}"
+            summary: {type: string, maxLength: 300}
         nextRun: {type: string, nullable: true, description: "ISO 8601; null while paused or broken"}
         error: {type: string, nullable: true}
     LiveItem:

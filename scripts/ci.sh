@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # homelab: the checks of every pull request (.github/workflows/ci.yml runs this). Run it yourself
-# before a PR: bash scripts/ci.sh. There is no package.json, so no npm lint, typecheck or build; for this repo those are:
+# before a PR: bash scripts/ci.sh. The frontend/ checks (npm) are a separate job in ci.yml. For the rest of the repo:
 #   lint       shellcheck on the shell scripts, py_compile on the Python (also catches syntax errors = "typecheck")
 #   validate   docker compose config on compose.yaml, and the exposure check on its definition
 #   tests      python3 -m unittest discover -s tests
@@ -20,7 +20,7 @@ fi
 echo "== python syntax"
 python3 -I - <<'PY'
 import ast, pathlib
-files = [p for p in pathlib.Path(".").rglob("*.py") if ".git" not in p.parts]
+files = [p for p in pathlib.Path(".").rglob("*.py") if ".git" not in p.parts and "node_modules" not in p.parts]
 files += [pathlib.Path(f) for f in ("bin/homelab-admin", "bin/homelab-backup", "bin/homelab-deploy",
                                     "bin/homelab-inbox", "bin/homelab-monitor", "bin/llm",
                                     "bin/llm-route", "bin/homelab-search")]

@@ -48,6 +48,22 @@ gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-d
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
 wijzigingen. Stijl en script: `web/app.css` en `web/app.js`.
 
+## JSON API: CSRF token and errors (H-021)
+
+The page's JavaScript talks to `/api/*` (contract: `backend/openapi.yaml`). Two rules apply to every `/api/*` call of
+the page (the chat and kitt doors have their own checks):
+
+- `GET /api/session` returns `{"csrf_token": "..."}`. Every mutating request (POST, PUT, PATCH, DELETE) must send it as
+  the header `X-CSRF-Token`, next to the `Origin` of the page. A missing or wrong token is 403. `web/app.js` fetches
+  the token once (`csrfToken()`) before its POSTs (search ask and feedback, forge start and stop). The HTML forms keep
+  their hidden `csrf` field; `/api/*` does not accept the field.
+- Every error under `/api/*` is `{"error": "text"}`: a refused caller (403), an unknown route (404), a bad parameter
+  (400), a failure of an upstream (502) and an unexpected exception (500, details in the journal). The `{"error":
+  {"message": ...}}` of forge and the search API is unwrapped by the inbox. PUT, PATCH and DELETE are not implemented
+  and answer 405 after the token check.
+
+Tests: `tests/test_inbox_session.py`. Pages that are not under `/api/` still answer with HTML.
+
 ## Beheer
 
 Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`, `bin/homelab_inbox/`, `web/` of de config:

@@ -1,7 +1,7 @@
 """Route coverage (H-020): every route of server.py and kitt.py, with its method, must be in backend/openapi.yaml.
 The routes are read from the Python source with ast, the same way the code reads them: a path literal compared with
 `path` / `self.path` / `url.path`, or the first argument of re.fullmatch/re.match on it. The method comes from the
-handler it sits in (do_GET, do_POST and the post_* helpers), from the `method == ...` tests of kitt.route, and the
+handler it sits in (handle_get, handle_post and the post_* helpers), from the `method == ...` tests of kitt.route, and the
 three chat-door paths are checked for both GET and POST (the door answers a wrong method with 405, which the spec
 documents). A route counts as documented when a path item of the spec lists the literal in its `x-code` line and has
 that method. The test also proves itself: against a copy of the spec with a path or one operation removed it must
@@ -18,7 +18,7 @@ SERVER, KITT = ROOT / "bin/homelab_inbox/server.py", ROOT / "bin/homelab_inbox/k
 SPEC = ROOT / "backend/openapi.yaml"
 METHODS = ("get", "post", "put", "patch", "delete")
 CHAT_DOOR_METHODS = ("GET", "POST")
-FUNCTION_METHOD = {"do_GET": ("GET",), "do_POST": ("POST",), "post_jobs": ("POST",), "post_agent": ("POST",),
+FUNCTION_METHOD = {"handle_get": ("GET",), "handle_post": ("POST",), "number": (), "post_jobs": ("POST",), "post_agent": ("POST",),
                    "post_memory": ("POST",), "cancel_run": ()}
 
 

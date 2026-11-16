@@ -81,8 +81,10 @@ class SearchTab(unittest.TestCase):
         headers = {}
         body = None
         if form is not None:
-            body = urllib.parse.urlencode({**({"csrf": pages.csrf_token()} if csrf else {}), **form})
+            body = urllib.parse.urlencode(form)
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            if csrf:
+                headers["X-CSRF-Token"] = pages.csrf_token()
             if origin:
                 headers["Origin"] = f"http://127.0.0.1:{self.port}"
         c.request(method, path, body, headers)
@@ -95,7 +97,6 @@ class SearchTab(unittest.TestCase):
         for needle in ('href="/search" aria-current=page', 'id="sq"', 'name="hard"', 'id="sproject"', 'id="stype"',
                        'width=device-width', 'id="sanswer"', 'id="sresults"'):
             self.assertIn(needle, html)
-        self.assertIn(pages.csrf_token(), html)
         self.assertIn('<a href="/search">Search</a>', self.req("GET", "/")[1])
 
     def test_filters_and_results_are_proxied_with_filters(self):
@@ -143,7 +144,7 @@ class SearchTab(unittest.TestCase):
         finally:
             search.SEARCH_URL = old
         self.assertEqual(status, 502)
-        self.assertIn("unreachable", json.loads(body)["error"]["message"])
+        self.assertIn("unreachable", json.loads(body)["error"])
 
     def test_upstream_errors_keep_their_status(self):
         s = serve(type("E", (Upstream,), {"do_GET": lambda self: self.reply(503, {"error": {"message": "stale"}})}))
@@ -154,7 +155,7 @@ class SearchTab(unittest.TestCase):
         finally:
             search.SEARCH_URL = old
             s.shutdown()
-        self.assertEqual((status, json.loads(body)["error"]["message"]), (503, "stale"))
+        self.assertEqual((status, json.loads(body)["error"]), (503, "stale"))
 
 
 class ExposureChecker(unittest.TestCase):

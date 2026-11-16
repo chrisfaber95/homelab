@@ -256,9 +256,11 @@ class Contract(unittest.TestCase):
     def form(self, method, path, fields=None, origin=True, csrf=True):
         """A page POST (or GET): form-encoded, Origin equal to Host, and the CSRF field."""
         fields = dict(fields or {})
-        if csrf:
-            fields["csrf"] = pages.csrf_token()
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        if csrf and path.startswith("/api/"):  # /api/* takes the token as a header (GET /api/session), pages as a field
+            headers["X-CSRF-Token"] = pages.csrf_token()
+        elif csrf:
+            fields["csrf"] = pages.csrf_token()
         if origin:
             headers["Origin"] = f"http://{self.host}:{self.port}"
         return self.call(method, path, headers=headers, raw=urllib.parse.urlencode(fields) if method == "POST" else None)
@@ -492,8 +494,8 @@ class KittDoor(Contract):
     def test_without_the_client_header_the_page_check_answers(self):
         self.local()
         r = self.call("GET", "/api/jobs")
-        self.assertEqual((r.status, r.ctype), (403, "text/html; charset=utf-8"))
-        self.assertIn("geweigerd", r.body)
+        self.assertEqual((r.status, r.ctype), (403, JSON_UTF8))
+        self.assertEqual(r.body, {"error": "Only from your own devices on the tailnet."})
 
     def test_unknown_calls_are_404_with_a_fixed_body(self):
         self.local()
@@ -621,15 +623,16 @@ class KittDoor(Contract):
 class PageMachineEndpoints(Contract):
     """The JSON endpoints of the homelab page: they need page access (the tailnet owner) and, for POST, Origin + CSRF."""
 
-    def test_the_box_itself_gets_the_html_403(self):
+    def test_the_box_itself_gets_a_json_403(self):
         self.local()
         for method, path in (("GET", "/api/live"), ("GET", "/api/log/t1"), ("GET", "/api/forge"),
                              ("GET", "/api/search/filters"), ("GET", "/api/search/results?q=x")):
             r = self.call(method, path)
-            self.assertEqual((r.status, r.ctype), (403, "text/html; charset=utf-8"), path)
+            self.assertEqual((r.status, r.ctype), (403, JSON_UTF8), path)
+            self.assertEqual(r.body, {"error": "Only from your own devices on the tailnet."})
             self.conforms(r, path.split("?")[0].replace("/t1", "/{key}"), method)
         r = self.call("POST", "/api/forge/start", headers={"Origin": "http://x"}, raw="csrf=1")
-        self.assertEqual((r.status, r.ctype), (403, "text/html; charset=utf-8"))
+        self.assertEqual((r.status, r.ctype), (403, JSON_UTF8))
 
     def test_live(self):
         self.local()
@@ -677,7 +680,7 @@ class PageMachineEndpoints(Contract):
         self.assertEqual(self.call("GET", "/api/log/r424242").body, {"lines": [], "next": 0, "done": True})
         for path in ("/api/log/t", "/api/log/x1", "/api/log/t1/extra"):
             r = self.conforms(self.call("GET", path), "/api/log/{key}", "get", 404)
-            self.assertEqual(r.ctype, "text/html; charset=utf-8")
+            self.assertEqual((r.ctype, r.body), (JSON_UTF8, {"error": "Not found."}))
 
     def test_log_of_forge(self):
         self.local()
@@ -689,7 +692,7 @@ class PageMachineEndpoints(Contract):
         self.assertIn(("GET", "/api/log?from=3", None), self.up["seen"])
         self.up["forge_log"] = (500, {})
         r = self.conforms(self.call("GET", "/api/log/f1"), "/api/log/{key}", "get", 502)
-        self.assertEqual(r.body, {"error": {"message": forge.UNREACHABLE}})
+        self.assertEqual(r.body, {"error": forge.UNREACHABLE})
 
     def test_forge_state(self):
         self.local()
@@ -700,7 +703,7 @@ class PageMachineEndpoints(Contract):
                                   "paused_until": None})
         self.dead_upstreams()
         r = self.conforms(self.call("GET", "/api/forge"), "/api/forge", "get", 502)
-        self.assertEqual(r.body, {"error": {"message": "Forge is not reachable (is homelab-app-forge running?)."}})
+        self.assertEqual(r.body, {"error": "Forge is not reachable (is homelab-app-forge running?)."})
 
     def test_forge_control(self):
         self.local()
@@ -710,19 +713,20 @@ class PageMachineEndpoints(Contract):
         self.assertIn(("POST", "/api/stop", {}), self.up["seen"])
         self.up["control"] = (409, {"error": "busy"})
         r = self.conforms(self.form("POST", "/api/forge/start"), "/api/forge/{action}", "post", 502)
-        self.assertEqual(r.body, {"error": {"message": "Forge refused start (HTTP 409): busy"}})
+        self.assertEqual(r.body, {"error": "Forge refused start (HTTP 409): busy"})
         self.dead_upstreams()
         r = self.conforms(self.form("POST", "/api/forge/start"), "/api/forge/{action}", "post", 502)
-        self.assertIn("Forge refused start", r.body["error"]["message"])
+        self.assertIn("Forge refused start", r.body["error"])
 
     def test_forge_control_checks_origin_csrf_and_action(self):
         self.local()
         self.allow_page()
         for r in (self.form("POST", "/api/forge/start", origin=False), self.form("POST", "/api/forge/start", csrf=False)):
             self.conforms(r, "/api/forge/{action}", "post", 403)
-            self.assertEqual(r.ctype, "text/html; charset=utf-8")
-        self.assertIn("Verkeerde herkomst.", self.form("POST", "/api/forge/start", origin=False).body)
-        self.assertIn("Verlopen formulier", self.form("POST", "/api/forge/start", csrf=False).body)
+            self.assertEqual(r.ctype, JSON_UTF8)
+        self.assertEqual(self.form("POST", "/api/forge/start", origin=False).body, {"error": "Wrong origin."})
+        self.assertIn("X-CSRF-Token", self.form("POST", "/api/forge/start", csrf=False).body["error"])
+        self.assertEqual(self.form("POST", "/api/forge/restart").body, {"error": "Not found."})
         self.assertEqual(self.form("POST", "/api/forge/restart").status, 404)
         self.assertEqual([s for s in self.up["seen"] if s[0] == "POST"], [])
         self.assertEqual(self.call("GET", "/api/forge/start").status, 404)
@@ -741,7 +745,7 @@ class PageMachineEndpoints(Contract):
         self.assertIn(("GET", "/v1/search?q=", None), self.up["seen"])
         self.up["filters"] = (503, {"error": {"message": "index is locked", "request_id": "abc123"}})
         r = self.call("GET", "/api/search/filters")
-        self.assertEqual((r.status, r.body["error"]["message"]), (503, "index is locked"))
+        self.assertEqual((r.status, r.body["error"]), (503, "index is locked"))
 
     def test_search_upstream_trouble(self):
         self.local()
@@ -749,7 +753,7 @@ class PageMachineEndpoints(Contract):
         self.dead_upstreams()
         for path in ("/api/search/filters", "/api/search/results?q=x"):
             r = self.conforms(self.call("GET", path), path.split("?")[0], "get", 502, JSON_UTF8)
-            self.assertTrue(r.body["error"]["message"].startswith("The search service is unreachable: "), r)
+            self.assertTrue(r.body["error"].startswith("The search service is unreachable: "), r)
 
     def test_search_ask(self):
         self.local()
@@ -761,7 +765,7 @@ class PageMachineEndpoints(Contract):
         self.assertEqual(r.body["answer"], "Port 8105.")
         self.assertIn(("POST", "/v1/ask", {"question": "which port?", "project": "homelab", "hard": True}), self.up["seen"])
         r = self.conforms(self.form("POST", "/api/search/ask", {"question": "   "}), "/api/search/ask", "post", 400)
-        self.assertEqual(r.body, {"error": {"message": "Type a question first."}})
+        self.assertEqual(r.body, {"error": "Type a question first."})
         for r in (self.form("POST", "/api/search/ask", {"question": "x"}, origin=False),
                   self.form("POST", "/api/search/ask", {"question": "x"}, csrf=False)):
             self.conforms(r, "/api/search/ask", "post", 403)
@@ -775,11 +779,11 @@ class PageMachineEndpoints(Contract):
         self.assertIn(("POST", "/v1/feedback", {"request_id": "req_12345", "note": "n" * 1000}), self.up["seen"])
         for rid in ("", "short", "bad id!", "x" * 65):
             r = self.conforms(self.form("POST", "/api/search/feedback", {"request_id": rid}), "/api/search/feedback", "post", 400)
-            self.assertEqual(r.body, {"error": {"message": "That answer has no request id to mark."}})
+            self.assertEqual(r.body, {"error": "That answer has no request id to mark."})
         self.dead_upstreams()
         r = self.conforms(self.form("POST", "/api/search/feedback", {"request_id": "req_12345"}), "/api/search/feedback",
                           "post", 502)
-        self.assertTrue(r.body["error"]["message"].startswith("The search service is unreachable: "))
+        self.assertTrue(r.body["error"].startswith("The search service is unreachable: "))
 
 
 class Spec(unittest.TestCase):

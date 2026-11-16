@@ -20,6 +20,8 @@ from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
 
+API_PREFIX = "/api/"
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "homelab-inbox/1"
@@ -45,14 +47,48 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def send_upstream(self, status, obj):
-        self.send(status, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
+        self.send(status, json.dumps(flat_error(status, obj), ensure_ascii=False), "application/json; charset=utf-8")
+
+    def is_api(self):
+        return urllib.parse.urlsplit(self.path).path.startswith(API_PREFIX)
+
+    def refuse(self, code, html, error):
+        """An error answer: `{"error": "..."}` for /api/*, an HTML page for the pages."""
+        if self.is_api():
+            return self.send_upstream(code, {"error": error})
+        return self.send(code, page({403: "geweigerd", 404: "niet gevonden"}.get(code, "fout"), html))
 
     def guard(self):
         ok, who = Access.allowed(self.client_address[0].removeprefix("::ffff:"))
         self.who = who
         if not ok:
-            self.send(403, page("geweigerd", "<p>Alleen vanaf je eigen apparaten op het tailnet.</p>"))
+            self.refuse(403, "<p>Alleen vanaf je eigen apparaten op het tailnet.</p>",
+                        "Only from your own devices on the tailnet.")
         return ok
+
+    def guarded(self, handle):
+        """Run a handler; an unexpected exception on /api/* becomes a 500 with a JSON error, not a dropped connection."""
+        try:
+            handle()
+        except Exception as e:  # noqa: BLE001
+            log(f"{self.command} {self.path}: {type(e).__name__}: {e}")
+            if self.is_api():
+                self.send_upstream(500, {"error": "the request failed; see the inbox journal"})
+            else:
+                raise
+
+    def csrf_ok(self, form):
+        """Page POSTs and every mutating /api/* request: the Origin must be this page, and the token must match. /api/*
+        takes the token only as the X-CSRF-Token header (from GET /api/session); the forms carry it as a field."""
+        if urllib.parse.urlsplit(self.headers.get("Origin", "")).netloc != self.headers.get("Host", ""):
+            self.refuse(403, "<p>Verkeerde herkomst.</p>", "Wrong origin.")
+            return False
+        sent = self.headers.get("X-CSRF-Token", "") if self.is_api() else form.get("csrf", "")
+        if not hmac.compare_digest(sent.encode(), csrf_token().encode()):
+            self.refuse(403, "<p>Verlopen formulier; ververs de pagina.</p>",
+                        "Missing or wrong X-CSRF-Token; fetch it from GET /api/session.")
+            return False
+        return True
 
     def chat_door(self, method):
         """The narrow door for chat clients (docs/conversation.md): loopback only, only /api/chat/entries, a client
@@ -163,6 +199,26 @@ class Handler(BaseHTTPRequestHandler):
             return 500, {"error": "the action failed; see the inbox journal"}
 
     def do_GET(self):
+        self.guarded(self.handle_get)
+
+    def do_POST(self):
+        self.guarded(self.handle_post)
+
+    def do_PUT(self):
+        self.guarded(self.handle_mutating)
+
+    do_PATCH = do_DELETE = do_PUT
+
+    def handle_mutating(self):
+        """PUT, PATCH and DELETE are not implemented anywhere. On /api/* they still need the token first (so the check
+        covers every mutating method), then answer 405 as JSON; elsewhere the default 501."""
+        if not self.is_api():
+            return self.send_error(501, f"Unsupported method ({self.command!r})")
+        if not self.guard() or not self.csrf_ok({}):
+            return
+        self.send_upstream(405, {"error": f"{self.command} is not supported"})
+
+    def handle_get(self):
         if self.kitt_door("GET") or self.chat_door("GET"):
             return
         if not self.guard():
@@ -174,16 +230,22 @@ class Handler(BaseHTTPRequestHandler):
                 ctype = {"css": "text/css; charset=utf-8", "js": "text/javascript; charset=utf-8",
                          "woff2": "font/woff2"}[m.group(2)]
                 return self.send(200, f.read_bytes(), ctype, cache="private, max-age=86400")
+        if url.path == "/api/session":
+            return self.send_upstream(200, {"csrf_token": csrf_token()})
         if url.path == "/api/live":
             items, queued = live_items()
             return self.send(200, json.dumps({"items": items, "queued": queued,
                                               "activity": activity_sentence(items, queued)}),
                              "application/json")
         if url.path == f"/api/log/{forge.LIVE_KEY}":
-            start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
+            start = self.number(url, "from")
+            if start is None:
+                return
             return self.send_upstream(*forge.log(max(0, start)))
         if m := re.fullmatch(r"/api/log/([tr])(\d+)", url.path):
-            start = int((urllib.parse.parse_qs(url.query).get("from") or ["0"])[0] or 0)
+            start = self.number(url, "from")
+            if start is None:
+                return
             lines, nxt = read_log(f"{m.group(1)}{m.group(2)}", max(0, start))
             if m.group(1) == "t":
                 done = (t := get(int(m.group(2)))) is None or t["status"] not in ACTIVE
@@ -236,21 +298,28 @@ class Handler(BaseHTTPRequestHandler):
                 r = c.execute("SELECT * FROM job_runs WHERE id=?", (int(m.group(1)),)).fetchone()
             if r:
                 return self.send(200, run_page(r))
-        self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+        self.refuse(404, "<p>Niet gevonden.</p>", "Not found.")
 
-    def do_POST(self):
+    def number(self, url, key):
+        """A numeric query parameter (default 0), or None after a 400 JSON error."""
+        try:
+            return int((urllib.parse.parse_qs(url.query).get(key) or ["0"])[0] or 0)
+        except ValueError:
+            self.send_upstream(400, {"error": f"{key} must be a number"})
+
+    def handle_post(self):
         if self.kitt_door("POST") or self.chat_door("POST"):
             return
         if not self.guard():
             return
         # Tegen CSRF: het formulier moet van deze pagina komen (Origin) en het token bevatten.
-        origin = self.headers.get("Origin", "")
-        if urllib.parse.urlsplit(origin).netloc != self.headers.get("Host", ""):
-            return self.send(403, page("geweigerd", "<p>Verkeerde herkomst.</p>"))
-        length = min(int(self.headers.get("Content-Length") or 0), 64 * 1024)
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), 64 * 1024)
+        except ValueError:
+            return self.refuse(400, "<p>Slechte aanvraag.</p>", "Bad Content-Length.")
         form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
-        if not hmac.compare_digest(form.get("csrf", ""), csrf_token()):
-            return self.send(403, page("geweigerd", "<p>Verlopen formulier; ververs de pagina.</p>"))
+        if not self.csrf_ok(form):
+            return
         if m := re.fullmatch(r"/discord/(discord|discord_approvals|kitt)/(on|off)", self.path):
             conversation.set_switch(m.group(1), m.group(2) == "on")
             log(f"switch {m.group(1)} {m.group(2)} by {self.who}")
@@ -304,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/task/(\d+)/(accept|answer|cancel|attended|retry)", self.path)
         t = get(int(m.group(1))) if m else None
         if not t:
-            return self.send(404, page("niet gevonden", "<p>Niet gevonden.</p>"))
+            return self.refuse(404, "<p>Niet gevonden.</p>", "Not found.")
         if m.group(2) == "answer":
             answer_task(t, form.get("answer", ""))
         elif m.group(2) == "cancel" and (t["status"] in ACTIVE + ("waiting",) or (t["status"] == "routed" and not t["ended"])):
@@ -434,6 +503,16 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as ex:
             return self.send(400, entry_page(entry, error=str(ex), text=text))
         return self.send(303, "", location=f"/memory/e/{entry['id']}")
+
+
+def flat_error(status, obj):
+    """Every error of /api/* is `{"error": "text"}`. The upstream services (forge, search) wrap the text as
+    `{"error": {"message": ...}}`; unwrap it and keep other keys of the wrapper (such as request_id) at the top."""
+    if status >= 400 and isinstance(obj, dict) and isinstance(obj.get("error"), dict):
+        inner = obj["error"]
+        return {**{k: v for k, v in obj.items() if k != "error"}, **{k: v for k, v in inner.items() if k != "message"},
+                "error": str(inner.get("message") or f"HTTP {status}")}
+    return obj
 
 
 def check_mem_text(text):

@@ -1,0 +1,14 @@
+{
+  "action": "run",
+  "args": [
+    "run",
+    "510",
+    "11111111-2222-3333-4444-555555555555",
+    "resume"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "run-resume-with-history",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"the prompt\", \"--append-system-prompt\", \"the system\", \"--resume\", \"11111111-2222-3333-4444-555555555555\", \"--add-dir\", \"<tmp>/runner/share/510/geschiedenis\", \"--permission-mode\", \"auto\", \"--output-format\", \"stream-json\", \"--verbose\"], \"auto_memory_disabled\": true, \"cwd\": \"<tmp>/task/work/510/repo\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

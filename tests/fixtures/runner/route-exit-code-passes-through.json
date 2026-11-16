@@ -1,0 +1,14 @@
+{
+  "action": "route",
+  "args": [
+    "route",
+    "r523"
+  ],
+  "env": {
+    "FAKE_CLAUDE_EXIT": "1"
+  },
+  "exit_code": 1,
+  "name": "route-exit-code-passes-through",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"the system\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/r523\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"the prompt\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

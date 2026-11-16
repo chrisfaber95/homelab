@@ -1,0 +1,12 @@
+{
+  "action": "sync",
+  "args": [
+    "sync",
+    "506"
+  ],
+  "env": {},
+  "exit_code": 4,
+  "name": "sync-conflict",
+  "stderr": "",
+  "stdout": "README.md\n"
+}

@@ -1,0 +1,15 @@
+{
+  "action": "script",
+  "args": [
+    "script",
+    "j601",
+    "demo",
+    "hello.sh",
+    "world"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "script-ok",
+  "stderr": "",
+  "stdout": "hello world\n"
+}

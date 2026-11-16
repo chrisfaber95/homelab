@@ -1,0 +1,12 @@
+{
+  "action": "behind",
+  "args": [
+    "behind",
+    "597"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "behind-no-copy",
+  "stderr": "geen werkkopie\n",
+  "stdout": ""
+}

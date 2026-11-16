@@ -1,0 +1,14 @@
+{
+  "action": "script",
+  "args": [
+    "script",
+    "j603",
+    "nope",
+    "hello.sh"
+  ],
+  "env": {},
+  "exit_code": 65,
+  "name": "script-unknown-repo",
+  "stderr": "onbekende repo\n",
+  "stdout": ""
+}

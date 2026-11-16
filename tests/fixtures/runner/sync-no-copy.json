@@ -1,0 +1,12 @@
+{
+  "action": "sync",
+  "args": [
+    "sync",
+    "598"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "sync-no-copy",
+  "stderr": "geen werkkopie\n",
+  "stdout": ""
+}

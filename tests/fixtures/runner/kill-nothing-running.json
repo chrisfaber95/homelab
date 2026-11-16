@@ -1,0 +1,12 @@
+{
+  "action": "kill",
+  "args": [
+    "kill",
+    "501"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "kill-nothing-running",
+  "stderr": "",
+  "stdout": ""
+}

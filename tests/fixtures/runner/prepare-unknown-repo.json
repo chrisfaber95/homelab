@@ -1,0 +1,13 @@
+{
+  "action": "prepare",
+  "args": [
+    "prepare",
+    "501",
+    "nope"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "prepare-unknown-repo",
+  "stderr": "onbekende repo\n",
+  "stdout": ""
+}

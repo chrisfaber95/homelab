@@ -1,0 +1,12 @@
+{
+  "action": "cleanup",
+  "args": [
+    "cleanup",
+    "501"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "cleanup",
+  "stderr": "",
+  "stdout": ""
+}

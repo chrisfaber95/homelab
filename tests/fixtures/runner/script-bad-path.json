@@ -1,0 +1,14 @@
+{
+  "action": "script",
+  "args": [
+    "script",
+    "j604",
+    "demo",
+    "../etc/passwd"
+  ],
+  "env": {},
+  "exit_code": 65,
+  "name": "script-bad-path",
+  "stderr": "ongeldig pad\n",
+  "stdout": ""
+}

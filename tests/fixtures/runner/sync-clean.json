@@ -1,0 +1,12 @@
+{
+  "action": "sync",
+  "args": [
+    "sync",
+    "505"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "sync-clean",
+  "stderr": "",
+  "stdout": ""
+}

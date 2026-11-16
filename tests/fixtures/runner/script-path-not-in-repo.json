@@ -1,0 +1,14 @@
+{
+  "action": "script",
+  "args": [
+    "script",
+    "j605",
+    "demo",
+    "missing.sh"
+  ],
+  "env": {},
+  "exit_code": 65,
+  "name": "script-path-not-in-repo",
+  "stderr": "missing.sh staat niet in demo\n",
+  "stdout": ""
+}

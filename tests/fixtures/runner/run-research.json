@@ -1,0 +1,15 @@
+{
+  "action": "run",
+  "args": [
+    "run",
+    "510",
+    "11111111-2222-3333-4444-555555555555",
+    "new",
+    "research"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "run-research",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"the prompt\", \"--append-system-prompt\", \"the system\", \"--session-id\", \"11111111-2222-3333-4444-555555555555\", \"--add-dir\", \"<tmp>/runner/share/510/geschiedenis\", \"--tools\", \"Read,Grep,Glob,WebSearch,WebFetch,Bash\", \"--allowedTools\", \"Read\", \"Grep\", \"Glob\", \"WebSearch\", \"WebFetch\", \"Bash(homelab-search query:*)\", \"Bash(homelab-search status:*)\", \"--disallowedTools\", \"Edit\", \"Write\", \"NotebookEdit\", \"Bash(git:*)\", \"Bash(gh:*)\", \"Bash(homelab-admin:*)\", \"Bash(sudo:*)\", \"--permission-mode\", \"dontAsk\", \"--output-format\", \"stream-json\", \"--verbose\"], \"auto_memory_disabled\": true, \"cwd\": \"<tmp>/task/work/510/repo\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

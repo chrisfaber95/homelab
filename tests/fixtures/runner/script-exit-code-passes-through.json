@@ -1,0 +1,14 @@
+{
+  "action": "script",
+  "args": [
+    "script",
+    "j602",
+    "demo",
+    "fail.sh"
+  ],
+  "env": {},
+  "exit_code": 1,
+  "name": "script-exit-code-passes-through",
+  "stderr": "",
+  "stdout": "failing\n"
+}

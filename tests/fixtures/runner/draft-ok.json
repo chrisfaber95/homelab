@@ -1,0 +1,12 @@
+{
+  "action": "draft",
+  "args": [
+    "draft",
+    "d521"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "draft-ok",
+  "stderr": "",
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"system for draft\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/d521\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"prompt for draft\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+}

@@ -1,0 +1,12 @@
+{
+  "action": "frobnicate",
+  "args": [
+    "frobnicate",
+    "501"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "unknown-action",
+  "stderr": "onbekende actie\n",
+  "stdout": ""
+}

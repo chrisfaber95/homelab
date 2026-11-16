@@ -1,0 +1,12 @@
+{
+  "action": "bundle",
+  "args": [
+    "bundle",
+    "503"
+  ],
+  "env": {},
+  "exit_code": 3,
+  "name": "bundle-nothing-new",
+  "stderr": "",
+  "stdout": ""
+}

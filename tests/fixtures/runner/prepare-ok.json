@@ -1,0 +1,13 @@
+{
+  "action": "prepare",
+  "args": [
+    "prepare",
+    "501",
+    "demo"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "prepare-ok",
+  "stderr": "",
+  "stdout": ""
+}

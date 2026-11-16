@@ -240,7 +240,7 @@ loopback services, so the tab adds **no port, no CORS and no ufw rule**:
 | `POST /api/search/ask` (`question`, `hard`, `project`, `type`) | search API `POST /v1/ask` |
 | `POST /api/search/feedback` (`request_id`, `note`) | router `POST /v1/feedback` |
 
-POSTs carry the page's CSRF token and need the page's `Origin`, like every form (asking is a POST because `hard` spends
+POSTs carry the page's CSRF token (header `X-CSRF-Token`, from `GET /api/session`) and need the page's `Origin`, like every form (asking is a POST because `hard` spends
 allowance and must not be triggerable by a link). The thumbs-down posts the `request_id` of the answer; the router
 looks up the caller (`search`), tier and backend of that request and stores them, so it shows in the usage view
 (`docs/router.md`) at once. The button is hidden when there is no request id (the "nothing relevant" answer never

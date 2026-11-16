@@ -4,6 +4,14 @@
 const POLL_LIVE = 2500;  // ms; een afgeronde run verdwijnt dus binnen een paar seconden
 const POLL_LOG = 2000;   // ms; het log loopt hooguit ~2 s achter
 
+// Mutating /api/* calls need the CSRF token as X-CSRF-Token; it comes from GET /api/session (fetched once).
+let csrfPromise = null;
+function csrfToken() {
+  csrfPromise ||= fetch("/api/session", { cache: "no-store" }).then((r) => r.json()).then((d) => d.csrf_token)
+    .catch((e) => { csrfPromise = null; throw e; });
+  return csrfPromise;
+}
+
 function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -164,7 +172,6 @@ if (live) {
 // Search tab (H-012): ask, list sources, thumbs-down. Talks to the inbox only (/api/search/*).
 const searchForm = document.getElementById("search-form");
 if (searchForm) {
-  const csrf = searchForm.dataset.csrf;
   const status = document.getElementById("sstatus");
   const answerBox = document.getElementById("sanswer");
   const resultsBox = document.getElementById("sresults");
@@ -174,12 +181,12 @@ if (searchForm) {
   const safeHref = (u) => (/^(https?|obsidian):/i.test(u || "") ? u : null);
   const say = (text, bad = false) => { status.textContent = text; status.classList.toggle("error", bad); };
   const errorOf = async (r) => {
-    try { return (await r.json()).error?.message || `HTTP ${r.status}`; } catch (e) { return `HTTP ${r.status}`; }
+    try { return (await r.json()).error || `HTTP ${r.status}`; } catch (e) { return `HTTP ${r.status}`; }
   };
-  const post = (path, fields) => fetch(path, {
+  const post = async (path, fields) => fetch(path, {
     method: "POST", cache: "no-store",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ csrf, ...fields }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": await csrfToken() },
+    body: new URLSearchParams(fields),
   });
   const filters = () => {
     const f = {};
@@ -288,7 +295,6 @@ if (searchForm) {
 // Forge (H-015): state, Start and Stop. Talks to the inbox only (/api/forge*), which calls forge.
 const forgeBox = document.getElementById("forge");
 if (forgeBox) {
-  const csrf = forgeBox.dataset.csrf;
   const status = document.getElementById("forge-status");
   const buttons = forgeBox.querySelectorAll("button[data-forge]");
   const show = (d) => {
@@ -301,7 +307,7 @@ if (forgeBox) {
     try {
       const r = await fetch("/api/forge", { cache: "no-store" });
       const d = await r.json();
-      if (r.ok) show(d); else fail(d.error?.message || `HTTP ${r.status}`);
+      if (r.ok) show(d); else fail(d.error || `HTTP ${r.status}`);
     } catch (e) { fail("Forge is not reachable."); }
   };
   for (const b of buttons) {
@@ -310,11 +316,11 @@ if (forgeBox) {
       try {
         const r = await fetch(`/api/forge/${b.dataset.forge}`, {
           method: "POST", cache: "no-store",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ csrf }),
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": await csrfToken() },
+          body: new URLSearchParams(),
         });
         const d = await r.json();
-        if (r.ok) show(d); else fail(d.error?.message || `HTTP ${r.status}`);
+        if (r.ok) show(d); else fail(d.error || `HTTP ${r.status}`);
       } catch (e) { fail("Forge is not reachable."); }
       buttons.forEach((x) => { x.disabled = false; });
     });

@@ -479,7 +479,7 @@ def forge_html():
     the state. The link to forge's page is its line in config/services.conf."""
     link = next((s["address"] for s in SERVICES if s["name"] == "Forge"), "")
     page_link = f' <a href="{html.escape(link)}">Forge page</a>' if link.startswith(("http://", "https://")) else ""
-    return (f'<section id="forge" class="sec-forge" data-csrf="{csrf_token()}"><div class="section-head"><h2>Forge</h2>'
+    return (f'<section id="forge" class="sec-forge"><div class="section-head"><h2>Forge</h2>'
             f'<p class="note">autopilot{page_link}</p></div>'
             '<p id="forge-status" class="note" role="status">Checking forge...</p>'
             '<div class="forge-actions"><button type="button" data-forge="start">Start</button> '
@@ -869,7 +869,7 @@ def search_page():
     return page("search", f"""<h1>Search</h1>
 <p class="muted">Ask about anything written down: the second brain, briefs, sessions, repo docs and memory. Private,
 answered on the box.</p>
-<form id="search-form" class="search" data-csrf="{csrf_token()}" role="search">
+<form id="search-form" class="search" role="search">
 <label for="sq">Question</label>
 <textarea id="sq" name="q" rows="2" maxlength="2000" required placeholder="Where did we decide on sqlite?"></textarea>
 <div class="search-filters">

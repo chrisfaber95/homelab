@@ -3,3 +3,7 @@ __pycache__/
 # Tokens and keys never go in the repo (the box keeps them in /etc/homelab).
 hacs-github-token
 *.token
+
+# Frontend (frontend/): dependencies and build output.
+node_modules/
+frontend/dist/

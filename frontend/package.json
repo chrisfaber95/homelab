@@ -1,0 +1,19 @@
+{
+  "name": "homelab-inbox-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "gen:types": "openapi-typescript ../backend/openapi.yaml -o src/api/schema.d.ts",
+    "lint": "tsc --noEmit -p tsconfig.lint.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

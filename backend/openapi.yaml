@@ -100,6 +100,49 @@ paths:
                 required: [csrf_token]
                 properties: {csrf_token: {type: string}}
         "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/skills:
+    x-code: ["/api/skills"]
+    get:
+      tags: [machine]
+      summary: What the Skills tab shows, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+        20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+        `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+      responses:
+        "200":
+          description: The Skills page data.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [intro, empty, proposals_empty, skills, proposals]
+                properties:
+                  intro: {type: string}
+                  empty: {type: string, description: "shown when `skills` is empty"}
+                  proposals_empty: {type: string, description: "shown when `proposals` is empty"}
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description, jobs]
+                      properties:
+                        name: {type: string}
+                        description: {type: string}
+                        jobs: {type: array, items: {type: string}, description: "names of the jobs that use it; empty shows 'geen'"}
+                  proposals:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, pr_url, task_id, created]
+                      properties:
+                        name: {type: string}
+                        pr_url: {type: string}
+                        task_id: {type: integer, nullable: true}
+                        created: {type: string}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/live:
     x-code: ["/api/live"]
     get:

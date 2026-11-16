@@ -66,6 +66,15 @@ CI (`.github/workflows/ci.yml`, job `frontend`, on every pull request): `npm ci 
 tests, build, a check that `dist/index.html` exists, and a check that `npm run gen:types` leaves `src/api/schema.d.ts`
 unchanged (the committed types match `backend/openapi.yaml`).
 
+In short, how the frontend fits into the inbox (details in the sections below):
+
+- `GET /api/session` returns the CSRF token; mutating `/api/*` requests send it as `X-CSRF-Token`; errors under `/api/*`
+  are `{"error": "..."}`.
+- `PORTED_PAGES` is empty by default and no page is ported yet, so the Python inbox still renders every page and the user
+  sees no change. A path listed there gets `frontend/dist/index.html` instead.
+- `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
+  root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
+
 ## JSON API: CSRF token and errors (H-021)
 
 The page's JavaScript talks to `/api/*` (contract: `backend/openapi.yaml`). Two rules apply to every `/api/*` call of

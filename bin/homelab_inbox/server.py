@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
 from .overview import activity_sentence, live_items
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_page, ssh_page, ssh_state, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -297,6 +297,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_upstream(*search.results(params.get("q", ""), params))
         if url.path == "/taken":
             return self.send(200, tasks_page())
+        if url.path == "/api/ssh":
+            return self.send_upstream(200, ssh_state())
         if url.path == "/ssh":
             return self.send(200, ssh_page())
         if url.path == "/memory":

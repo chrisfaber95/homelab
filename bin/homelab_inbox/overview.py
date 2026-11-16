@@ -6,7 +6,8 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 from . import forge
-from .config import CONF, JOBS, TZ, _round_started
+from .briefs import build_left_nothing, builds, live_build, split_frontmatter, load_briefs
+from .config import ACTIVE, BRIEF, CONF, JOBS, STATUS_NL, TZ, _round_started
 from .helpers import first_line, label, read_json
 from .jobs import JOB_KINDS, LLM_URL, RUN_NL, run_view
 from .storage import db, tasks
@@ -231,3 +232,51 @@ def usage():
             saved[kind] = saved.get(kind, 0) + mins
     return {"days": days, "llm": llm, "claude_jobs": per_day(claude_jobs), "inbox": per_day(inbox),
             "cap": int(CONF.get("JOB_CLAUDE_CAP", 10)), "saved": saved}
+
+
+WITHOUT_ME = ("The inbox merges each task PR itself once the brief reviewer finds every criterion met and CI is green, "
+              "and then the handoff. A PR on homelab, a missed criterion after the rework round, red CI or criteria "
+              "only you can check still wait for you.")
+
+
+def brief_view(b, text=False):
+    """One brief as the Briefs page shows it. `build` is the build that still counts (null: Build buttons show);
+    `actions` lists the buttons the page offers: build, build-without-me and, on a draft, park."""
+    build = live_build(b["id"])
+    out = {"id": b["id"], "title": b["title"], "status": b["status"], "priority": b["priority"],
+           "repos": b["repos"], "project": b["project"], "path": b["path"],
+           "build": {"id": build["id"], "url": f'/task/{build["id"]}'} if build else None,
+           "actions": [] if build else ["build", "build-without-me"] + (["park"] if b["status"] == "draft" else [])}
+    if text:
+        out["text"] = split_frontmatter(b["text"])[1].strip()
+    return out
+
+
+def build_view(t):
+    """A build parent as `task_row` shows it."""
+    what = JOB_KINDS.get(JOBS.get(t["job"], {}).get("kind"), "job") if t["job"] else first_line(t["text"])
+    return {"id": t["id"], "label": label(t), "url": f'/task/{t["id"]}', "status": t["status"],
+            "status_label": STATUS_NL[t["status"]], "what": what, "repo": t["repo"], "source": t["source"],
+            "created": t["created"], "ended": t["ended"], "pr_number": t["pr_number"], "pr_url": t["pr_url"]}
+
+
+def briefs_data(error=None):
+    """What `briefs_page` renders: drafts, approved, needs-design, the builds so far and the counts per status."""
+    try:
+        items = load_briefs()
+    except Exception as ex:
+        items, error = [], f"Can't read {CONF['PRODUCT_REPO']}: {ex}"
+    counts = {}
+    for b in items:
+        counts[b["status"]] = counts.get(b["status"], 0) + 1
+    done = builds()
+    by = lambda status: [brief_view(b) for b in items if b["status"] == status]
+    return {"error": error, "without_me": WITHOUT_ME, "drafts": by("draft"), "approved": by("approved"),
+            "needs_design": by("needs-design"), "builds": [build_view(t) for t in done],
+            "counts": [{"status": k, "count": n} for k, n in sorted(counts.items())],
+            "refresh": any(t["status"] in ACTIVE for t in done)}
+
+
+def brief_data(b, error=None):
+    """What `brief_page` renders: one brief with its text (front matter removed)."""
+    return {"error": error, "brief": brief_view(b, text=True)}

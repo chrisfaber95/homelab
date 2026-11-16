@@ -143,6 +143,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/briefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Briefs page shows (H-022 F11a)
+         * @description The data `briefs_page` renders: drafts, approved briefs and briefs that need design (from main of the product
+         *     repo), the builds so far (newest first) and the number of briefs per status. A brief with a live build has
+         *     `build` set and no `actions`; otherwise `actions` lists the buttons (`build`, `build-without-me`, and `park`
+         *     on a draft; they POST to `/briefs/<id>/build` and `/briefs/<id>/park`). When the product repo can't be read
+         *     the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["BriefsPage"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/briefs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the page of one brief shows (H-022 F11a)
+         * @description The data `brief_page` renders, the brief and its text without the front matter.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description e.g. H-022 */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The brief. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            error: string | null;
+                            brief: components["schemas"]["BriefView"];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/log/{key}": {
         parameters: {
             query?: never;
@@ -2758,6 +2849,53 @@ export interface components {
             /** @description ISO 8601; null while paused or broken */
             nextRun: string | null;
             error: string | null;
+        };
+        BriefView: {
+            id: string;
+            title: string;
+            /** @description draft, approved, needs-design, ... (empty: no status) */
+            status: string;
+            priority: string;
+            repos: string[];
+            project: string;
+            /** @description in the product repo */
+            path: string;
+            build: {
+                id: number;
+                url: string;
+            } | null;
+            actions: ("build" | "build-without-me" | "park")[];
+            /** @description Only on /api/briefs/{id}: the brief without front matter */
+            text?: string;
+        };
+        BuildView: {
+            id: number;
+            label: string;
+            url: string;
+            status: string;
+            /** @description Dutch, as the page shows it */
+            status_label: string;
+            what: string;
+            repo: string;
+            source: string | null;
+            created: string;
+            ended: string | null;
+            pr_number: number | null;
+            pr_url: string | null;
+        };
+        BriefsPage: {
+            error: string | null;
+            /** @description The note under the heading about Build without me */
+            without_me: string;
+            drafts: components["schemas"]["BriefView"][];
+            approved: components["schemas"]["BriefView"][];
+            needs_design: components["schemas"]["BriefView"][];
+            builds: components["schemas"]["BuildView"][];
+            counts: {
+                status: string;
+                count: number;
+            }[];
+            refresh: boolean;
         };
         LiveItem: {
             /** @description t<id> task, r<id> local run, f1 forge */

@@ -15,7 +15,7 @@ from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
-from .overview import activity_sentence, live_items
+from .overview import activity_sentence, brief_data, briefs_data, live_items
 from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
@@ -288,6 +288,12 @@ class Handler(BaseHTTPRequestHandler):
                              "application/json")
         if url.path == "/search":
             return self.send(200, search_page())
+        if url.path == "/api/briefs":
+            return self.send_upstream(200, briefs_data())
+        if (m := re.fullmatch(r"/api/briefs/([A-Z]-\d{3,4})", url.path)):
+            if not (b := brief_by_id(m.group(1))):
+                return self.send_upstream(404, {"error": "Not found."})
+            return self.send_upstream(200, brief_data(b))
         if url.path == "/api/forge":
             return self.send_upstream(*forge.state())
         if url.path == "/api/search/filters":

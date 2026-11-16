@@ -123,6 +123,48 @@ paths:
                   queued: {type: integer, description: "queued tasks among the 100 newest"}
                   activity: {type: string, description: "e.g. 'Niets bezig. Volgende job: x, ...'"}
         "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/briefs:
+    x-code: ["/api/briefs"]
+    get:
+      tags: [machine]
+      summary: What the Briefs page shows (H-022 F11a)
+      x-access: page
+      x-machine: true
+      description: |
+        The data `briefs_page` renders: drafts, approved briefs and briefs that need design (from main of the product
+        repo), the builds so far (newest first) and the number of briefs per status. A brief with a live build has
+        `build` set and no `actions`; otherwise `actions` lists the buttons (`build`, `build-without-me`, and `park`
+        on a draft; they POST to `/briefs/<id>/build` and `/briefs/<id>/park`). When the product repo can't be read
+        the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself).
+      responses:
+        "200":
+          description: The page data.
+          content:
+            application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/BriefsPage"}}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/briefs/{id}:
+    x-code: ["/api/briefs/([A-Z]-\\d{3,4})"]
+    get:
+      tags: [machine]
+      summary: What the page of one brief shows (H-022 F11a)
+      x-access: page
+      x-machine: true
+      description: "The data `brief_page` renders, the brief and its text without the front matter."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: "^[A-Z]-\\d{3,4}$"}, description: "e.g. H-022"}
+      responses:
+        "200":
+          description: The brief.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [error, brief]
+                properties:
+                  error: {type: string, nullable: true}
+                  brief: {$ref: "#/components/schemas/BriefView"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
   /api/log/{key}:
     x-code: ["/api/log/{forge.LIVE_KEY}", "/api/log/([tr])(\\d+)"]
     get:
@@ -1446,6 +1488,59 @@ components:
             summary: {type: string, maxLength: 300}
         nextRun: {type: string, nullable: true, description: "ISO 8601; null while paused or broken"}
         error: {type: string, nullable: true}
+    BriefView:
+      type: object
+      required: [id, title, status, priority, repos, project, path, build, actions]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        status: {type: string, description: "draft, approved, needs-design, ... (empty: no status)"}
+        priority: {type: string}
+        repos: {type: array, items: {type: string}}
+        project: {type: string}
+        path: {type: string, description: "in the product repo"}
+        build:
+          type: object
+          nullable: true
+          required: [id, url]
+          properties: {id: {type: integer}, url: {type: string}}
+        actions:
+          type: array
+          items: {type: string, enum: [build, build-without-me, park]}
+        text: {type: string, description: "Only on /api/briefs/{id}: the brief without front matter"}
+    BuildView:
+      type: object
+      required: [id, label, url, status, status_label, what, repo, source, created, ended, pr_number, pr_url]
+      properties:
+        id: {type: integer}
+        label: {type: string}
+        url: {type: string}
+        status: {type: string}
+        status_label: {type: string, description: "Dutch, as the page shows it"}
+        what: {type: string}
+        repo: {type: string}
+        source: {type: string, nullable: true}
+        created: {type: string}
+        ended: {type: string, nullable: true}
+        pr_number: {type: integer, nullable: true}
+        pr_url: {type: string, nullable: true}
+    BriefsPage:
+      type: object
+      required: [error, without_me, drafts, approved, needs_design, builds, counts, refresh]
+      properties:
+        error: {type: string, nullable: true}
+        without_me: {type: string, description: "The note under the heading about Build without me"}
+        drafts: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        approved: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        needs_design: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        builds: {type: array, items: {$ref: "#/components/schemas/BuildView"}}
+        counts:
+          type: array
+          items:
+            type: object
+            required: [status, count]
+            properties: {status: {type: string}, count: {type: integer}}
+        refresh: {type: boolean}
     LiveItem:
       type: object
       required: [key, title, what, repo, model, url, cancel, started]

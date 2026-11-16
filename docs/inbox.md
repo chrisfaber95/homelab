@@ -5,6 +5,8 @@ de tab Taken van de homelab-pagina, `docs/dashboard.md`).
 Kies een repo, beschrijf wat er moet gebeuren of wat je wilt weten, en verstuur. Claude eindigt met een PR, een
 antwoord op de pagina, één vraag terug, of een weigering met reden; bij elk daarvan krijg je een melding.
 
+> Plan to split the frontend (TypeScript) from the backend (Spring Boot, with Python runners): [`docs/architecture/inbox-split.md`](architecture/inbox-split.md).
+
 ## Wat er gebeurt
 
 ```

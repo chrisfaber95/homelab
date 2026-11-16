@@ -52,6 +52,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The CSRF token for mutating /api/* requests
+         * @description Returns the token that every mutating (POST, PUT, PATCH, DELETE) `/api/*` request of the page must send as
+         *     the `X-CSRF-Token` header (next to the `Origin` check). The token is stable while the inbox's secret file
+         *     (`csrf-secret`) is; the page's JavaScript fetches it once. Only the tailnet owner's devices can read it (the
+         *     page check), so a cross-site page cannot.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The token. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            csrf_token: string;
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live": {
         parameters: {
             query?: never;
@@ -87,7 +132,7 @@ export interface paths {
                         };
                     };
                 };
-                403: components["responses"]["PageForbidden"];
+                403: components["responses"]["ApiForbidden"];
             };
         };
         put?: never;
@@ -110,15 +155,14 @@ export interface paths {
          * @description Three routes share this path shape, matched in this order on `url.path`:
          *
          *     1. `/api/log/f1` (`forge.LIVE_KEY`): forge's own log through `forge.log(from)`; JSON is
-         *        `application/json; charset=utf-8`; upstream failure is 502 `{"error": {"message": ...}}`.
+         *        `application/json; charset=utf-8`; upstream failure is 502 `{"error": "..."}`.
          *     2. `/api/log/t<digits>` (task) and `/api/log/r<digits>` (job run): lines of `logs/<key>.log` from line
          *        `from`, at most 500 per call. Content type `application/json`. An unknown id is not an error: `lines` is
          *        empty and `done` is true. `done` is true when the task is not `queued`/`running` (or the run not
          *        `queued`/`running`), or does not exist, and no lines are left after this chunk.
          *
-         *     Any other key (for example `t` without digits) is not a route: generic 404 page.
-         *     A non-numeric `from` raises ValueError inside the handler (no try/except): the connection ends without a
-         *     proper response (no status line is written by the application). A negative `from` is clamped to 0.
+         *     Any other key (for example `t` without digits) is not a route: 404 `{"error": "Not found."}`.
+         *     A non-numeric `from` is 400 `{"error": "from must be a number"}`. A negative `from` is clamped to 0.
          */
         get: {
             parameters: {
@@ -143,8 +187,17 @@ export interface paths {
                         "application/json": components["schemas"]["LogChunk"] | components["schemas"]["ForgeLogChunk"];
                     };
                 };
-                403: components["responses"]["PageForbidden"];
-                404: components["responses"]["PageNotFound"];
+                /** @description `from` is not a number. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
                 502: components["responses"]["ForgeUnreachable"];
             };
         };
@@ -182,7 +235,7 @@ export interface paths {
                         "application/json; charset=utf-8": components["schemas"]["ForgeState"];
                     };
                 };
-                403: components["responses"]["PageForbidden"];
+                403: components["responses"]["ApiForbidden"];
                 502: components["responses"]["ForgeUnreachable"];
             };
         };
@@ -205,7 +258,7 @@ export interface paths {
         put?: never;
         /**
          * Start or stop forge (the page's Start and Stop buttons)
-         * @description Needs the page POST checks (Origin and CSRF form field, see components). The body fields are otherwise ignored.
+         * @description Needs the page POST checks (Origin and the `X-CSRF-Token` header, see components). The body fields are otherwise ignored.
          *     The inbox calls `POST FORGE_URL/api/<action>` with `{}`, prints `forge <action> by <device>` to the journal,
          *     drops its 2-second cache and answers with the new state (same as `GET /api/forge`). The route regex only
          *     matches `start` and `stop`, so the 400 `Unknown action.` of `forge.control` is unreachable through HTTP.
@@ -216,13 +269,15 @@ export interface paths {
                 header: {
                     /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
                     Origin: components["parameters"]["Origin"];
+                    /** @description Mutating /api/* only: the value of `GET /api/session`; missing or wrong gives 403 `{"error": ...}`. */
+                    "X-CSRF-Token": components["parameters"]["CsrfHeader"];
                 };
                 path: {
                     action: "start" | "stop";
                 };
                 cookie?: never;
             };
-            requestBody: components["requestBodies"]["CsrfForm"];
+            requestBody?: components["requestBodies"]["ApiForm"];
             responses: {
                 /** @description Forge's state after the action. */
                 200: {
@@ -233,14 +288,14 @@ export interface paths {
                         "application/json; charset=utf-8": components["schemas"]["ForgeState"];
                     };
                 };
-                403: components["responses"]["PageForbiddenCsrf"];
+                403: components["responses"]["ApiForbiddenCsrf"];
                 /** @description Forge unreachable, or it refused (HTTP >= 400 from forge). */
                 502: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json; charset=utf-8": components["schemas"]["UpstreamError"];
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
             };
@@ -261,9 +316,9 @@ export interface paths {
         /**
          * Search filters (proxied from SEARCH_URL/v1/filters)
          * @description Status and body of the search API are passed through (`search.call`). A dead or garbled upstream becomes 502
-         *     `{"error": {"message": "The search service is unreachable: <detail>"}}`; an upstream HTTP error with a non-JSON
-         *     body becomes `{"error": {"message": "Upstream answered HTTP <code>."}}` with that code. The search API's own
-         *     200 body is `{"projects": [...], "types": [...], ...}`; its errors are `{"error": {"message", "request_id"?}}`.
+         *     `{"error": "The search service is unreachable: <detail>"}`; an upstream HTTP error with a non-JSON
+         *     body becomes `{"error": "Upstream answered HTTP <code>."}` with that code. The search API's own
+         *     200 body is `{"projects": [...], "types": [...], ...}`; its errors `{"error": {"message", "request_id"?}}` are flattened to `{"error": "<message>", "request_id"?}`.
          */
         get: {
             parameters: {
@@ -285,7 +340,7 @@ export interface paths {
                         };
                     };
                 };
-                403: components["responses"]["PageForbidden"];
+                403: components["responses"]["ApiForbidden"];
                 502: components["responses"]["UpstreamUnreachable"];
             };
         };
@@ -335,7 +390,7 @@ export interface paths {
                         };
                     };
                 };
-                403: components["responses"]["PageForbidden"];
+                403: components["responses"]["ApiForbidden"];
                 502: components["responses"]["UpstreamUnreachable"];
             };
         };
@@ -358,7 +413,7 @@ export interface paths {
         put?: never;
         /**
          * Ask a question of the private search (proxied to SEARCH_URL/v1/ask)
-         * @description Form fields (after the CSRF check): `question` (required, trimmed, cut to 2000 characters), optional filters
+         * @description Form fields (after the Origin and token checks): `question` (required, trimmed, cut to 2000 characters), optional filters
          *     `project`, `type`, `source`, and `hard` (`1`, `true` or `on` sets `hard: true`). Waits up to 330 s for the
          *     upstream. Status and body of the search API are passed through; its 200 body is
          *     `{"found": bool, "answer": ..., "citations": [{"n", "path", "location", "link"?}], "request_id"?, ...}`.
@@ -369,6 +424,8 @@ export interface paths {
                 header: {
                     /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
                     Origin: components["parameters"]["Origin"];
+                    /** @description Mutating /api/* only: the value of `GET /api/session`; missing or wrong gives 403 `{"error": ...}`. */
+                    "X-CSRF-Token": components["parameters"]["CsrfHeader"];
                 };
                 path?: never;
                 cookie?: never;
@@ -376,7 +433,6 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/x-www-form-urlencoded": {
-                        csrf: string;
                         question: string;
                         project?: string;
                         type?: string;
@@ -406,15 +462,13 @@ export interface paths {
                     content: {
                         /**
                          * @example {
-                         *       "error": {
-                         *         "message": "Type a question first."
-                         *       }
+                         *       "error": "Type a question first."
                          *     }
                          */
-                        "application/json; charset=utf-8": components["schemas"]["UpstreamError"];
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
-                403: components["responses"]["PageForbiddenCsrf"];
+                403: components["responses"]["ApiForbiddenCsrf"];
                 502: components["responses"]["UpstreamUnreachable"];
             };
         };
@@ -444,6 +498,8 @@ export interface paths {
                 header: {
                     /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
                     Origin: components["parameters"]["Origin"];
+                    /** @description Mutating /api/* only: the value of `GET /api/session`; missing or wrong gives 403 `{"error": ...}`. */
+                    "X-CSRF-Token": components["parameters"]["CsrfHeader"];
                 };
                 path?: never;
                 cookie?: never;
@@ -451,7 +507,6 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/x-www-form-urlencoded": {
-                        csrf: string;
                         request_id: string;
                         note?: string;
                     };
@@ -477,15 +532,13 @@ export interface paths {
                     content: {
                         /**
                          * @example {
-                         *       "error": {
-                         *         "message": "That answer has no request id to mark."
-                         *       }
+                         *       "error": "That answer has no request id to mark."
                          *     }
                          */
-                        "application/json; charset=utf-8": components["schemas"]["UpstreamError"];
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
-                403: components["responses"]["PageForbiddenCsrf"];
+                403: components["responses"]["ApiForbiddenCsrf"];
                 502: components["responses"]["UpstreamUnreachable"];
             };
         };
@@ -2653,15 +2706,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Error body of the chat door and kitt door. */
+        /** @description Error body of every /api/* answer: the chat door, the kitt door and the page endpoints. A flattened upstream error may add keys (e.g. request_id). */
         Error: {
             error: string;
-        };
-        /** @description Error body of /api/forge*, /api/search/* and forge's log (an upstream may add fields, e.g. request_id). */
-        UpstreamError: {
-            error: {
-                message: string;
-            };
+        } & {
+            [key: string]: unknown;
         };
         ChatState: {
             discord: boolean;
@@ -2790,6 +2839,36 @@ export interface components {
                 "text/html; charset=utf-8": string;
             };
         };
+        /** @description Caller is not the tailnet owner or comes from the box itself: `{"error": "Only from your own devices on the tailnet."}`. */
+        ApiForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json; charset=utf-8": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description 403 JSON: not the owner (as above), `Wrong origin.` (Origin does not match Host) or
+         *     `Missing or wrong X-CSRF-Token; fetch it from GET /api/session.`
+         */
+        ApiForbiddenCsrf: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json; charset=utf-8": components["schemas"]["Error"];
+            };
+        };
+        /** @description `{"error": "Not found."}`. */
+        ApiNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json; charset=utf-8": components["schemas"]["Error"];
+            };
+        };
         /** @description HTML page 'niet gevonden' ('Niet gevonden.'). */
         PageNotFound: {
             headers: {
@@ -2807,12 +2886,10 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "error": {
-                 *         "message": "Forge is not reachable (is homelab-app-forge running?)."
-                 *       }
+                 *       "error": "Forge is not reachable (is homelab-app-forge running?)."
                  *     }
                  */
-                "application/json; charset=utf-8": components["schemas"]["UpstreamError"];
+                "application/json; charset=utf-8": components["schemas"]["Error"];
             };
         };
         /** @description The search service (or router) is unreachable or answered garbage. */
@@ -2823,12 +2900,10 @@ export interface components {
             content: {
                 /**
                  * @example {
-                 *       "error": {
-                 *         "message": "The search service is unreachable: <detail>"
-                 *       }
+                 *       "error": "The search service is unreachable: <detail>"
                  *     }
                  */
-                "application/json; charset=utf-8": components["schemas"]["UpstreamError"];
+                "application/json; charset=utf-8": components["schemas"]["Error"];
             };
         };
         /** @description `after` or `limit` is not a number. */
@@ -2906,6 +2981,8 @@ export interface components {
     parameters: {
         /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
         Origin: string;
+        /** @description Mutating /api/* only: the value of `GET /api/session`; missing or wrong gives 403 `{"error": ...}`. */
+        CsrfHeader: string;
         NumericId: string;
         BriefId: string;
         JobName: string;
@@ -2920,6 +2997,11 @@ export interface components {
                     /** @description HMAC token of pages.csrf_token(); mismatch gives 403 'Verlopen formulier; ververs de pagina.' */
                     csrf: string;
                 };
+            };
+        };
+        ApiForm: {
+            content: {
+                "application/x-www-form-urlencoded": Record<string, never>;
             };
         };
         TextForm: {

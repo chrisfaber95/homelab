@@ -252,6 +252,7 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh` (vraagt om beide tokens).
   - [ ] `http://homelab.tail4eb878.ts.net:8105` op de telefoon: een vraag-taak geeft een antwoord, een code-taak een PR.
 - [ ] H-021 (frontend): `scripts/21-inbox.sh` bouwt `frontend/dist` als wegwerpgebruiker (geen npm als root) en controleert `/usr/local/lib/homelab/frontend/dist/index.html`. Na de merge `scripts/21-inbox.sh` opnieuw draaien (de rerun-regel doet dat); controleer met `ls -l /usr/local/lib/homelab/frontend/dist`.
+  - [ ] Verify on the box: `ls -l /usr/local/lib/homelab/frontend/dist` shows a non-empty `index.html` (built by the throwaway user, owned by root), `systemctl is-active homelab-inbox` is `active`, and the inbox looks unchanged on the phone (homelab page, `/taken`, `/search`, a task page): `PORTED_PAGES` is empty, so every page is still rendered by Python. `curl -s http://homelab.tail4eb878.ts.net:8105/api/session` returns a `csrf_token`. Docs: `docs/dashboard.md`.
 - [ ] F-022 (jobs en skills): zie `docs/jobs.md`. Zit in de inbox: na de merge `scripts/21-inbox.sh` opnieuw draaien.
   - [ ] Als `claude`: `bash /var/lib/homelab/repo/scripts/18-claude.sh` opnieuw (de pre-push-hook houdt ook `jobs` tegen).
   - [ ] Op de pagina, tab Jobs: een job in woorden opstellen, bevestigen; hij staat op de branch `jobs` en "Nu draaien"

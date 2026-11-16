@@ -48,6 +48,24 @@ gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-d
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
 wijzigingen. Stijl en script: `web/app.css` en `web/app.js`.
 
+## Frontend project (H-021)
+
+`frontend/` is the TypeScript frontend: Vite and plain TypeScript, no UI framework, all dependencies pinned in
+`package.json` and `package-lock.json`. Its types come from `backend/openapi.yaml` (`src/api/schema.d.ts`, generated).
+No page is ported yet, so it only contains a placeholder entry (`src/main.ts`) and a first test.
+
+npm scripts (run in `frontend/`, install with `npm ci --ignore-scripts`):
+
+- `npm run gen:types`: regenerate `src/api/schema.d.ts` from `../backend/openapi.yaml` (openapi-typescript).
+- `npm run lint`: `tsc --noEmit -p tsconfig.lint.json`.
+- `npm run typecheck`: `tsc --noEmit`.
+- `npm test`: `vitest run`.
+- `npm run build`: `vite build`, output in `frontend/dist`.
+
+CI (`.github/workflows/ci.yml`, job `frontend`, on every pull request): `npm ci --ignore-scripts`, lint, typecheck,
+tests, build, a check that `dist/index.html` exists, and a check that `npm run gen:types` leaves `src/api/schema.d.ts`
+unchanged (the committed types match `backend/openapi.yaml`).
+
 ## JSON API: CSRF token and errors (H-021)
 
 The page's JavaScript talks to `/api/*` (contract: `backend/openapi.yaml`). Two rules apply to every `/api/*` call of

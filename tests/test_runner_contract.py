@@ -57,7 +57,7 @@ class Fixtures(unittest.TestCase):
     def test_every_action_of_the_script_has_a_fixture_and_a_schema_entry(self):
         actions = script_actions()
         self.assertEqual(actions, {"prepare", "run", "bundle", "sync", "behind", "has", "kill", "script", "draft",
-                                   "route", "review", "cleanup"})
+                                   "route", "plan", "review", "cleanup"})
         recorded = {fx["action"] for fx in fixtures().values()}
         for a in sorted(actions):
             self.assertIn(a, recorded, f"no fixture for {a}")

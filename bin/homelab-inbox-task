@@ -16,6 +16,7 @@
 #   script j<run> <repo-map> <pad> [args]  een script uit die repo draaien (geen root), uitvoer op stdout, exit = die van het script
 #                                          (65: repo of pad ongeldig, het script draaide niet)
 #   route r<taak>                Claude zonder tools: een bericht over de repo's verdelen (json op stdout; prompt zoals bij draft)
+#   plan r<task>                 Claude without tools, PLAN_MODEL: split an approved brief into tasks (H-001; json on stdout)
 #   draft d<concept>             Claude zonder tools: een job-bestand opstellen uit RUNNER_HOME/share/<id>/prompt.txt (json op stdout)
 #   review v<task>               Claude without tools: check a brief task's PR diff against its criteria (H-001; json on stdout)
 set -euo pipefail
@@ -177,7 +178,15 @@ case $action in
     (( code == 124 )) && echo "[gestopt na ${JOB_SCRIPT_MINUTES:-10} minuten]"
     exit "$code"
     ;;
-  draft|route|review)
+  draft|route|plan|review)
+    # plan: the brief planner (H-001), like route but with its own model. PLAN_MODEL / REVIEW_MODEL come from
+    # config/inbox.conf, never from the caller; FALLBACK_MODEL takes over when that model is overloaded or unavailable.
+    model=""
+    [[ $action == plan ]] && model=${PLAN_MODEL:-}
+    [[ $action == review ]] && model=${REVIEW_MODEL:-}
+    models=()
+    [[ -n $model ]] && models=(--model "$model")
+    [[ -n $model && -n ${FALLBACK_MODEL:-} ]] && models+=(--fallback-model "$FALLBACK_MODEL")
     prompt="$RUNNER_HOME/share/$id/prompt.txt"
     system="$RUNNER_HOME/share/$id/system.txt"
     rm -rf "$work"
@@ -191,7 +200,7 @@ case $action in
     # Alleen tekst: geen tools, dus niets op de box.
     # The prompt goes in on stdin: as an argument Linux refuses one above 128 KiB ("Argument list too long"), and
     # a review prompt holds up to REVIEW_MAX_DIFF characters of diff.
-    claude -p --append-system-prompt "$(cat "$system")" --tools "" --output-format json < "$prompt"
+    claude -p --append-system-prompt "$(cat "$system")" "${models[@]}" --tools "" --output-format json < "$prompt"
     ;;
   cleanup)
     rm -rf "$work" "$TASK_HOME/out/$id.bundle"

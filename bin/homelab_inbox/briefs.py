@@ -282,7 +282,8 @@ def plan_task(task_id):
             os.chmod(share / f, 0o640)
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
         log_line(f"t{task_id}", "info", f"planner started for {b['id']}")
-        code, out = task_cmd("route", f"r{task_id}", timeout=600)
+        # Its own action for its own model (PLAN_MODEL); a stronger model thinks longer, hence the extra minutes.
+        code, out = task_cmd("plan", f"r{task_id}", timeout=900)
         result = json.loads(out[out.find("{"):]) if "{" in out else {}
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
@@ -376,7 +377,7 @@ def review_pr(task_id, cache):
         for f in ("prompt.txt", "system.txt"):
             os.chmod(share / f, 0o640)
         log_line(f"t{task_id}", "info", f"brief review of PR #{t['pr_number']} started")
-        code, out = task_cmd("review", f"v{task_id}", timeout=600)
+        code, out = task_cmd("review", f"v{task_id}", timeout=900)
         result = json.loads(out[out.find("{"):]) if "{" in out else {}
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")

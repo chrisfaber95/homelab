@@ -180,7 +180,7 @@ def record():
         add("run-no-copy", ["run", "599", uid, "new"])
 
         # route / draft / review (Claude without tools, JSON on stdout)
-        for action, key in (("route", "r520"), ("draft", "d521"), ("review", "v522")):
+        for action, key in (("route", "r520"), ("draft", "d521"), ("review", "v522"), ("plan", "r524")):
             s.share(key, prompt=f"prompt for {action}", system=f"system for {action}")
             add(f"{action}-ok", [action, key])
         s.share("r523")

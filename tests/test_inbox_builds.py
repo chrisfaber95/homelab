@@ -1,5 +1,6 @@
 """H-001: a build that left nothing lets the brief be built again; one that is still going does not.
 Run: python3 -m unittest discover -s tests"""
+import json
 import os
 import sys
 import tempfile
@@ -83,6 +84,32 @@ class Builds(unittest.TestCase):
         new = self.build("cancelled")
         self.assertEqual(briefs.live_build(BID)["id"], old)
         self.assertEqual([b["id"] for b in briefs.builds(BID)], [new, old])
+
+
+
+class TaskLimit(unittest.TestCase):
+    """A brief may set its own `max_tasks`; without it PLAN_MAX_TASKS applies."""
+    REPOS = {"homelab": "o/homelab"}
+
+    def plan(self, n):
+        tasks = [{"id": str(i), "repo": "homelab", "text": "do it", "criteria": ["done"]} for i in range(n)]
+        return "```plan\n" + json.dumps({"tasks": tasks}) + "\n```"
+
+    def test_the_setting_applies_when_the_brief_says_nothing(self):
+        for own in (None, "many", -1, True):
+            self.assertEqual(briefs.task_limit({"max_tasks": own}), int(briefs.CONF.get("PLAN_MAX_TASKS", 6)))
+
+    def test_the_brief_sets_its_own_limit(self):
+        self.assertEqual(briefs.task_limit({"max_tasks": 20}), 20)
+        self.assertEqual(briefs.task_limit({"max_tasks": 0}), 0)
+
+    def test_a_plan_over_the_limit_is_refused(self):
+        with self.assertRaises(ValueError):
+            briefs.parse_plan(self.plan(7), self.REPOS, 6)
+
+    def test_limit_zero_takes_any_number_of_tasks(self):
+        kind, tasks, _ = briefs.parse_plan(self.plan(25), self.REPOS, 0)
+        self.assertEqual((kind, len(tasks)), ("tasks", 25))
 
 
 if __name__ == "__main__":

@@ -548,6 +548,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Tasks page (/taken) renders, as JSON
+         * @description Added for the page port (H-022 F10). Matched on `url.path`. `repos` fills the new-task form (`auto` is the extra
+         *     option "auto (homelab beslist)"); `queue` holds queued, running and waiting tasks, oldest first; `history` the
+         *     rest of the 200 newest, newest first. Times are the stored ISO 8601 UTC strings. `refresh` is true while the
+         *     queue is not empty (the HTML page reloads itself then).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The lists of the Tasks page. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["TaskList"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the task page (/task/<id>) renders, as JSON, with the log so far
+         * @description Added for the page port (H-022 F10). Matched on `url.path`. Unknown id: 404 `{"error": "Not found."}`.
+         *     `actions` says which forms the page shows (answer, cancel, retry, accept, attended); the POSTs stay the form
+         *     routes of `/task/{id}/{action}`. `log` holds the first 2000 lines and `next`; the page keeps polling
+         *     `GET /api/log/t<id>?from=<next>` until `done` (no server-sent events).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["NumericId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The task page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["TaskDetail"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -2777,6 +2866,85 @@ export interface components {
             /** @description info, claude, tool, result, error, out (forge: info, claude, tool, error) */
             kind: string;
             text: string;
+        };
+        TaskRow: {
+            id: number;
+            /** @description 'Inbox <id>' or 'Job <name>' */
+            label: string;
+            /** @description queued, running, waiting, pr_open, ... (config.STATUS_NL) */
+            status: string;
+            /** @description Dutch status text of the page */
+            status_text: string;
+            /** @description first line of the task text (max 70), or the kind of the job */
+            what: string;
+            repo: string;
+            /** @description the client it came from; null = the page */
+            source: string | null;
+            created: string;
+            ended: string | null;
+            pr_url: string | null;
+            pr_number: number | null;
+        };
+        TaskList: {
+            /** @description sorted */
+            repos: string[];
+            /** @description the repo value that lets homelab decide */
+            auto: string;
+            queue: components["schemas"]["TaskRow"][];
+            history: components["schemas"]["TaskRow"][];
+            refresh: boolean;
+        };
+        /** @description A TaskRow plus everything the task page shows. */
+        TaskDetail: components["schemas"]["TaskRow"] & {
+            text: string;
+            question: string | null;
+            answer: string | null;
+            parent: number | null;
+            reason: string | null;
+            after_task: number | null;
+            brief: string | null;
+            handoff: string | null;
+            criteria: string[];
+            review: string | null;
+            /** @description automatic rework rounds used */
+            reviews: number | null;
+            unattended: boolean;
+            /** @description the 'Build without me' explanation */
+            without_me: string;
+            /** @description a brief build (repo `brief`) */
+            is_build: boolean;
+            build_left_nothing: boolean;
+            children: components["schemas"]["TaskRow"][];
+            summary: string | null;
+            /** @description 'Reden' for a refused task, else 'Samenvatting' */
+            summary_title: string;
+            note: string | null;
+            turns: number | null;
+            rounds: number | null;
+            /** @description e.g. 'Claude (opus-5-5)' */
+            model: string;
+            /** @description limit per round, as configured */
+            max_turns: unknown;
+            /** @description limit per round, as configured */
+            max_minutes: unknown;
+            accepted: boolean;
+            /** @description the predecessor that stops a retry */
+            blocked_by: number | null;
+            /** @enum {string} */
+            retry_label: "Continue" | "Retry";
+            retry_hint: string;
+            /** @description show 'PR #n is not merged as far as the inbox knows' */
+            accept_pr_unmerged: boolean;
+            actions: {
+                answer: boolean;
+                cancel: boolean;
+                retry: boolean;
+                accept: boolean;
+                attended: boolean;
+            };
+            /** @description true while queued (the HTML page reloads itself) */
+            refresh: boolean;
+            log: components["schemas"]["LogChunk"];
         };
         LogChunk: {
             lines: components["schemas"]["LogLine"][];

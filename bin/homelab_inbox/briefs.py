@@ -109,6 +109,11 @@ def builds(bid=None):
         return c.execute("SELECT * FROM tasks WHERE repo=? ORDER BY id DESC", (BRIEF,)).fetchall()
 
 
+WITHOUT_ME = ("The inbox merges each task PR itself once the brief reviewer finds every criterion met and CI is green, "
+              "and then the handoff. A PR on homelab, a missed criterion after the rework round, red CI or criteria "
+              "only you can check still wait for you.")
+
+
 def build_left_nothing(b):
     """True when nothing of this build is left: it was cancelled or failed, or it was planned and every task ended
     badly (cancelled, failed, refused, stopped at the limit, or its PR closed). The brief can then be built again."""

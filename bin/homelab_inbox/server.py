@@ -15,7 +15,7 @@ from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
-from .overview import activity_sentence, live_items
+from .overview import activity_sentence, live_items, task_view, tasks_view
 from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_page, ssh_page, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
@@ -295,6 +295,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/search/results":
             params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
             return self.send_upstream(*search.results(params.get("q", ""), params))
+        if url.path == "/api/tasks":
+            return self.send_upstream(200, tasks_view())
+        if m := re.fullmatch(r"/api/tasks/(\d+)", url.path):
+            if t := get(int(m.group(1))):
+                return self.send_upstream(200, task_view(t))
+            return self.send_upstream(404, {"error": "Not found."})
         if url.path == "/taken":
             return self.send(200, tasks_page())
         if url.path == "/ssh":

@@ -75,6 +75,14 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
 
+## JSON for the Tasks pages (H-022 F10)
+
+`GET /api/tasks` returns what `/taken` renders (repos for the form, `queue`, `history`) and `GET /api/tasks/<id>` what
+`/task/<id>` renders: the task, its derived facts, `actions` (which forms apply) and `log` (the lines so far, `next`,
+`done`). The live log keeps polling `GET /api/log/t<id>?from=<next>`; there are no server-sent events. The builders are
+`tasks_view` and `task_view` in `overview.py`; the HTML pages are unchanged. Contract: `backend/openapi.yaml`; tests:
+`tests/test_inbox_tasks_api.py`.
+
 ## JSON API: CSRF token and errors (H-021)
 
 The page's JavaScript talks to `/api/*` (contract: `backend/openapi.yaml`). Two rules apply to every `/api/*` call of

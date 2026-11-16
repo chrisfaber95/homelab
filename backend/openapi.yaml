@@ -100,6 +100,26 @@ paths:
                 required: [csrf_token]
                 properties: {csrf_token: {type: string}}
         "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/jobs-page:
+    x-code: ["/api/jobs-page"]
+    get:
+      tags: [machine]
+      summary: What the Jobs page renders (jobs, catalogue, drafts, latest runs) as data
+      x-access: page
+      x-machine: true
+      description: |
+        The data of `GET /jobs` (`pages.jobs_page`): the Claude-run counter of today, the open drafts (newest 10), the
+        catalogue of `agents/`, all jobs (sorted by name) and the 20 latest runs. Texts are the Dutch ones the page
+        shows (`next`, `last`, `status_label`, times in `timezone`). A broken job or catalogue file has only `name` and
+        `error`; it never hides the others. `refresh` is true while a draft is still being drafted (the page reloads
+        itself every 20 seconds then). The query string is ignored. Not `/api/jobs`: that is kitt's door.
+      responses:
+        "200":
+          description: The Jobs page as data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/JobsPage"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/live:
     x-code: ["/api/live"]
     get:
@@ -1392,6 +1412,73 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
           example: {error: "not a call kitt may make"}
   schemas:
+    JobsPage:
+      type: object
+      required: [claude_runs_today, claude_cap, timezone, refresh, drafts, catalogue, jobs, runs]
+      properties:
+        claude_runs_today: {type: integer, description: "Claude runs started by jobs today"}
+        claude_cap: {type: integer, description: "daily limit (`JOB_CLAUDE_CAP`)"}
+        timezone: {type: string, description: "e.g. Europe/Amsterdam"}
+        refresh: {type: boolean, description: "a draft is still being drafted"}
+        drafts:
+          type: array
+          items:
+            type: object
+            required: [id, status, request]
+            properties:
+              id: {type: integer}
+              status: {type: string, enum: [drafting, ready, failed]}
+              request: {type: string, description: "first line of the request"}
+        catalogue:
+          type: array
+          items: {$ref: "#/components/schemas/CatalogueAgent"}
+        jobs:
+          type: array
+          items: {$ref: "#/components/schemas/JobSummary"}
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/JobRunSummary"}
+    CatalogueAgent:
+      type: object
+      required: [name, error]
+      description: With `error` set only `name` and `error` are present.
+      properties:
+        name: {type: string}
+        error: {type: string, nullable: true, description: "why the file in agents/ is broken"}
+        on: {type: boolean, description: "a job of this name exists"}
+        what: {type: string, description: "first paragraph of the instruction, at most 300 characters"}
+        when: {type: string}
+        model: {type: string, enum: [lokaal, Claude]}
+        deliver: {type: string, enum: [page, ntfy, conversation]}
+        fill: {type: string, nullable: true, description: "what to fill in when switching on"}
+    JobSummary:
+      type: object
+      required: [name, error]
+      description: With `error` set only `name` and `error` are present.
+      properties:
+        name: {type: string}
+        error: {type: string, nullable: true}
+        kind: {type: string, description: "Dutch kind label"}
+        model: {type: string, enum: [lokaal, Claude]}
+        when: {type: string}
+        next: {type: string, description: "'gepauzeerd' or e.g. 'morgen 07:00'"}
+        paused: {type: boolean}
+        last: {type: string, nullable: true, description: "Dutch status of the latest run, null without runs"}
+    JobRunSummary:
+      type: object
+      required: [id, job, job_url, due, status, status_label, url, model, manual, pr, summary]
+      properties:
+        id: {type: integer}
+        job: {type: string}
+        job_url: {type: string, description: "/job/<name>, or /research for research questions"}
+        due: {type: string, description: "dd-mm HH:MM in timezone"}
+        status: {type: string}
+        status_label: {type: string}
+        url: {type: string, description: "/task/<id> or /run/<id>"}
+        model: {type: string, enum: [lokaal, Claude]}
+        manual: {type: boolean, description: "started with 'Nu draaien'"}
+        pr: {type: string, nullable: true}
+        summary: {type: string, description: "first line, empty when none"}
     Error:
       type: object
       required: [error]

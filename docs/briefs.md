@@ -66,7 +66,8 @@ kit is in the repo and a new build doesn't add it twice.
 
 - The **planner** is Claude without tools (the same route as the router of "auto"). It gets the brief and the
   profiles of the brief's `repos` (only those in `config/repos.conf` plus `homelab`) and returns up to
-  `PLAN_MAX_TASKS` tasks, each with its own acceptance criteria and optionally `after`. Criteria only you can check
+  `PLAN_MAX_TASKS` tasks, each with its own acceptance criteria and optionally `after`. A brief that needs more
+  sets `max_tasks: N` in its frontmatter (`max_tasks: 0`: no limit), as the inbox migration briefs do. Criteria only you can check
   (hardware, a browser check) are listed on the build as "Needs you". If the brief is unclear, it asks one question
   on the page, like any inbox task.
 - **CI first**: each repo's profile says whether its main has a GitHub Actions workflow. A repo without one (a new

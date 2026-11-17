@@ -14,7 +14,7 @@ from .config import ACTIVE, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BR
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
-from .memory import MEM_ID_RE, entry_text, load_memory, mem_get, save_memory
+from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, live_items, overview_json
 from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, task_page, tasks_page
@@ -263,6 +263,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_upstream(200, {"csrf_token": csrf_token()})
         if url.path == "/api/overview":
             return self.send_upstream(200, overview_json())
+        if url.path == "/api/memory":
+            return self.send_upstream(200, memory_view(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
+        if (m := re.fullmatch(r"/api/memory/e/(.+)", url.path)):
+            if entry := mem_get(m.group(1)):
+                return self.send_upstream(200, entry_view(entry))
+            return self.refuse(404, "<p>Niet gevonden.</p>", "No such memory entry.")
         if url.path == "/api/skills":
             return self.send_upstream(200, skills_data())
         if url.path == "/api/live":

@@ -100,6 +100,109 @@ paths:
                 required: [csrf_token]
                 properties: {csrf_token: {type: string}}
         "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/memory:
+    x-code: ["/api/memory"]
+    get:
+      tags: [machine]
+      summary: Memory (Geheugen) list as JSON, what the /memory page renders
+      x-access: page
+      x-machine: true
+      description: |
+        The same data as `GET /memory`: preferences, facts and history filtered by `q` (every word must occur in id,
+        about, source, status or body; `q` is cut to 200 characters). The three sections always come in the order
+        `voorkeuren`, `feiten`, `geschiedenis`. History is sorted newest first and cut to the newest 30 unless `q` is
+        given (`truncated` is then true). `abouts` are the choices of the add form. Dates are the stored strings; the
+        `*_local` fields are what the page shows (dd-mm hh:mm).
+      parameters: [{name: q, in: query, required: false, schema: {type: string}}]
+      responses:
+        "200":
+          description: The sections and the add-form choices.
+  /api/skills:
+    x-code: ["/api/skills"]
+    get:
+      tags: [machine]
+      summary: What the Skills tab shows, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+        20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+        `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+      responses:
+        "200":
+          description: The Skills page data.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [q, sections, abouts]
+                properties:
+                  q: {type: string}
+                  sections:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, count, truncated, entries]
+                      properties:
+                        kind: {type: string, enum: [voorkeuren, feiten, geschiedenis]}
+                        count: {type: integer, description: "matches, also those not shown"}
+                        truncated: {type: boolean}
+                        entries:
+                          type: array
+                          items: {$ref: "#/components/schemas/MemoryEntry"}
+                  abouts: {type: array, items: {type: string}}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/memory/e/{id}:
+    x-code: ["/api/memory/e/(.+)"]
+    get:
+      tags: [machine]
+      summary: One memory entry as JSON, what the /memory/e/{id} page renders
+      x-access: page
+      x-machine: true
+      description: |
+        The id contains slashes (`voorkeuren/<about>/<name>`, ...); in the template it stands for the whole remainder
+        after `/api/memory/e/`. Matched on `url.path`.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}, allowReserved: true}]
+      responses:
+        "200":
+          description: The entry plus the branch and repo it is stored in.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MemoryEntry"
+                  - type: object
+                    required: [branch, data_repo]
+                    properties:
+                      branch: {type: string, description: "MEMORY_BRANCH"}
+                      data_repo: {type: string, description: "DATA_REPO"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {description: "`{\"error\": \"No such memory entry.\"}`", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+                required: [intro, empty, proposals_empty, skills, proposals]
+                properties:
+                  intro: {type: string}
+                  empty: {type: string, description: "shown when `skills` is empty"}
+                  proposals_empty: {type: string, description: "shown when `proposals` is empty"}
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description, jobs]
+                      properties:
+                        name: {type: string}
+                        description: {type: string}
+                        jobs: {type: array, items: {type: string}, description: "names of the jobs that use it; empty shows 'geen'"}
+                  proposals:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, pr_url, task_id, created]
+                      properties:
+                        name: {type: string}
+                        pr_url: {type: string}
+                        task_id: {type: integer, nullable: true}
+                        created: {type: string}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/overview:
     x-code: ["/api/overview"]
     get:
@@ -1507,6 +1610,26 @@ components:
             summary: {type: string, maxLength: 300}
         nextRun: {type: string, nullable: true, description: "ISO 8601; null while paused or broken"}
         error: {type: string, nullable: true}
+    MemoryEntry:
+      type: object
+      required: [id, kind, about, name, body, added, changed, source, link, status, pr, title, summary, kind_label, added_local, changed_local]
+      properties:
+        id: {type: string, description: "voorkeuren/<about>/<name>, feiten/<about>/<name> or geschiedenis/<yyyy-mm>/taak-<n>"}
+        kind: {type: string, enum: [voorkeuren, feiten, geschiedenis]}
+        about: {type: string}
+        name: {type: string}
+        body: {type: string}
+        added: {type: string}
+        changed: {type: string}
+        source: {type: string}
+        link: {type: string}
+        status: {type: string}
+        pr: {type: string}
+        title: {type: string, description: "row title: first body line for history, else the name"}
+        summary: {type: string, description: "first body line; empty for history"}
+        kind_label: {type: string, enum: [voorkeur, feit, geschiedenis]}
+        added_local: {type: string}
+        changed_local: {type: string}
     Overview:
       type: object
       required: [status, live, timeline, changes, services, forge_link, switches, usage, health]

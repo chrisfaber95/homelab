@@ -67,6 +67,8 @@ systemctl stop homelab-backend-build.service 2>/dev/null || true
 rm -rf "$BUILD_STATE/out"
 # The state directory belongs to the dynamic user: it is created (and chowned to the current dynamic uid) by systemd.
 # Tests run in CI (job `backend`), not here: the box has no throwaway PostgreSQL for them yet (Q5, task B4).
+# The inline script below must not use brace expansions (dollar-brace): systemd-run expands those itself before bash
+# runs it (unknown names become empty), which broke the jar check. Plain $var and $1 pass through unchanged.
 systemd-run --quiet --wait --pipe --collect --unit=homelab-backend-build \
   -p DynamicUser=yes -p StateDirectory=homelab-backend-build -p StateDirectoryMode=0700 \
   -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p PrivateDevices=yes \
@@ -84,9 +86,9 @@ systemd-run --quiet --wait --pipe --collect --unit=homelab-backend-build \
     cp -a "$SRC_COPY"/. "$work"/
     cd "$work"
     ./mvnw -B -ntp -Dmaven.repo.local="$state/m2" package -DskipTests
-    jars=(target/inbox-backend-*.jar)
-    [[ ${#jars[@]} -eq 1 && -f ${jars[0]} ]] || { echo "expected exactly one target/inbox-backend-*.jar" >&2; exit 1; }
-    cp "${jars[0]}" "$state/out/inbox-backend.jar"
+    set -- target/inbox-backend-*.jar
+    [[ $# -eq 1 && -f $1 ]] || { echo "expected exactly one target/inbox-backend-*.jar" >&2; exit 1; }
+    cp "$1" "$state/out/inbox-backend.jar"
     rm -rf "$work"
   ' || { echo "the Maven build failed (output above)" >&2; exit 1; }
 rm -rf "$SRC_COPY"

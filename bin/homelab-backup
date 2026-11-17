@@ -7,7 +7,9 @@
 
 Wat erin gaat staat in config/backup.list; instellingen in config/backup.conf. De backups zijn alleen voor root
 leesbaar. De status van de laatste backup (zonder geheimen) staat in BACKUP_STATUS, voor de health check.
-Voor tests overschrijfbaar met BACKUP_DIR, BACKUP_STATUS, BACKUP_LIST, RESTORE_ROOT en NO_SERVICES=1.
+Een regel `pg_dump: <database>` in backup.list maakt een `pg_dump` in custom-formaat (H-023, B8), naast de tar.gz als
+`homelab-<datum>.<database>.dump`; terugzetten met pg_restore (docs/monitor.md).
+Voor tests overschrijfbaar met BACKUP_DIR, BACKUP_STATUS, BACKUP_LIST, RESTORE_ROOT, PG_RUN en NO_SERVICES=1.
 """
 import argparse
 import glob
@@ -41,6 +43,9 @@ BACKUP_DIR = Path(CONF["BACKUP_DIR"])
 STATUS = Path(CONF["BACKUP_STATUS"])
 LIST = Path(os.environ.get("BACKUP_LIST", ROOT / "config" / "backup.list"))
 # Wat er tijdens een restore stil moet liggen, zodat niets de teruggezette bestanden overschrijft.
+# Hoe psql en pg_dump als PostgreSQL-superuser draaien (peer-authenticatie over de socket; PostgreSQL luistert niet op TCP).
+PG_RUN = os.environ.get("PG_RUN", "runuser -u postgres --").split()
+PG_PREFIX = "pg_dump:"
 SERVICES = ["tailscaled", "ntfy", "llm-helper", "homelab-admin", "homelab-app-claude-dashboard"]
 
 
@@ -53,7 +58,7 @@ def paths():
     found, missing = [], []
     for line in LIST.read_text().splitlines():
         line = line.split("#", 1)[0].strip()
-        if not line:
+        if not line or line.startswith(PG_PREFIX):
             continue
         hits = sorted(glob.glob(line))
         if not hits:
@@ -65,6 +70,44 @@ def paths():
             else:
                 found.append(p)
     return found, missing
+
+
+def databases():
+    """De databases uit backup.list (`pg_dump: <naam>`)."""
+    names = []
+    for line in LIST.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith(PG_PREFIX):
+            names.append(line[len(PG_PREFIX):].strip())
+    return names
+
+
+def dump_database(db, stamp):
+    """pg_dump -Fc van één database naar BACKUP_DIR: eerst een tijdelijk bestand (0600), dan hernoemen.
+    Geeft de bestandsnaam, of None als de database er niet is (zoals een ontbrekend pad). Een mislukte dump is een fout."""
+    if not db.replace("_", "").isalnum():
+        raise ValueError(f"ongeldige databasenaam in backup.list: {db!r}")
+    found = subprocess.run([*PG_RUN, "psql", "-AtXc", f"select 1 from pg_database where datname = '{db}'"],
+                           cwd="/", capture_output=True, text=True)
+    if found.returncode != 0:
+        raise RuntimeError(f"psql: {found.stderr.strip()}")
+    if found.stdout.strip() != "1":
+        return None
+    name = f"homelab-{stamp}.{db}.dump"
+    tmp_file = BACKUP_DIR / f".{name}.tmp"
+    old_umask = os.umask(0o077)
+    try:
+        with open(tmp_file, "wb") as out:
+            done = subprocess.run([*PG_RUN, "pg_dump", "--format=custom", "--dbname", db], cwd="/",
+                                  stdout=out, stderr=subprocess.PIPE)
+    finally:
+        os.umask(old_umask)
+    if done.returncode != 0 or tmp_file.stat().st_size == 0:
+        tmp_file.unlink(missing_ok=True)
+        raise RuntimeError(f"pg_dump {db}: {done.stderr.decode(errors='replace').strip() or 'lege uitvoer'}")
+    tmp_file.chmod(0o600)
+    tmp_file.rename(BACKUP_DIR / name)
+    return name
 
 
 def add(tar, path, tmpdir):
@@ -108,7 +151,8 @@ def cmd_run():
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         BACKUP_DIR.chmod(0o700)
         files, missing = paths()
-        name = f"homelab-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        name = f"homelab-{stamp}.tar.gz"
         tmp_file = BACKUP_DIR / f".{name}.tmp"
         old_umask = os.umask(0o077)
         try:
@@ -119,9 +163,18 @@ def cmd_run():
             os.umask(old_umask)
         tmp_file.chmod(0o600)
         tmp_file.rename(BACKUP_DIR / name)
+        dumps = []
+        for db in databases():
+            dump = dump_database(db, stamp)
+            if dump:
+                dumps.append(dump)
+            else:
+                missing.append(f"database {db}")
         removed = prune()
         status.update(ok=True, file=name, size=(BACKUP_DIR / name).stat().st_size, files=len(files),
-                      missing=missing, removed=removed)
+                      dumps=dumps, missing=missing, removed=removed)
+        for d in dumps:
+            print(f"{d}: {(BACKUP_DIR / d).stat().st_size // 1024} KiB")
         print(f"{name}: {len(files)} bestanden, {status['size'] // 1024} KiB"
               + (f"; ontbreekt: {', '.join(missing)}" if missing else ""))
     except Exception as e:
@@ -155,11 +208,18 @@ def prune():
         if f.stat().st_mtime < keep_after:
             f.unlink()
             removed.append(f.name)
+    for db in databases():  # per database blijft de nieuwste dump altijd
+        for f in sorted(BACKUP_DIR.glob(f"homelab-*.{db}.dump"), reverse=True)[1:]:
+            if f.stat().st_mtime < keep_after:
+                f.unlink()
+                removed.append(f.name)
     return removed
 
 
 def cmd_list():
     for f in backups():
+        print(f"{f.name}  {f.stat().st_size // 1024:>8} KiB")
+    for f in sorted(BACKUP_DIR.glob("homelab-*.dump"), reverse=True):
         print(f"{f.name}  {f.stat().st_size // 1024:>8} KiB")
     s = read_status()
     if s:

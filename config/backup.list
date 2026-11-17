@@ -37,3 +37,6 @@
 /var/lib/homelab/admin/machine.json
 # sdlc-studio (H-013): generated projects and their artifact versions (DynamicUser state).
 /var/lib/private/sdlc-studio/*.db
+# Inbox database (H-023, B8): PostgreSQL `inbox`, via pg_dump in custom format (homelab-<date>.inbox.dump, 0600, next
+# to the tar.gz). A database that does not exist yet is reported as missing, not as a failure.
+pg_dump: inbox

@@ -125,6 +125,18 @@ if [[ ! -s $SECRET_FILE ]]; then
 fi
 chown "$SERVICE_USER:$SERVICE_USER" "$SECRET_FILE"
 chmod 600 "$SECRET_FILE"
+# H-024 M4: the conversation store is Java's. Import it from the Python inbox's SQLite before the (re)start, as the
+# service account, with the new jar: the fresh import of the switch. --if-not-imported makes a re-run a no-op once the
+# store is Java's, so this never overwrites what Java has written since.
+INBOX_DB=/var/lib/homelab-inbox/inbox.db
+if [[ -f $INBOX_DB ]]; then
+  echo "== Conversation store: import from $INBOX_DB (once; a no-op when it is already imported)"
+  (cd / && runuser -u "$SERVICE_USER" -- "$JAVA_HOME_DIR/bin/java" -Xmx256m -jar "$JAR" import-conversation \
+     --sqlite "$INBOX_DB" --if-not-imported) || { echo "the conversation import failed (nothing was switched; see docs/inbox-backend.md, M4)" >&2; exit 1; }
+else
+  echo "no $INBOX_DB yet: run scripts/21-inbox.sh first, then this script again" >&2
+  exit 1
+fi
 systemctl enable -q "$SERVICE"
 if [[ $changed -eq 1 ]] || ! systemctl is-active --quiet "$SERVICE"; then
   systemctl restart "$SERVICE"

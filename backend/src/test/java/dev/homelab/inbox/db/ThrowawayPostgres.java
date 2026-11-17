@@ -14,7 +14,7 @@ import java.util.stream.Stream;
  * installed PostgreSQL, in a temp directory, listening on a Unix socket in that directory only (no TCP).
  * Binaries come from {@code PG_BIN}, else the newest {@code /usr/lib/postgresql/<n>/bin}.
  */
-final class ThrowawayPostgres implements AutoCloseable {
+public final class ThrowawayPostgres implements AutoCloseable {
 
     private static final int PORT = 54329; // only names the socket file (.s.PGSQL.<port>); nothing listens on TCP
     private final Path root;
@@ -27,7 +27,7 @@ final class ThrowawayPostgres implements AutoCloseable {
         this.bin = bin;
     }
 
-    static ThrowawayPostgres start() throws Exception {
+    public static ThrowawayPostgres start() throws Exception {
         Path bin = findBin();
         // Short path: a Unix socket path is limited to about 100 bytes.
         Path root = Files.createTempDirectory("pgtest");
@@ -46,17 +46,17 @@ final class ThrowawayPostgres implements AutoCloseable {
     }
 
     /** pgjdbc URL over the Unix socket (junixsocket). */
-    String jdbcUrl() {
+    public String jdbcUrl() {
         return jdbcUrl("postgres");
     }
 
     /** Same, for another database of the cluster (create it first). */
-    String jdbcUrl(String database) {
+    public String jdbcUrl(String database) {
         return "jdbc:postgresql://localhost/" + database + "?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg"
                 + "&socketFactoryArg=" + root.resolve(".s.PGSQL." + PORT);
     }
 
-    String user() {
+    public String user() {
         return "postgres";
     }
 

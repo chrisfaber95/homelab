@@ -66,7 +66,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | F-019 root changes, ntfy | `bin/homelab-admin`, `changes/`, `scripts/19-admin.sh` | `config/machine.conf`, `config/admin.conf` | `docs/admin.md` |
 | F-020 monitor, overview, backups | `bin/homelab-monitor`, `bin/homelab-backup`, `scripts/20-monitor.sh` | `config/backup.conf`, `config/backup.list` | `docs/monitor.md` |
 | F-021 task inbox (port 8105) | `bin/homelab-inbox` (entry point), `bin/homelab_inbox/` (modules: see below), `bin/homelab-inbox-task`, `scripts/21-inbox.sh` | `config/inbox.conf` | `docs/inbox.md` |
-| H-016 conversation (store, client permissions, loopback door) | `bin/homelab_inbox/conversation.py` | `config/clients.json` | `docs/conversation.md` |
+| H-016 conversation (store in Java since H-024 M4, client permissions, loopback door) | `bin/homelab_inbox/conversation.py`, `backend/src/main/java/dev/homelab/inbox/conversation/` | `config/clients.json` | `docs/conversation.md` |
 | H-018 kitt (cockpit app: unit, gate on the tailnet, door for its adapter) | `deploy/kitt.service`, `bin/homelab_inbox/{gate,kitt}.py` | `config/clients.json` (client `kitt`), `config/inbox.conf` (`KITT_*`) | `docs/kitt.md` |
 | H-016 Discord bot (separate service, own account and venv, outward only) | `discord-bot/` (`bot_core.py` behaviour, `bot_run.py` discord.py glue, `requirements.txt` with hashes), `scripts/26-discord-bot.sh`, `systemd/homelab-discord-bot.service` | `/etc/homelab/discord-bot.env` (not in the repo) | `docs/discord.md` |
 | H-023 inbox database (PostgreSQL `inbox`, socket only, beside the old inbox) | `scripts/28-inbox-db.sh` | | `docs/inbox-db.md` |
@@ -82,8 +82,8 @@ part load automatically from `.claude/rules/` when you work on that part.
 
 `bin/homelab-inbox` only parses the command line and imports the modules in `bin/homelab_inbox/` (installed next to it
 by `scripts/21-inbox.sh`). Layers, each importing only from the ones above it: `config` (settings, shared state),
-`storage` (SQLite), `conversation` (H-016), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
-round), `router`, `briefs` (H-001), `search` (Search tab proxy), `forge` (Start/Stop proxy), `facade` (forwarding to the Java backend, H-023), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
+`storage` (SQLite), `facade` (forwarding to the Java backend, H-023), `conversation` (H-016, a client of the Java store since M4), `helpers` (git, GitHub, notify, live logs), `memory` (F-023), `jobs` (F-022), `rounds` (one Claude
+round), `router`, `briefs` (H-001), `search` (Search tab proxy), `forge` (Start/Stop proxy), `queue` (scheduler, run_round, finish_round), `github` (PR polling, auto merge),
 `access` (CSRF token, tailnet owner check), `overview` (page data), `kitt` (the door for kitt's adapter, H-018), `gate` (the tailnet gate in front of kitt), `server` (HTTP handler, serve). No import cycles: keep it that way.
 
 Addresses: Tailscale `homelab` = `100.85.70.34`; homelab page and inbox `http://homelab.tail4eb878.ts.net:8105`

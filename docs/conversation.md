@@ -1,7 +1,8 @@
 # The conversation (H-016)
 
-The box keeps one conversation with Chris, in the inbox database (`/var/lib/homelab-inbox/inbox.db`, table
-`conversation`), so it survives a restart. Code: `bin/homelab_inbox/conversation.py`. Clients (the Discord bot, later
+The box keeps one conversation with Chris, in the Java backend's PostgreSQL database (table `conversation`, since H-024 M4; before
+that in `inbox.db`), so it survives a restart. The Java backend is the only writer; `bin/homelab_inbox/conversation.py` is its client
+and still checks the client token. Details, rollback and checks: `docs/inbox-backend.md`, "Conversation store (M4)". Clients (the Discord bot, later
 Jarvis) keep no history of their own.
 
 ## What is stored

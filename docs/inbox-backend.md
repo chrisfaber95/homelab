@@ -290,3 +290,89 @@ not-found cases, and then `tests.test_inbox_contract.MovedReads` and `MovedMemor
 Revert the PR (or only remove `/api/skills` and `/api/memory` from `BACKEND_ROUTES` in `config/inbox.conf`) and let `scripts/21-inbox.sh`
 run again (a merge of the revert does that). The Python handlers are untouched, so they answer again at once. **No re-import and no data
 move are needed:** Java wrote nothing, and Python never stopped being the only writer of the memory clone, `skill_prs` and the job files.
+
+## Conversation store (M4, H-024)
+
+The store behind `/api/chat/*` moved to Java: PostgreSQL tables `conversation` and `conversation_refusals`, and the `switch:*`
+keys of `kv`. **From the merge on the Java backend is the only writer.** Code: `backend/src/main/java/dev/homelab/inbox/conversation/`
+(`ConversationStore`, `ConversationController`, `Clients`), the import in `.../db/ConversationImporter.java` and
+`ConversationCommand.java`. The Python side is a client: `bin/homelab_inbox/conversation.py` keeps its function names
+(`append`, `note`, `read`, `allowed`, `switch`, ...) and calls the backend on loopback with the facade secret, so the queue, the kitt
+door, notifications and the overview did not change.
+
+**Account (checked on the box, 2026-11-17).** The backend runs as `inbox-runner` (`User=` in the unit; `ps` shows it), like the Python
+inbox; only the Maven *build* uses a `DynamicUser`. The plan in `inbox-split.md` was right; the PostgreSQL role `inbox_app` trusts that name.
+
+### Routes
+
+| Route | Who answers | Notes |
+| --- | --- | --- |
+| `GET /api/chat/state` | Java | same body; non-GET is 405 `GET only` |
+| `GET /api/chat/entries?after=&limit=` | Java | cursor, limit 1 to 1000, `next`; 403 `refused: no permission 'read'`, 400 for non-numbers |
+| `POST /api/chat/entries` | Java | always written as Chris; kind needs `write`/`ask`/`answer`; scrubbing, 20000 characters, `ref` 80 |
+| `POST /api/chat/action` | **Python** | task queue and approvals; stays until K7 |
+
+The paths, bodies and status codes are unchanged. **Tokens:** the bearer token (`/etc/homelab/chat-<name>-token`) is still checked by
+the Python door (`conversation.authenticate`), which also checks loopback; it then calls Java with `X-Inbox-Client: <name>`. Java trusts
+that header only together with the facade secret. **This moves to Java in K7** (see `docs/architecture/inbox-split.md`). **Permissions**
+come from `config/clients.json`, read by Java on every request (`INBOX_CONFIG_DIR`), including the Discord and kitt switches. The Discord
+bot is not changed.
+
+Internal routes for the rest of the Python inbox (secret required, not reachable from outside): `POST /internal/conversation/append`,
+`GET /internal/conversation/entries`, `GET /internal/conversation/refusals`, `POST /internal/conversation/allowed`,
+`GET|POST /internal/conversation/switch/<name>`.
+
+### Failure behaviour (fail closed)
+
+The Java store answers 503 until the import has run (marker row `store:conversation` in `kv`) or while PostgreSQL is down. Python then:
+the chat door answers 503; `note()` (notifications, task rounds) logs and gives up; `allowed()` says no; `switch()` reads as on; `read()` and
+`append()` raise. Nothing is written to SQLite as a fallback: that would be a second writer.
+
+### The import (the switch)
+
+`scripts/27-backend.sh` runs it after installing the new jar and before the restart, as `inbox-runner`:
+
+```sh
+sudo -u inbox-runner /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar \
+  import-conversation --sqlite /var/lib/homelab-inbox/inbox.db --if-not-imported
+```
+
+One PostgreSQL transaction: the old Java rows are replaced by the SQLite `conversation`, `conversation_refusals` and `kv switch:*` rows
+(ids kept, sequences reset, counts compared), and the marker is written last. `--if-not-imported` makes a re-run a no-op once Java owns the
+store, so it never overwrites what Java wrote after the switch. The other `kv` keys stay in SQLite. Without the flag a second import
+refuses (exit 2); `--replace` redoes it and is only for before the switch. Entries Python wrote between this import and the moment the new
+Python code starts are not copied (the order of the two scripts after a merge is not fixed); merge when nothing is going on and see
+"After the merge" for the check.
+
+### Rollback (revert the PR, then re-import into the Python store)
+
+Java must hand its data back to SQLite **with the jar of this PR, before the revert is installed** (the revert removes the command). With the
+Python inbox stopped, nothing writes either store:
+
+```sh
+sudo systemctl stop homelab-inbox
+sudo -u inbox-runner /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar \
+  export-conversation --sqlite /var/lib/homelab-inbox/inbox.db      # prints: export ok: conversation=N conversation_refusals=M switches=K (counts equal)
+# then merge the revert PR of this change; homelab-admin reruns 21-inbox.sh and 27-backend.sh (old Python code, old jar)
+sudo systemctl start homelab-inbox     # if the rerun did not already start it
+```
+
+`export-conversation` replaces `conversation`, `conversation_refusals` and the `switch:*` keys in `inbox.db` in one transaction (ids kept)
+and leaves every other table alone. Afterwards check `sqlite3 /var/lib/homelab-inbox/inbox.db 'select count(*), max(id) from conversation'`
+against the export line. The PostgreSQL copy stays as it is. If the revert was already installed, build this PR's jar from its merge commit
+and run the command above with it.
+
+### After the merge: what to check
+
+1. `systemctl is-active homelab-inbox homelab-inbox-backend` and `curl -s http://127.0.0.1:8130/api/backend/health`.
+2. Send a Discord message to the bot: it must answer and `curl -H "Authorization: Bearer <discord token>" 'http://127.0.0.1:8105/api/chat/entries?after=0'` shows it.
+3. Open kitt on the phone: the chat thread shows the same message, and sending a question from kitt appears in it.
+4. The homelab page: the Discord and kitt switches still toggle (Overview).
+
+### Tests
+
+`python3 -m unittest tests.test_inbox_m4_parity` (needs the jar and PostgreSQL binaries): the reference inbox (old in-process store) and
+the inbox in front of Java get the same scripted requests with the tokens and permissions of `config/clients.json`, and must answer the same;
+then the same checks run against the Java base URL with the facade secret and `X-Inbox-Client` (per client of `clients.json`, plus the
+no-secret cases). Known difference: the wording of a JSON parse error (`bad request: ...`). Java: `ConversationStoreTest`,
+`ConversationImporterTest` (throwaway PostgreSQL). The other Python tests use `tests/conversation_fake.py`, an in-process stand-in for the store.

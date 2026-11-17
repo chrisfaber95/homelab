@@ -25,6 +25,9 @@ CLIENTS = json.dumps({"clients": {
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import conversation, helpers, overview, queue, server, storage  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 LONG = "A long result sentence. " * 400  # about 9000 characters: far beyond ntfy's 300 and one Discord message
 

@@ -358,6 +358,11 @@ matter: say so in the PR).
 | M5 | Memory writes (page edits and `GEHEUGEN:` blocks via `/internal/memory`; git pushes to the `memory` branch) | Java: `memory-repo` | M2 | medium (git, scrubbing with `SECRET_RE`) | `backend-developer` |
 | M6 | Job files: list, read, save, pause, resume, delete, change, catalogue (`jobs-repo`, `/agents/*`); scheduler and runs stay in Python | Java: `jobs-repo` | M2, F7a | medium | `backend-developer` |
 
+**M4 as built (H-024):** Java owns `conversation`, `conversation_refusals` and `kv switch:*` (marker row `store:conversation`); Python's
+`conversation.py` is a loopback client (`/internal/conversation/*`). `GET /api/chat/state` and `GET|POST /api/chat/entries` are answered by
+Java; **the bearer-token check and `/api/chat/action` (queue, approvals) stay in Python and move to Java in K7**, where the token files
+become Java's to read. The backend runs as `inbox-runner` (not a DynamicUser; only the build is one). See `docs/inbox-backend.md`, "Conversation store (M4)".
+
 M1–M3 can run in parallel; M4, M5 and M6 one at a time (each changes a writer). User for each: merge, and for M4 a
 Discord message and a kitt look on the phone.
 

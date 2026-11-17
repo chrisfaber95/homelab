@@ -178,43 +178,22 @@ class Handler(BaseHTTPRequestHandler):
         if not client:
             self.send_upstream(401, {"error": "unknown client or token"})
             return True
-        if url.path == "/api/chat/state":  # any authenticated client may ask; clients poll it to see the switches
-            if method != "GET":
-                self.send_upstream(405, {"error": "GET only"})
+        if url.path == "/api/chat/action":  # the task queue and the approvals: still Python's until K7
+            if why := conversation.switched_off(client):  # not logged as a refusal: a stopped client polls
+                self.send_upstream(403, {"error": f"refused: {why}", **conversation.state()})
             else:
-                self.send_upstream(200, conversation.state())
+                self.send_upstream(*self.chat_action(client, method))
             return True
-        if why := conversation.switched_off(client):  # not logged as a refusal: a stopped client polls
-            self.send_upstream(403, {"error": f"refused: {why}", **conversation.state()})
-            return True
-        if url.path == "/api/chat/action":
-            self.send_upstream(*self.chat_action(client, method))
-            return True
-        if method == "GET":
-            q = urllib.parse.parse_qs(url.query)
-            try:
-                entries = conversation.client_read(client, int((q.get("after") or ["0"])[0]),
-                                                   int((q.get("limit") or ["200"])[0]))
-            except ValueError:
-                self.send_upstream(400, {"error": "after and limit are numbers"})
-                return True
-            if entries is None:
-                self.send_upstream(403, {"error": "refused: no permission 'read'"})
-            else:
-                self.send_upstream(200, {"entries": entries, "next": entries[-1]["id"] if entries else
-                                         int((q.get("after") or ["0"])[0] or 0)})
-            return True
+        # entries and state belong to the Java backend (H-024 M4): the token is checked above, the permissions, switches,
+        # scrubbing and refusal log are there. The backend gets the client's name from us, never from the caller.
+        body = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 * 1024)) if method == "POST" else None
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 64 * 1024)))
-            kind, text, ref = str(body.get("kind", "message")), str(body["text"]), body.get("ref")
-            entry = conversation.client_append(client, kind, text, str(ref)[:80] if ref else None)
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
-            self.send_upstream(400, {"error": f"bad request: {e}"})
+            status, data = conversation.door(method, self.path, body, client)
+        except conversation.Unavailable as e:
+            log(f"chat door {method} {url.path}: {e}")
+            self.send_upstream(503, {"error": "the conversation store is not available; see the inbox journal"})
             return True
-        if entry is None:
-            self.send_upstream(403, {"error": f"refused: {client} may not write '{kind}'"})
-        else:
-            self.send_upstream(200, {"entry": entry})
+        self.send(status, data, "application/json; charset=utf-8")
         return True
 
     def kitt_door(self, method):

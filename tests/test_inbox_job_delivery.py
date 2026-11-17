@@ -13,6 +13,9 @@ os.environ.update(INBOX_RUNNER_HOME=tempfile.mkdtemp(), NTFY_FAKE="1", BACKEND_R
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import conversation, jobs, overview  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 HEAD = '---\nwhen: daily\nschedule: "0 7 * * *"\nkind: box-report\nmodel: local\n{extra}---\n{body}\n'
 NOTHING = "Nothing broke: answer NOTHING TO REPORT as the first line."

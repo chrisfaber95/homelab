@@ -294,21 +294,6 @@ def skills_data():
                            "created": local(p["created"])} for p in prs]}
 
 
-def skills_page():
-    e = html.escape
-    data = skills_data()
-    rows = "".join(f'<div class="row"><div class="row-title"><b>{e(s["name"])}</b><span>{e(s["description"])}</span></div>'
-                   + meta("jobs: " + (", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in s["jobs"]) or "geen"))
-                   + '</div>' for s in data["skills"])
-    props = "".join(f'<div class="row"><div class="row-title"><b>{e(p["name"])}</b><a href="{e(p["pr_url"])}">PR</a>'
-                    f'</div>' + meta(f'uit <a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a>', p["created"])
-                    + '</div>' for p in data["proposals"])
-    rows = rows or "<p class=empty>" + data["empty"] + "</p>"
-    props = props or "<p class=empty>" + data["proposals_empty"] + "</p>"
-    return page("skills", '<h1>Skills</h1><p class="muted">' + data["intro"] + "</p>" + rows
-                + "<h2>Voorstellen</h2>" + props)
-
-
 def admin_ask(req):
     """Een verzoek aan homelab-admin (F-019) via zijn socket; die kijkt zelf wie het vraagt (inbox-runner)."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

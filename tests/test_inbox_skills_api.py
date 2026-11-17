@@ -1,4 +1,4 @@
-"""GET /api/skills (H-022 F4a): the data the Skills page renders, as JSON. The HTML page stays as it was.
+"""GET /api/skills (H-022 F4a): the data the Skills page renders, as JSON. The page itself is TypeScript (frontend/dist).
 Run: python3 -m unittest discover -s tests"""
 import http.client
 import json
@@ -51,7 +51,6 @@ class SkillsApi(unittest.TestCase):
             self.set_proposals(("s-three", 7, "https://example.test/pr/1", "2026-11-16T10:00:00+00:00"))
             self.addCleanup(self.set_proposals)
             code, ctype, raw = self.get("/api/skills")
-            html_code, _, html_page = self.get("/skills")
         self.assertEqual((code, ctype), (200, "application/json; charset=utf-8"), raw)
         body = json.loads(raw)
         self.assertEqual(body["skills"], [{"name": "s-one", "description": "First", "jobs": ["a-job"]},
@@ -60,9 +59,7 @@ class SkillsApi(unittest.TestCase):
         prop = body["proposals"][0]
         self.assertEqual((prop["name"], prop["task_id"], prop["pr_url"]), ("s-three", 7, "https://example.test/pr/1"))
         self.assertRegex(prop["created"], r"^\d\d-\d\d \d\d:\d\d$")
-        self.assertEqual(html_code, 200)
-        for text in (body["intro"], "s-one", "First", "s-three", prop["created"]):
-            self.assertIn(text, html_page)
+        self.assertIn("Gemergde skills", body["intro"])
 
     def test_empty_texts(self):
         with mock.patch.object(pages, "skill_list", return_value={}):

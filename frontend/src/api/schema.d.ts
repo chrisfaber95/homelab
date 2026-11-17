@@ -206,9 +206,9 @@ export interface paths {
         };
         /**
          * What the Skills tab shows, as JSON
-         * @description The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+         * @description The data the Skills page shows (`pages.skills_data`), for the TypeScript page: the merged skills with the jobs that use each, the
          *     20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
-         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The page itself (`/skills`) is served from `frontend/dist` (`PORTED_PAGES`).
          */
         get: {
             parameters: {
@@ -1736,8 +1736,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Skills tab
-         * @description Matched on `self.path`.
+         * Skills tab (TypeScript page from frontend/dist)
+         * @description Served from `frontend/dist` (`PORTED_PAGES`); the page reads `GET /api/skills`. Without a build the answer is 503.
          */
         get: {
             parameters: {
@@ -1750,7 +1750,15 @@ export interface paths {
             responses: {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
-                404: components["responses"]["PageNotFound"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;

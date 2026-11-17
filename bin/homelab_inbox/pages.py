@@ -701,24 +701,39 @@ def run_page(r):
                 refresh=status == "queued")
 
 
-def skills_page():
-    e = html.escape
+SKILLS_INTRO = ("Gemergde skills op main; elke taak en Claude-job kan ze gebruiken. "
+                "Nieuwe en betere komen alleen via een PR die jij merget.")
+SKILLS_EMPTY, PROPOSALS_EMPTY = "Nog geen skills.", "Nog geen voorstellen."
+
+
+def skills_data():
+    """What the Skills page shows, as plain data (GET /api/skills): the skills with the jobs that use them and the
+    latest skill proposals, plus the page's texts."""
     used = {}
     for job in JOBS.values():
         for s in job.get("skills", []):
             used.setdefault(s, []).append(job["name"])
-    rows = "".join(f'<div class="row"><div class="row-title"><b>{e(n)}</b><span>{e(d)}</span></div>'
-                   + meta("jobs: " + (", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in used.get(n, [])) or "geen"))
-                   + '</div>' for n, d in skill_list().items())
     with db() as c:
         prs = c.execute("SELECT * FROM skill_prs ORDER BY id DESC LIMIT 20").fetchall()
+    return {"intro": SKILLS_INTRO, "empty": SKILLS_EMPTY, "proposals_empty": PROPOSALS_EMPTY,
+            "skills": [{"name": n, "description": d, "jobs": used.get(n, [])} for n, d in skill_list().items()],
+            "proposals": [{"name": p["name"], "pr_url": p["pr_url"], "task_id": p["task_id"],
+                           "created": local(p["created"])} for p in prs]}
+
+
+def skills_page():
+    e = html.escape
+    data = skills_data()
+    rows = "".join(f'<div class="row"><div class="row-title"><b>{e(s["name"])}</b><span>{e(s["description"])}</span></div>'
+                   + meta("jobs: " + (", ".join(f"<a href=/job/{e(j)}>{e(j)}</a>" for j in s["jobs"]) or "geen"))
+                   + '</div>' for s in data["skills"])
     props = "".join(f'<div class="row"><div class="row-title"><b>{e(p["name"])}</b><a href="{e(p["pr_url"])}">PR</a>'
-                    f'</div>' + meta(f'uit <a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a>', local(p["created"]))
-                    + '</div>' for p in prs)
-    return page("skills", f'<h1>Skills</h1><p class="muted">Gemergde skills op main; elke taak en Claude-job kan '
-                f'ze gebruiken. Nieuwe en betere komen alleen via een PR die jij merget.</p>'
-                f'{rows or "<p class=empty>Nog geen skills.</p>"}<h2>Voorstellen</h2>'
-                f'{props or "<p class=empty>Nog geen voorstellen.</p>"}')
+                    f'</div>' + meta(f'uit <a href="/task/{p["task_id"]}">taak #{p["task_id"]}</a>', p["created"])
+                    + '</div>' for p in data["proposals"])
+    rows = rows or "<p class=empty>" + data["empty"] + "</p>"
+    props = props or "<p class=empty>" + data["proposals_empty"] + "</p>"
+    return page("skills", '<h1>Skills</h1><p class="muted">' + data["intro"] + "</p>" + rows
+                + "<h2>Voorstellen</h2>" + props)
 
 
 def admin_ask(req):

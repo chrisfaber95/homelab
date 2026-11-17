@@ -97,6 +97,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Memory (Geheugen) list as JSON, what the /memory page renders
+         * @description The same data as `GET /memory`: preferences, facts and history filtered by `q` (every word must occur in id,
+         *     about, source, status or body; `q` is cut to 200 characters). The three sections always come in the order
+         *     `voorkeuren`, `feiten`, `geschiedenis`. History is sorted newest first and cut to the newest 30 unless `q` is
+         *     given (`truncated` is then true). `abouts` are the choices of the add form. Dates are the stored strings; the
+         *     `*_local` fields are what the page shows (dd-mm hh:mm).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The sections and the add-form choices. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            q: string;
+                            sections: {
+                                /** @enum {string} */
+                                kind: "voorkeuren" | "feiten" | "geschiedenis";
+                                /** @description matches, also those not shown */
+                                count: number;
+                                truncated: boolean;
+                                entries: components["schemas"]["MemoryEntry"][];
+                            }[];
+                            abouts: string[];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Skills tab shows, as JSON
+         * @description The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+         *     20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Skills page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            intro: string;
+                            /** @description shown when `skills` is empty */
+                            empty: string;
+                            /** @description shown when `proposals` is empty */
+                            proposals_empty: string;
+                            skills: {
+                                name: string;
+                                description: string;
+                                /** @description names of the jobs that use it; empty shows 'geen' */
+                                jobs: string[];
+                            }[];
+                            proposals: {
+                                name: string;
+                                pr_url: string;
+                                task_id: number | null;
+                                created: string;
+                            }[];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/e/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One memory entry as JSON, what the /memory/e/{id} page renders
+         * @description The id contains slashes (`voorkeuren/<about>/<name>`, ...); in the template it stands for the whole remainder
+         *     after `/api/memory/e/`. Matched on `url.path`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The entry plus the branch and repo it is stored in. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["MemoryEntry"] & {
+                            /** @description MEMORY_BRANCH */
+                            branch: string;
+                            /** @description DATA_REPO */
+                            data_repo: string;
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                /** @description `{"error": "No such memory entry."}` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live": {
         parameters: {
             query?: never;
@@ -2847,6 +3021,29 @@ export interface components {
             /** @description ISO 8601; null while paused or broken */
             nextRun: string | null;
             error: string | null;
+        };
+        MemoryEntry: {
+            /** @description voorkeuren/<about>/<name>, feiten/<about>/<name> or geschiedenis/<yyyy-mm>/taak-<n> */
+            id: string;
+            /** @enum {string} */
+            kind: "voorkeuren" | "feiten" | "geschiedenis";
+            about: string;
+            name: string;
+            body: string;
+            added: string;
+            changed: string;
+            source: string;
+            link: string;
+            status: string;
+            pr: string;
+            /** @description row title: first body line for history, else the name */
+            title: string;
+            /** @description first body line; empty for history */
+            summary: string;
+            /** @enum {string} */
+            kind_label: "voorkeur" | "feit" | "geschiedenis";
+            added_local: string;
+            changed_local: string;
         };
         LiveItem: {
             /** @description t<id> task, r<id> local run, f1 forge */

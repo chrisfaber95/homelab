@@ -3,10 +3,11 @@ import json
 import re
 import shutil
 import threading
+from datetime import datetime
 
 import yaml
 
-from .config import CONF, HOME, JOBS, SECRET_RE, STATUS_NL
+from .config import CONF, HOME, JOBS, SECRET_RE, STATUS_NL, TZ
 from .helpers import first_line, git, label, page_url, repo_list, sync_branch, title_of
 from .storage import get, log, now, update
 
@@ -108,6 +109,44 @@ def load_memory(fetch=True):
 
 def mem_get(mid):
     return next((m for m in MEMORY if m["id"] == mid), None)
+
+
+def mem_local(iso):
+    """The date as the Geheugen page shows it (dd-mm hh:mm in the inbox time zone); a hand-edited value stays as is."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    except ValueError:
+        return iso
+
+
+def mem_json(m):
+    """One entry for the JSON API: the fields of the entry plus what the page derives from them."""
+    title = first_line(m["body"]).lstrip("# ") if m["kind"] == "geschiedenis" else m["name"]
+    return {**m, "title": title, "summary": "" if m["kind"] == "geschiedenis" else first_line(m["body"]),
+            "kind_label": MEM_KINDS[m["kind"]], "added_local": mem_local(m["added"]),
+            "changed_local": mem_local(m["changed"])}
+
+
+def memory_view(q=""):
+    """What memory_page renders: the three sections (history newest first, cut to 30 unless there is a query), the
+    entries per section and the `about` choices of the add form."""
+    words = q.lower().split()
+    hits = [m for m in MEMORY if all(w in " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
+                                     for w in words)]
+    sections = []
+    for kind in ("voorkeuren", "feiten", "geschiedenis"):
+        items = [m for m in hits if m["kind"] == kind]
+        if kind == "geschiedenis":
+            items.sort(key=lambda m: m["added"], reverse=True)
+        shown = items if q or kind != "geschiedenis" else items[:30]
+        sections.append({"kind": kind, "count": len(items), "truncated": len(shown) < len(items),
+                         "entries": [mem_json(m) for m in shown]})
+    return {"q": q, "sections": sections, "abouts": ["algemeen", "box", *sorted(repo_list())]}
+
+
+def entry_view(m):
+    """What entry_page renders: the entry and where it lives."""
+    return {**mem_json(m), "branch": CONF.get("MEMORY_BRANCH", "memory"), "data_repo": CONF["DATA_REPO"]}
 
 
 def entry_text(about, source, link, body, added, **extra):

@@ -183,7 +183,7 @@ class EmptyList(unittest.TestCase):
 
     def test_the_shipped_config_forwards_exactly_the_moved_routes(self):
         conf = (ROOT / "config" / "inbox.conf").read_text()
-        self.assertIn('\nBACKEND_ROUTES="/api/overview,/api/live,/api/log,/api/skills,/api/memory"\n', conf)
+        self.assertIn('\nBACKEND_ROUTES="/api/overview,/api/live,/api/log,/api/skills,/api/memory,/api/forge,/api/search"\n', conf)
 
     def test_nothing_is_forwarded_and_answers_are_the_python_ones(self):
         FakeBackend.calls = []

@@ -91,13 +91,15 @@ class SearchTab(unittest.TestCase):
         r = c.getresponse()
         return r.status, r.read().decode()
 
-    def test_page_is_a_tab_with_the_controls(self):
-        status, html = self.req("GET", "/search")
-        self.assertEqual(status, 200)
-        for needle in ('href="/search" aria-current=page', 'id="sq"', 'name="hard"', 'id="sproject"', 'id="stype"',
-                       'width=device-width', 'id="sanswer"', 'id="sresults"'):
-            self.assertIn(needle, html)
+    def test_page_is_the_typescript_page_and_a_tab(self):
+        status, _ = self.req("GET", "/search")
+        self.assertIn(status, (200, 503))  # 200 with a frontend build, else the "build is missing" answer
+        self.assertIn("/search", server.PORTED_PAGES)
         self.assertIn('<a href="/search">Search</a>', self.req("GET", "/research")[1])
+        ts = (ROOT / "frontend/src/pages/search.ts").read_text()
+        for needle in ('id: "sq"', 'name: "hard"', 'id: "sproject"', 'id: "stype"', 'id: "sanswer"', 'id: "sresults"',
+                       "/api/search/filters", "/api/search/results", "/api/search/ask", "/api/search/feedback"):
+            self.assertIn(needle, ts)
 
     def test_filters_and_results_are_proxied_with_filters(self):
         self.assertEqual(json.loads(self.req("GET", "/api/search/filters")[1])["projects"], ["homelab"])

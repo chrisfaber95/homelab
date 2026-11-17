@@ -638,7 +638,9 @@ paths:
       tags: [page]
       summary: Search tab
       x-access: page
-      description: Matched on `url.path`.
+      description: |
+        Matched on `url.path`. Served from `frontend/dist` (TypeScript, `frontend/src/pages/search.ts`, data from
+        `/api/search/*`); without a build 503.
       responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
   /memory:
     x-code: ["/memory"]

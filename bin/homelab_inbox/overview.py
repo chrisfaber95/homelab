@@ -8,7 +8,7 @@ from pathlib import Path
 from . import conversation, forge
 from .config import CONF, JOBS, SERVICES, TZ, _round_started
 from .helpers import first_line, label, read_json
-from .jobs import JOB_KINDS, LLM_URL, RUN_NL, run_view
+from .jobs import JOB_KINDS, LLM_URL, RESEARCH_JOB, RUN_NL, claude_runs_today, job_runs, load_agents, run_view
 from .storage import db, tasks
 
 
@@ -231,6 +231,57 @@ def usage():
             saved[kind] = saved.get(kind, 0) + mins
     return {"days": days, "llm": llm, "claude_jobs": per_day(claude_jobs), "inbox": per_day(inbox),
             "cap": int(CONF.get("JOB_CLAUDE_CAP", 10)), "saved": saved}
+
+
+def local_time(iso):
+    """'dd-mm HH:MM' in the inbox's time zone, '-' when empty, the text as is when it is not a date."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    except ValueError:
+        return iso  # a date edited by hand in the memory
+
+
+def jobs_data():
+    """What the Jobs page renders, as data (GET /api/jobs-page): the counter, the open drafts, the catalogue, all jobs and
+    the latest runs. The texts are the ones the page shows (Dutch); a broken job or catalogue file has `error`."""
+    def model(m):
+        return "lokaal" if m == "local" else "Claude"
+
+    jobs = []
+    for name, job in sorted(JOBS.items()):
+        if "error" in job:
+            jobs.append({"name": name, "error": job["error"]})
+            continue
+        last = job_runs(name, 1)
+        status = run_view(last[0])[0] if last else None
+        nxt = "gepauzeerd" if job["paused"] else day_time(job["cron"].next_after(datetime.now(timezone.utc)))
+        jobs.append({"name": name, "error": None, "kind": JOB_KINDS[job["kind"]], "model": model(job["model"]),
+                     "when": job["when"] or job["schedule"], "next": nxt, "paused": bool(job["paused"]),
+                     "last": RUN_NL.get(status, "") if status else None})
+    catalogue = []
+    for a in load_agents():
+        if "error" in a:
+            catalogue.append({"name": a["name"], "error": a["error"]})
+            continue
+        j = a["job"]
+        catalogue.append({"name": a["name"], "error": None, "on": bool(a["on"]),
+                          "what": j["instruction"].split("\n\n")[0][:300], "when": j["when"] or j["schedule"],
+                          "model": model(j["model"]), "deliver": j["deliver"], "fill": a.get("fill") or None})
+    with db() as c:
+        drafts = c.execute("SELECT * FROM drafts WHERE status IN ('drafting','ready','failed') ORDER BY id DESC "
+                           "LIMIT 10").fetchall()
+    runs = []
+    for r in job_runs(limit=20):
+        status, summary, link, pr = run_view(r)
+        runs.append({"id": r["id"], "job": r["job"],
+                     "job_url": "/research" if r["job"] == RESEARCH_JOB and r["job"] not in JOBS else f"/job/{r['job']}",
+                     "due": local_time(r["due"]), "status": status, "status_label": RUN_NL.get(status, status),
+                     "url": link, "model": model(r["model"]), "manual": bool(r["manual"]), "pr": pr,
+                     "summary": first_line(summary) if summary else ""})
+    return {"claude_runs_today": claude_runs_today(), "claude_cap": int(CONF.get("JOB_CLAUDE_CAP", 10)),
+            "timezone": TZ.key, "refresh": any(d["status"] == "drafting" for d in drafts),
+            "drafts": [{"id": d["id"], "status": d["status"], "request": first_line(d["request"])} for d in drafts],
+            "catalogue": catalogue, "jobs": jobs, "runs": runs}
 
 
 def change_text(c):

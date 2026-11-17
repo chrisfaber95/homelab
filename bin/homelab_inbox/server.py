@@ -15,7 +15,7 @@ from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
-from .overview import activity_sentence, live_items, overview_json
+from .overview import activity_sentence, jobs_data, live_items, overview_json
 from . import forge, search
 from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
@@ -261,6 +261,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, f.read_bytes(), ctype, cache="private, max-age=86400")
         if url.path == "/api/session":
             return self.send_upstream(200, {"csrf_token": csrf_token()})
+        if url.path == "/api/jobs-page":
+            return self.send_upstream(200, jobs_data())
         if url.path == "/api/overview":
             return self.send_upstream(200, overview_json())
         if url.path == "/api/memory":

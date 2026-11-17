@@ -97,6 +97,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Jobs page renders (jobs, catalogue, drafts, latest runs) as data
+         * @description The data of `GET /jobs` (`pages.jobs_page`): the Claude-run counter of today, the open drafts (newest 10), the
+         *     catalogue of `agents/`, all jobs (sorted by name) and the 20 latest runs. Texts are the Dutch ones the page
+         *     shows (`next`, `last`, `status_label`, times in `timezone`). A broken job or catalogue file has only `name` and
+         *     `error`; it never hides the others. `refresh` is true while a draft is still being drafted (the page reloads
+         *     itself every 20 seconds then). The query string is ignored. Not `/api/jobs`: that is kitt's door.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Jobs page as data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["JobsPage"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory": {
         parameters: {
             query?: never;
@@ -2922,6 +2965,77 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        JobsPage: {
+            /** @description Claude runs started by jobs today */
+            claude_runs_today: number;
+            /** @description daily limit (`JOB_CLAUDE_CAP`) */
+            claude_cap: number;
+            /** @description e.g. Europe/Amsterdam */
+            timezone: string;
+            /** @description a draft is still being drafted */
+            refresh: boolean;
+            drafts: {
+                id: number;
+                /** @enum {string} */
+                status: "drafting" | "ready" | "failed";
+                /** @description first line of the request */
+                request: string;
+            }[];
+            catalogue: components["schemas"]["CatalogueAgent"][];
+            jobs: components["schemas"]["JobSummary"][];
+            runs: components["schemas"]["JobRunSummary"][];
+        };
+        /** @description With `error` set only `name` and `error` are present. */
+        CatalogueAgent: {
+            name: string;
+            /** @description why the file in agents/ is broken */
+            error: string | null;
+            /** @description a job of this name exists */
+            on?: boolean;
+            /** @description first paragraph of the instruction, at most 300 characters */
+            what?: string;
+            when?: string;
+            /** @enum {string} */
+            model?: "lokaal" | "Claude";
+            /** @enum {string} */
+            deliver?: "page" | "ntfy" | "conversation";
+            /** @description what to fill in when switching on */
+            fill?: string | null;
+        };
+        /** @description With `error` set only `name` and `error` are present. */
+        JobSummary: {
+            name: string;
+            error: string | null;
+            /** @description Dutch kind label */
+            kind?: string;
+            /** @enum {string} */
+            model?: "lokaal" | "Claude";
+            when?: string;
+            /** @description 'gepauzeerd' or e.g. 'morgen 07:00' */
+            next?: string;
+            paused?: boolean;
+            /** @description Dutch status of the latest run, null without runs */
+            last?: string | null;
+        };
+        JobRunSummary: {
+            id: number;
+            job: string;
+            /** @description /job/<name>, or /research for research questions */
+            job_url: string;
+            /** @description dd-mm HH:MM in timezone */
+            due: string;
+            status: string;
+            status_label: string;
+            /** @description /task/<id> or /run/<id> */
+            url: string;
+            /** @enum {string} */
+            model: "lokaal" | "Claude";
+            /** @description started with 'Nu draaien' */
+            manual: boolean;
+            pr: string | null;
+            /** @description first line, empty when none */
+            summary: string;
+        };
         /** @description Error body of every /api/* answer: the chat door, the kitt door and the page endpoints. A flattened upstream error may add keys (e.g. request_id). */
         Error: {
             error: string;

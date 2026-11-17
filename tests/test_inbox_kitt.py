@@ -19,6 +19,9 @@ ALL = ["read", "write", "ask", "start_task", "run_job", "approve"]
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import access, briefs, chat, config, conversation, gate, kitt, overview, server, storage  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 OWNER = "chris@example.com"
 BID = "H-018"
@@ -46,9 +49,9 @@ class Base(unittest.TestCase):
 
     def setUp(self):
         self._clients_json = os.environ.get("CLIENTS_JSON")  # other test files set theirs for the whole run
-        conversation.refusals()
+        FAKE.reset()
         with storage.db() as c:
-            for t in ("tasks", "kv", "conversation", "conversation_refusals", "job_runs"):
+            for t in ("tasks", "kv", "job_runs"):
                 c.execute(f"DELETE FROM {t}")
             c.execute("DROP TABLE IF EXISTS approvals")
         self.set_clients(ALL)

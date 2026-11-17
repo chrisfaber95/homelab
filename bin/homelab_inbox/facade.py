@@ -42,7 +42,7 @@ def secret():
         return ""
 
 
-def forward(method, target, headers, body, who):
+def forward(method, target, headers, body, who, extra=None, timeout=TIMEOUT):
     """Send one request to the backend; return (status, [(header, value)], body bytes).
     Raises RuntimeError with a short message when the backend cannot be reached or is not configured."""
     base = urllib.parse.urlsplit(BACKEND_URL)
@@ -53,8 +53,9 @@ def forward(method, target, headers, body, who):
         raise RuntimeError("no backend secret (BACKEND_SECRET or BACKEND_SECRET_FILE)")
     out = {h: headers[h] for h in SEND_HEADERS if headers.get(h)}
     out["X-Inbox-Facade"] = key
+    out.update(extra or {})  # headers the inbox itself sets (the chat door's X-Inbox-Client); never the caller's
     out["X-Inbox-Who"] = "".join(c for c in who if c.isascii() and c.isprintable())[:100]
-    conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=TIMEOUT)
+    conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=timeout)
     try:
         conn.request(method, target, body=body or None, headers=out)
         r = conn.getresponse()

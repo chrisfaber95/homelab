@@ -25,6 +25,9 @@ os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import briefs, chat, config, conversation  # noqa: E402
 from homelab_inbox import helpers, overview, server, storage  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 BID = "H-016"
 FAKE_BRIEF = {"id": BID, "title": "Chat", "status": "draft", "repos": ["homelab"], "build": {},
@@ -33,12 +36,10 @@ FAKE_BRIEF = {"id": BID, "title": "Chat", "status": "draft", "repos": ["homelab"
 
 class Base(unittest.TestCase):
     def setUp(self):
-        conversation.refusals()  # creates the conversation tables
+        FAKE.reset()
         with storage.db() as c:
             c.execute("DELETE FROM tasks")
             c.execute("DELETE FROM kv")
-            c.execute("DELETE FROM conversation")
-            c.execute("DELETE FROM conversation_refusals")
             c.execute("DROP TABLE IF EXISTS approvals")
         self._env = {k: os.environ.get(k) for k in ("CLIENTS_JSON", "CHAT_TOKEN_DIR")}  # other test files set theirs
         os.environ.update(CLIENTS_JSON=json.dumps(CLIENTS), CHAT_TOKEN_DIR=TOKENS)

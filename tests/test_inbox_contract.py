@@ -67,6 +67,9 @@ if not EXTERNAL:
     os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
     sys.path.insert(0, str(ROOT / "bin"))
     from homelab_inbox import access, briefs, chat, config, conversation, forge, helpers, kitt, search, server, storage  # noqa: E402
+    sys.path.insert(0, str(ROOT / "tests"))
+    import conversation_fake  # noqa: E402
+    FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) as an in-process stand-in
 
 try:
     import yaml
@@ -195,9 +198,9 @@ class Contract(unittest.TestCase):
     def setUp(self):
         if EXTERNAL:
             return
-        conversation.refusals()  # creates the conversation tables
+        FAKE.reset()
         with storage.db() as c:
-            for t in ("tasks", "kv", "conversation", "conversation_refusals", "job_runs"):
+            for t in ("tasks", "kv", "job_runs"):
                 c.execute(f"DELETE FROM {t}")
             c.execute("DROP TABLE IF EXISTS approvals")
         for old in helpers.LOGS.glob("*.log"):  # ids restart at 1 after the DELETE: no lines of an earlier test

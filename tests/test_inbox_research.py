@@ -14,6 +14,9 @@ os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import chat, conversation, jobs, overview, queue, rounds  # noqa: E402
 from homelab_inbox.storage import db, get  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+FAKE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 FILE = ('---\nwhen: weekly\nschedule: "0 9 * * 1"\nkind: research\nmodel: claude\n{extra}---\n'
         'What changed in Tailscale ACL syntax this year?\n')
@@ -43,9 +46,7 @@ def reset():
         c.execute("DELETE FROM tasks")
         c.execute("DELETE FROM job_runs")
         c.execute("DELETE FROM kv")
-    conversation.refusals()
-    with db() as c:
-        c.execute("DELETE FROM conversation")
+    FAKE.reset()
 
 
 class Format(unittest.TestCase):

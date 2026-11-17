@@ -11,7 +11,7 @@
 # Needs scripts/28-inbox-db.sh (B2) to have run: the account inbox-runner and the database `inbox`. Nothing is
 # switched over to the backend; the old inbox (homelab-inbox, inbox.db) is not touched. Docs: docs/inbox-backend.md.
 # Run as: sudo bash <homelab-repo>/scripts/27-backend.sh
-# homelab-rerun: root backend systemd/homelab-inbox-backend.service config/inbox.conf
+# homelab-rerun: root backend systemd/homelab-inbox-backend.service config/inbox.conf scripts/conversation-import.sh
 set -euo pipefail
 
 SERVICE=homelab-inbox-backend
@@ -125,6 +125,10 @@ if [[ ! -s $SECRET_FILE ]]; then
 fi
 chown "$SERVICE_USER:$SERVICE_USER" "$SECRET_FILE"
 chmod 600 "$SECRET_FILE"
+# H-024 M4: the conversation store is Java's. The import runs where nothing can write either store (inbox stopped, the M4
+# Python code installed); scripts/conversation-import.sh skips until both the code and this jar are in place, so whichever of
+# 21-inbox.sh and this script runs last does it.
+bash "$REPO/scripts/conversation-import.sh"
 systemctl enable -q "$SERVICE"
 if [[ $changed -eq 1 ]] || ! systemctl is-active --quiet "$SERVICE"; then
   systemctl restart "$SERVICE"

@@ -1,13 +1,21 @@
 """The one conversation between Chris and the box (H-016): every message, answer, question, notification and approval
-request with its time, author and client. Stored in the inbox database (survives a restart), scrubbed with the memory's
-secret filter, read from a cursor, and open to clients only with the permissions config/clients.json gives them."""
+request with its time, author and client, read from a cursor and open to clients only with the permissions
+config/clients.json gives them.
+
+Since H-024 M4 the Java backend owns the store (PostgreSQL: the conversation and refusal tables and the switch keys); it
+is the only writer. This module is its client on loopback (/internal/conversation/*, with the facade secret), keeps the
+same function names the rest of the inbox already calls, and still does the bearer-token check of the chat door
+(authenticate) until K7. When the backend cannot be reached nothing is written locally: note() logs and gives up,
+switch() counts a switch as on, allowed() says no (fail closed), the others raise."""
 import hmac
 import json
 import os
+import urllib.parse
 from pathlib import Path
 
-from .config import ROOT, SECRET_RE
-from .storage import db, log, now
+from . import facade
+from .config import ROOT
+from .storage import log
 
 
 AUTHORS = ("chris", "claude", "box", "system")  # box = notifications, system = the inbox itself
@@ -26,17 +34,6 @@ FORBIDDEN = ("ssh_key", "memory_edit", "merge_homelab")
 
 # What a client may append, and the permission that takes: a client always writes as Chris.
 CLIENT_KINDS = {"message": "write", "question": "ask", "answer": "answer"}
-
-
-MAX_TEXT = 20000
-
-
-REDACTED = "[removed: looks like a secret]"
-
-
-def scrub(text):
-    """The same filter the memory uses (config.SECRET_RE), applied by replacing the match: the rest stays readable."""
-    return SECRET_RE.sub(REDACTED, text or "")
 
 
 CLIENTS_FILE = ROOT / "config" / "clients.json"
@@ -63,30 +60,57 @@ def client_setting(client, key):
     return _config().get(client, {}).get(key)
 
 
-def _init(conn):
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS conversation (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL,
-            author TEXT NOT NULL, client TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, link TEXT, ref TEXT);
-        CREATE TABLE IF NOT EXISTS conversation_refusals (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL,
-            client TEXT NOT NULL, action TEXT NOT NULL, why TEXT NOT NULL);""")
+class Unavailable(RuntimeError):
+    """The Java backend did not answer (down, not imported yet, or no secret): the store cannot be used right now."""
 
 
-def _row(r):
-    return {k: r[k] for k in ("id", "time", "author", "client", "kind", "text", "link", "ref")}
+def _http(method, path, data=None, client=None):
+    """The transport: one request to the backend, (status, body bytes). `client` is the chat door's authenticated client,
+    sent as X-Inbox-Client (set here, never taken from a caller). Tests replace `transport` with an in-process fake
+    (tests/conversation_fake.py); production always goes through facade.forward."""
+    try:
+        headers = {"Content-Type": "application/json"} if data else {}
+        status, _, raw = facade.forward(method, path, headers, data, client or "inbox",
+                                        extra={"X-Inbox-Client": client} if client else None, timeout=5)
+        return status, raw
+    except RuntimeError as e:
+        raise Unavailable(f"conversation store: {e}") from e
+
+
+transport = _http
+
+
+def door(method, target, body, client):
+    """The chat door's entries and state routes (/api/chat/entries, /api/chat/state): the backend answers them for the
+    client the door has authenticated. Returns (status, body bytes); Unavailable when the backend does not answer."""
+    return transport(method, target, body, client)
+
+
+def _backend(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    status, raw = transport(method, path, data, None)
+    try:
+        return status, json.loads(raw or b"{}")
+    except ValueError as e:
+        raise Unavailable(f"conversation store: not JSON (HTTP {status})") from e
+
+
+def _ok(method, path, body=None):
+    """The answer body of a call that must succeed; Unavailable otherwise (a 400 is the caller's mistake: ValueError)."""
+    status, data = _backend(method, path, body)
+    if status == 400:
+        raise ValueError(data.get("error", "bad request"))
+    if status != 200:
+        raise Unavailable(f"conversation store: HTTP {status}: {data.get('error', '')}")
+    return data
 
 
 def append(author, client, kind, text, link=None, ref=None):
-    """Add an entry (internal callers: the inbox itself). Returns the entry; the text is scrubbed first."""
+    """Add an entry (internal callers: the inbox itself). Returns the entry; the backend scrubs the text first."""
     if author not in AUTHORS or kind not in KINDS:
         raise ValueError(f"unknown author or kind: {author}/{kind}")
-    text = scrub(str(text).strip())[:MAX_TEXT]
-    if not text:
-        raise ValueError("the text is empty")
-    with db() as c:
-        _init(c)
-        cur = c.execute("INSERT INTO conversation (time, author, client, kind, text, link, ref) VALUES (?,?,?,?,?,?,?)",
-                        (now(), author, client, kind, text, scrub(link) if link else None, ref))
-        return _row(c.execute("SELECT * FROM conversation WHERE id=?", (cur.lastrowid,)).fetchone())
+    return _ok("POST", "/internal/conversation/append", {"author": author, "client": client, "kind": kind,
+                                                         "text": str(text), "link": link, "ref": ref})["entry"]
 
 
 def note(author, client, kind, text, link=None, ref=None):
@@ -99,36 +123,31 @@ def note(author, client, kind, text, link=None, ref=None):
 
 def read(after=0, limit=200):
     """Entries with an id above `after` (the cursor: pass the last id you saw; 0 = from the start), oldest first."""
-    with db() as c:
-        _init(c)
-        rows = c.execute("SELECT * FROM conversation WHERE id>? ORDER BY id LIMIT ?",
-                         (max(0, int(after)), max(1, min(int(limit), 1000)))).fetchall()
-    return [_row(r) for r in rows]
+    q = urllib.parse.urlencode({"after": max(0, int(after)), "limit": max(1, min(int(limit), 1000))})
+    return _ok("GET", f"/internal/conversation/entries?{q}")["entries"]
 
 
 def refusals(limit=100):
-    with db() as c:
-        _init(c)
-        return [dict(r) for r in c.execute("SELECT * FROM conversation_refusals ORDER BY id DESC LIMIT ?",
-                                           (limit,)).fetchall()]
+    return _ok("GET", f"/internal/conversation/refusals?limit={int(limit)}")["refusals"]
 
 
-SWITCHES = ("discord", "discord_approvals", "kitt")  # on the homelab page; stored in the kv table, read on every request
+SWITCHES = ("discord", "discord_approvals", "kitt")  # on the homelab page; stored by the backend, read on every request
 
 
 def switch(name):
-    """True unless the switch was turned off. Read from the database each time: no restart needed."""
-    with db() as c:
-        _init(c)
-        row = c.execute("SELECT value FROM kv WHERE key=?", (f"switch:{name}",)).fetchone()
-    return not (row and row["value"] == "off")
+    """True unless the switch was turned off. Read from the backend each time: no restart needed. A backend that does
+    not answer reads as on (the default), so the homelab page still renders."""
+    try:
+        return bool(_ok("GET", f"/internal/conversation/switch/{name}")["on"])
+    except (Unavailable, ValueError, KeyError) as e:
+        log(f"conversation: switch {name} unreadable, taken as on ({e})")
+        return True
 
 
 def set_switch(name, on):
     if name not in SWITCHES:
         raise ValueError(f"unknown switch: {name}")
-    with db() as c:
-        c.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?,?)", (f"switch:{name}", "on" if on else "off"))
+    _ok("POST", f"/internal/conversation/switch/{name}", {"on": bool(on)})
 
 
 def state():
@@ -152,21 +171,14 @@ def switched_off(client, action=None):
 
 
 def allowed(client, action):
-    """True when the client has the permission; otherwise False, and the refusal is logged (journal and table)."""
-    if action in FORBIDDEN:
-        why = "chat clients can never do this"
-    elif action in PERMISSIONS and action in clients().get(client, set()):
-        why = switched_off(client, action)
-        if not why:
-            return True
-    else:
-        why = "unknown client" if client not in clients() else f"no permission '{action}'"
-    log(f"conversation: refused {client}: {action} ({why})")
-    with db() as c:
-        _init(c)
-        c.execute("INSERT INTO conversation_refusals (time, client, action, why) VALUES (?,?,?,?)",
-                  (now(), str(client)[:40], str(action)[:40], why))
-    return False
+    """True when the client has the permission; otherwise False, and the backend logs the refusal (its journal and the
+    refusal table). The same answer as before the move: forbidden actions never, the permission list of
+    config/clients.json, the switches. Fail closed: without an answer from the backend the answer is no."""
+    try:
+        return bool(_ok("POST", "/internal/conversation/allowed", {"client": str(client), "action": str(action)})["allowed"])
+    except (Unavailable, ValueError, KeyError) as e:
+        log(f"conversation: refused {client}: {action} (the store did not answer: {e})")
+        return False
 
 
 def client_read(client, after=0, limit=200):

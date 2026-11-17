@@ -1,6 +1,8 @@
 package dev.homelab.inbox.read;
 
 import dev.homelab.inbox.read.Jobs.Job;
+import dev.homelab.inbox.conversation.ConversationDb;
+import dev.homelab.inbox.conversation.ConversationStore;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -62,9 +64,12 @@ public class OverviewService {
     private final Forge forge;
     private final JsonMapper json;
     private final Clock clock;
+    private final ConversationStore conversation;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    public OverviewService(Settings settings, InboxDb db, Jobs jobs, Forge forge, JsonMapper json, Clock clock) {
+    public OverviewService(Settings settings, InboxDb db, Jobs jobs, Forge forge, JsonMapper json, Clock clock,
+                           ConversationStore conversation) {
+        this.conversation = conversation;
         this.settings = settings;
         this.db = db;
         this.jobs = jobs;
@@ -430,8 +435,11 @@ public class OverviewService {
     // --- switches ---------------------------------------------------------------------------------------------------
 
     private boolean switchOn(String name) {
-        Map<String, Object> row = db.one("SELECT value FROM kv WHERE key=?", "switch:" + name);
-        return !(row != null && "off".equals(InboxDb.str(row, "value")));
+        try {
+            return conversation.switchOn(name);  // the switches live in the conversation store since M4 (PostgreSQL)
+        } catch (ConversationDb.Unavailable e) {
+            return true;  // as the Python inbox does: a switch counts as on unless it was turned off
+        }
     }
 
     private List<String> clientMay(String client) {

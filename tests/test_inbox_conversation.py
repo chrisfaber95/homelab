@@ -26,6 +26,9 @@ os.environ["CLIENTS_JSON"] = json.dumps({"clients": {
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import config, conversation, helpers, server  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import conversation_fake  # noqa: E402
+STORE = conversation_fake.install(conversation)  # the Java store (H-024 M4) is replaced by an in-process stand-in
 
 FAKE = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"  # a planted fake token, not a real one
 
@@ -42,13 +45,33 @@ class Store(unittest.TestCase):
         with self.assertRaises(ValueError):
             conversation.append("chris", "inbox", "gossip", "x")
 
-    def test_survives_a_restart(self):
-        e = conversation.append("chris", "page", "message", "persist me")
-        code = ("import sys;sys.path.insert(0,%r);from homelab_inbox import conversation as c;"
-                "print([x['text'] for x in c.read(%d-1)])" % (str(ROOT / "bin"), e["id"]))
-        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                             env={**os.environ, "INBOX_RUNNER_HOME": str(config.HOME)}).stdout
-        self.assertIn("persist me", out)  # a new process (a restart) reads what the old one stored
+    def test_python_holds_no_copy_of_the_store(self):
+        """One writer (H-024 M4): the Java backend owns the tables; the Python inbox writes nothing of them to SQLite."""
+        conversation.append("chris", "page", "message", "only the backend keeps me")
+        conversation.set_switch("kitt", False)
+        conversation.allowed("nobody", "read")
+        conversation.set_switch("kitt", True)
+        import sqlite3
+        with sqlite3.connect(config.HOME / "inbox.db") as c:
+            tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("conversation", tables)
+            self.assertNotIn("conversation_refusals", tables)
+            self.assertEqual(c.execute("SELECT count(*) FROM kv WHERE key LIKE 'switch:%'").fetchone()[0]
+                             if "kv" in tables else 0, 0)
+
+    def test_without_the_backend_nothing_is_stored_and_it_fails_closed(self):
+        STORE.down = True
+        try:
+            self.assertIsNone(conversation.note("box", "ntfy", "notification", "lost"))  # note() never raises
+            with self.assertRaises(conversation.Unavailable):
+                conversation.append("chris", "page", "message", "x")
+            with self.assertRaises(conversation.Unavailable):
+                conversation.read()
+            self.assertFalse(conversation.allowed("discord", "read"))  # no answer is no
+            self.assertTrue(conversation.switch("discord"))  # a switch that cannot be read counts as on
+        finally:
+            STORE.down = False
+        self.assertNotIn("lost", [e["text"] for e in conversation.read()])
 
     def test_read_from_cursor(self):
         a = conversation.append("chris", "page", "message", "one")
@@ -124,6 +147,22 @@ class Door(unittest.TestCase):
                 return r.status, json.load(r)
         except urllib.error.HTTPError as e:
             return e.code, json.load(e)
+
+    def test_the_door_answers_503_when_the_store_does_not(self):
+        STORE.down = True
+        try:
+            for path, data in (("", None), ("", {"text": "x"})):
+                status, r = self.call("tok-discord", data)
+                self.assertEqual(status, 503)
+                self.assertIn("not available", r["error"])
+            status, _ = self.call("wrong-token")  # the token is still checked here, before the store is asked
+            self.assertEqual(status, 401)
+        finally:
+            STORE.down = False
+
+    def test_the_door_tells_the_store_which_client_it_authenticated(self):
+        self.call("tok-reader")
+        self.assertEqual(STORE.calls[-1], ("GET", "/api/chat/entries", "reader"))
 
     def test_write_then_read_from_cursor(self):
         status, r = self.call("tok-discord", {"kind": "message", "text": f"hi {FAKE}"})

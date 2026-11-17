@@ -136,6 +136,7 @@ BUILD_NAME=homelab-frontend-build
 BUILD_STATE=/var/lib/private/$BUILD_NAME   # StateDirectory of a DynamicUser unit
 STAGE=$(mktemp -d /var/tmp/homelab-frontend-src.XXXXXX)
 trap 'rm -rf "$STAGE"' EXIT
+chmod 755 "$STAGE"   # mktemp -d makes it 0700 (root only): the DynamicUser build could not read /run/frontend-src
 rsync -rt --delete --exclude=node_modules --exclude=dist --chmod=D755,F644 "$REPO/frontend/" "$STAGE/"
 rm -rf "$BUILD_STATE"   # a clean build every time: no leftovers of an earlier run
 systemd-run --quiet --wait --pipe --collect --unit="$BUILD_NAME" \

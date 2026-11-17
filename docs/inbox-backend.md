@@ -330,19 +330,26 @@ the chat door answers 503; `note()` (notifications, task rounds) logs and gives 
 
 ### The import (the switch)
 
-`scripts/27-backend.sh` runs it after installing the new jar and before the restart, as `inbox-runner`:
+`scripts/conversation-import.sh` does it, called by `scripts/21-inbox.sh` (after it installs the Python code) and by
+`scripts/27-backend.sh` (after it installs the jar). It **skips unless both are installed** (the Python code has `conversation.door`, the
+jar has `ConversationCommand`) and `inbox.db` exists, so whichever of the two scripts runs last does the import, in either order.
+It then stops `homelab-inbox` (no process of the old or the new code runs), runs, as `inbox-runner`:
 
 ```sh
 sudo -u inbox-runner /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar \
   import-conversation --sqlite /var/lib/homelab-inbox/inbox.db --if-not-imported
 ```
 
-One PostgreSQL transaction: the old Java rows are replaced by the SQLite `conversation`, `conversation_refusals` and `kv switch:*` rows
-(ids kept, sequences reset, counts compared), and the marker is written last. `--if-not-imported` makes a re-run a no-op once Java owns the
-store, so it never overwrites what Java wrote after the switch. The other `kv` keys stay in SQLite. Without the flag a second import
-refuses (exit 2); `--replace` redoes it and is only for before the switch. Entries Python wrote between this import and the moment the new
-Python code starts are not copied (the order of the two scripts after a merge is not fixed); merge when nothing is going on and see
-"After the merge" for the check.
+and starts `homelab-inbox` again. One PostgreSQL transaction: the old Java rows are replaced by the SQLite `conversation`,
+`conversation_refusals` and `kv switch:*` rows (ids kept, sequences reset, counts compared), and the marker is written last.
+`--if-not-imported` makes a re-run a no-op once Java owns the store, so it never overwrites what Java wrote after the switch. The other
+`kv` keys stay in SQLite. Without the flag a second import refuses (exit 2); `--replace` redoes it and is only for before the switch.
+
+**One writer at every moment.** Until the import the old Python code is the only writer. The import only runs when the Python code on
+disk is the M4 code, and it stops the service first, so the old code is no longer running when SQLite is read, and the M4 code never writes
+SQLite. From the marker on Java is the only writer. What can be lost is only availability, not data from the old store: while the new
+Python code runs but the import has not happened yet (a few minutes while the backend builds), the chat door answers 503 and
+notifications are not stored (logged); nothing is written anywhere else.
 
 ### Rollback (revert the PR, then re-import into the Python store)
 

@@ -443,6 +443,6 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       the old inbox on 8105 still works. Then measure the heap (`docs/inbox-backend.md`, "Measuring the heap on the box") and fill in the
       **Measured values** table there (a PR, or tell Claude the numbers).
 
-- [ ] H-024 M4 conversation store (Java is the only writer): after the merge `27-backend.sh` imports `conversation`, `conversation_refusals` and
+- [ ] H-024 M4 conversation store (Java is the only writer): after the merge `scripts/conversation-import.sh` (called by `21-inbox.sh` and `27-backend.sh`, whichever runs last) imports `conversation`, `conversation_refusals` and
       the `switch:*` keys once (`import-conversation --if-not-imported`). Send the Discord bot a message and read it back, open kitt on the
       phone and see the same thread, toggle the Discord switch on the homelab page. Rollback: `docs/inbox-backend.md`, "Conversation store (M4)".

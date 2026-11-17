@@ -21,6 +21,7 @@ CLIENTS = {"clients": {
                                 "ssh_key", "memory_edit", "merge_homelab"], "tasks_per_day": 3},
     "reader": {"permissions": ["read"]}}}
 os.environ["CLIENTS_JSON"] = json.dumps(CLIENTS)
+os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import briefs, chat, config, conversation  # noqa: E402
 from homelab_inbox import helpers, overview, server, storage  # noqa: E402

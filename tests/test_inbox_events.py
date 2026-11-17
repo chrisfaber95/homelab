@@ -22,6 +22,7 @@ os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "
 CLIENTS = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer", "approve"]},
     "jarvis": {"permissions": ["read"]}}})
+os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import conversation, helpers, overview, queue, server, storage  # noqa: E402
 

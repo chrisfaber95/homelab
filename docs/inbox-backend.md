@@ -1,8 +1,8 @@
 # Inbox backend on the box (H-023, task B3)
 
 The Spring Boot backend (`backend/`, task B1) runs on the box beside the old Python inbox, as the systemd service
-`homelab-inbox-backend`. Nothing is switched over to it yet: it answers `GET /api/backend/health` and that is all
-(plan: [`docs/architecture/inbox-split.md`](architecture/inbox-split.md)). The database it will use is described in
+`homelab-inbox-backend`. It answers `GET /api/backend/health` and, since H-024 M1, the overview, live and log reads
+([below](#overview-live-and-log-reads-m1-h-024)); nothing else is switched over (plan: [`docs/architecture/inbox-split.md`](architecture/inbox-split.md)). The database it will use is described in
 [`docs/inbox-db.md`](inbox-db.md).
 
 Installer: `scripts/27-backend.sh` (root, idempotent,
@@ -131,7 +131,8 @@ freshly imported compares stale data and means nothing.
   that legitimately differ, for all routes under `*` or per spec path; `a.b` means the key `b` inside `a`).
 - **Result per route.** `OK`, `DIFF` (with a unified diff of the normalized answers, `-` Python, `+` Java) or `SKIP`.
   Java answering 404 or 501 where Python does not means *not implemented yet*: skipped, not a failure. Today that is
-  every route (Java only has `/api/backend/health`), so a run prints only SKIP lines until the M slices land.
+  every route except the M1 ones (`/api/overview`, `/api/live`, `/api/log/*`), so a run prints SKIP lines for the rest
+  until the other M slices land.
   A Java 403 is a difference: it usually means the facade secret is missing.
 - **Exit code.** 0 no differences, 1 at least one `DIFF`, 2 the run could not start (a side is down, bad option).
 - **Options.** `--python-url` (default `http://127.0.0.1:8105`), `--java-url` (`http://127.0.0.1:8130`),
@@ -148,3 +149,55 @@ the Python side only answers the chat door and kitt door routes (give their head
 those are GET routes in the spec that this harness covers well yet). For page routes run it from a tailnet device with
 `--python-url http://homelab.tail4eb878.ts.net:8105` and an SSH tunnel to `127.0.0.1:8130` for Java, passing the
 secret with `--java-header`. Do not start a second Python inbox for this: it would run the scheduler on the same data.
+
+## Overview, live and log reads (M1, H-024)
+
+Three read routes are served by Java; the Python server forwards them (`BACKEND_ROUTES="/api/overview,/api/live,/api/log"`
+in `config/inbox.conf`) after its own tailnet owner check, so who may call them has not changed. Discord and kitt do not
+use them (they use the doors with their own token, `/api/chat/*` and kitt's door, which are never forwarded).
+
+| Route | Answer (as before) |
+| --- | --- |
+| `GET /api/overview` | everything the Overview page shows: status sentence, live items, the job timeline, the last five changes, services, switches, a week of usage, health. `application/json; charset=utf-8` |
+| `GET /api/live` | `{items, queued, activity}`, plain `application/json` |
+| `GET /api/log/t<id>`, `/api/log/r<id>` | lines of `logs/<key>.log` from `?from=` (at most 500), `{lines, next, done}`; an unknown id is empty and done |
+| `GET /api/log/f1` | forge's log through forge's own endpoint; 502 `{"error": ...}` when forge does not answer |
+
+Other keys under `/api/log/` are 404 `{"error": "Not found."}`; a `from` that is not a number is 400. The code is in
+`backend/src/main/java/dev/homelab/inbox/read/`; it is a port of `overview.py`, the log branch of `server.py`, `forge.py`
+(read half) and `jobs.parse_job`/`Cron`, with the same Dutch sentences.
+
+**Where it reads.** No store is switched: Python is still the only writer of every table, so Java reads **the live files of
+the Python inbox, read-only**, not the PostgreSQL copy (that one is a one-off import and is stale as soon as Python writes).
+`inbox.db` is opened with sqlite-jdbc read-only (`InboxDb`), `logs/`, `jobs-repo/jobs/*.md`, `repos/homelab/skills/`,
+`new-repos.json`, the monitor and deploy state, `changes.jsonl` and `backup.json` are read from the same paths as Python,
+and forge (`FORGE_URL`) and the LLM helper (`LLM_URL`) are asked over HTTP with the same timeouts. Settings come from the installed
+`*.conf` files (`INBOX_CONFIG_DIR`, set in the unit, default `/usr/local/lib/homelab/config`) with the same environment overrides.
+The unit therefore also allows the box's own tailnet address (`IPAddressAllow=... 100.85.70.34/32`) so Java can reach forge; nothing
+else outside loopback is allowed. Job files are read on each request (Python keeps them in memory between syncs).
+
+**One known difference.** Python remembers in memory when the *running round* of a task started (`_round_started`) and shows that
+as `started` of a running task; that is not in the database. Java shows the task's own `started`. For a task in its first round
+they are equal; in a later round the page's "bezig sinds" shows the start of the task, not of the round. Parity runs report this as
+a `DIFF` on `started` of a live item for such a task; it is not a bug in a route.
+
+**Checks.** `python3 -m unittest tests.test_inbox_m1_parity` (CI runs it after `./mvnw verify`; skipped without a built jar) starts the
+Python server and the built jar on the same fixture state (`tests/m1_fixture.py`: tasks, runs, logs, job files good and broken, paused and
+deleted jobs, monitor files, a fake forge and LLM helper) and compares them with the parity harness, then runs
+`tests.test_inbox_contract.MovedReads` against the Java base URL (`INBOX_CONTRACT_BASE_URL`, `INBOX_CONTRACT_FACADE_SECRET`). The
+only fields left out of the comparison are the time-dependent ones (`x`, `status.at`, see `backend/parity/parity.json`). Java unit tests
+(`CronTest`, `TextTest`) pin cron times, timeline positions and the sentence helpers to values from the Python code.
+On the box, after the merge: `python3 backend/parity/parity.py --only /api/overview --only /api/live --only /api/log
+--java-secret-file /var/lib/homelab-inbox/backend-secret` (see "Parity runs" for the limits).
+
+**Order after the merge.** `homelab-admin` runs `21-inbox.sh` (restarts the inbox with the routes) before `27-backend.sh` (builds and
+starts the new jar). In between, which can be a few minutes, the old jar does not have these routes and the Overview, live and log
+calls fail with 404 or 502; they work again as soon as `27-backend.sh` has restarted the backend. Nothing else is affected.
+
+### Rollback of the M1 switch
+
+Revert the PR (or only remove the three prefixes from `BACKEND_ROUTES` in `config/inbox.conf`) and let `scripts/21-inbox.sh` run again
+(a merge of the revert does that). The Python handlers for these routes are untouched in this PR, so they answer again at once.
+**These routes are read-only and no store changes owner, so no re-import and no data move are needed:** Java wrote nothing,
+and Python never stopped being the only writer. The extra files in the backend (`read/` package, unit settings) may stay; with the
+prefixes gone nothing calls them.

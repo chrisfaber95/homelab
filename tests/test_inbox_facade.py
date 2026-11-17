@@ -15,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
+os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import access, facade, server  # noqa: E402
 
@@ -176,9 +177,13 @@ class EmptyList(unittest.TestCase):
             s.shutdown()
             s.server_close()
 
-    def test_the_default_is_empty(self):
-        self.assertEqual(facade.ROUTES, ())
+    def test_the_tests_forward_nothing_by_default(self):
+        self.assertEqual(facade.ROUTES, ())  # the tests set BACKEND_ROUTES="" (the shipped config lists the M1 routes)
         self.assertFalse(facade.matches("/api/backend/health"))
+
+    def test_the_shipped_config_forwards_exactly_the_m1_routes(self):
+        conf = (ROOT / "config" / "inbox.conf").read_text()
+        self.assertIn('\nBACKEND_ROUTES="/api/overview,/api/live,/api/log"\n', conf)
 
     def test_nothing_is_forwarded_and_answers_are_the_python_ones(self):
         FakeBackend.calls = []

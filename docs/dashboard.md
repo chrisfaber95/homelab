@@ -76,9 +76,12 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
   same HTML forms as before (hidden `csrf` field, same actions).
-- `PORTED_PAGES` defaults to `/,/jobs,/ssh,/taken,/task` (Overview, Jobs, SSH and the Tasks pages; `/task` stands for every `/task/<id>`; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
-  build, these pages answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
+- `PORTED_PAGES` defaults to `/,/jobs,/ssh,/taken,/task,/briefs` (Overview, Jobs, SSH, the Tasks pages and Briefs; `/task` stands for every `/task/<id>`; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
+  build, these pages (and `/briefs/<id>`) answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
   paths fall back to their Python page.
+- The Briefs page (`frontend/src/pages/briefs.ts`) reads `GET /api/briefs` and `GET /api/briefs/<id>`. Approve & build, Build and
+  Park POST to `/briefs/<id>/build|park` as before; the script follows the redirect, and a failure is a 400 `{"error"}` that is
+  shown above the list.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
 

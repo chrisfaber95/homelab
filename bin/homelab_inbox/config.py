@@ -47,9 +47,9 @@ HOME = Path(os.environ.get("INBOX_RUNNER_HOME", CONF["RUNNER_HOME"]))
 DB = HOME / "inbox.db"
 
 
-# Pages already ported to the TypeScript frontend (H-021, H-022): URL paths, comma-separated; "/" (Overview), "/jobs", "/ssh", "/taken" and "/task" (every /task/<id>) are ported.
+# Pages already ported to the TypeScript frontend (H-021, H-022): URL paths, comma-separated; "/" (Overview), "/jobs", "/ssh", "/taken", "/task" (every /task/<id>) and "/briefs" are ported.
 # For these the server sends frontend/dist/index.html; every other path is rendered by pages.py as before.
-PORTED_PAGES = frozenset(p.strip() for p in os.environ.get("PORTED_PAGES", "/,/jobs,/ssh,/taken,/task").split(",") if p.strip().startswith("/"))
+PORTED_PAGES = frozenset(p.strip() for p in os.environ.get("PORTED_PAGES", "/,/jobs,/ssh,/taken,/task,/briefs").split(",") if p.strip().startswith("/"))
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", ROOT / "frontend" / "dist"))
 STATIC_PREFIX = "/app/"  # built assets: /app/<file under frontend/dist>
 

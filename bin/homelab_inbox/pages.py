@@ -10,8 +10,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from .briefs import WITHOUT_ME, builds, live_build, load_briefs, split_frontmatter
-from .config import ACTIVE, CONF, JOBS, ROOT, SECRET_FILE, STATUS_NL, TZ
+from .config import CONF, JOBS, ROOT, SECRET_FILE, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
@@ -90,7 +89,7 @@ def asset(name):
 def tab_of(title):
     if title.startswith(("job", "concept", "run")):
         return "jobs"
-    if title.startswith(("geheugen", "search", "skills", "briefs")):
+    if title.startswith(("geheugen", "search", "skills")):
         return title.split()[0]
     return "overzicht" if title == "homelab" else "taken"
 
@@ -139,66 +138,6 @@ def log_html(key):
             f'{rows or "<div class=log-end>Nog geen regels.</div>"}</div>')
 
 
-def brief_actions(b):
-    """The buttons for a brief: Build (with or without you), on a draft also the approval, and Park."""
-    bid, draft = b["id"], b["status"] == "draft"
-    build = live_build(bid)
-    if build:
-        return f'<a href="/task/{build["id"]}">build #{build["id"]}</a>'
-    buttons = [form(f'/briefs/{bid}/build', "", "Approve &amp; build" if draft else "Build", cls="small"),
-               form(f'/briefs/{bid}/build', '<input type="hidden" name="mode" value="without-me">',
-                    "Approve &amp; build without me" if draft else "Build without me", cls="small quiet")]
-    if draft:
-        buttons.append(form(f'/briefs/{bid}/park', "", "Park", cls="small quiet"))
-    return '<div class="actions">' + "".join(buttons) + '</div>'
-
-
-def brief_row(b, actions=True):
-    e = html.escape
-    return (f'<div class="row"><div class="row-title"><a href="/briefs/{e(b["id"])}">{e(b["id"])}</a>'
-            f'<span class="st {"warn" if b["status"] != "approved" else "ok"}">{e(b["status"] or "no status")}</span>'
-            f'<span>{e(b["title"])}</span></div>'
-            + meta(e(b["project"]), e(b["priority"]), "repos: " + e(", ".join(b["repos"]) or "-"))
-            + (brief_actions(b) if actions else "") + '</div>')
-
-
-def briefs_page(error=None):
-    """H-001: drafts to approve and approved briefs from the product repo, each with Build, and the builds so far."""
-    e = html.escape
-    try:
-        items = load_briefs()
-    except Exception as ex:
-        items, error = [], f"Can't read {CONF['PRODUCT_REPO']}: {ex}"
-    drafts = [b for b in items if b["status"] == "draft"]
-    approved = [b for b in items if b["status"] == "approved"]
-    design = [b for b in items if b["status"] == "needs-design"]
-    counts = {}
-    for b in items:
-        counts[b["status"]] = counts.get(b["status"], 0) + 1
-    done = builds()
-    body = ('<h1>Briefs</h1>' + (f'<p class="error">{e(error)}</p>' if error else "")
-            + '<p class="muted">Briefs on main of the product repo. Read a draft, then approve it here: Approve &amp; '
-              'build commits <code>status: approved</code> and starts the planner, which splits the brief into inbox '
-              'tasks; each PR is checked against the brief. Design new briefs with <code>cd ~/dev/product &amp;&amp; '
-              'claude</code> on the box.</p>'
-            + f'<p class="muted">Build without me: {e(WITHOUT_ME)}</p>'
-            + '<h2>To approve</h2>' + ("".join(brief_row(b) for b in drafts) or "<p class=empty>No drafts.</p>")
-            + '<h2>Approved</h2>' + ("".join(brief_row(b) for b in approved) or "<p class=empty>No approved briefs.</p>")
-            + ('<h2>Needs design</h2>' + "".join(brief_row(b, actions=False) for b in design) if design else "")
-            + '<h2>Builds</h2>' + ("".join(task_row(t) for t in done) or "<p class=empty>No builds yet.</p>")
-            + '<p class="muted">In the repo: ' + e(", ".join(f"{n} {k or 'no status'}" for k, n in sorted(counts.items())))
-            + '.</p>')
-    return page("briefs", body, refresh=any(t["status"] in ACTIVE for t in done))
-
-
-def brief_page(b, error=None):
-    e = html.escape
-    _, text = split_frontmatter(b["text"])
-    body = (f'<h1>{e(b["id"])} {e(b["title"])}</h1>' + (f'<p class="error">{e(error)}</p>' if error else "")
-            + brief_row(b, actions=False) + f'<p class="muted">{e(b["path"])} on main of the product repo.</p>'
-            + f'<pre>{e(text.strip())}</pre>'
-            + (brief_actions(b) if b["status"] in ("draft", "approved") else ""))
-    return page("briefs", body)
 
 
 def when(dt):

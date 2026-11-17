@@ -47,13 +47,13 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_the_overview_jobs_ssh_and_the_tasks_pages(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/ssh", "/taken", "/task"}))
+    def test_default_ports_the_overview_jobs_ssh_tasks_and_briefs(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/ssh", "/taken", "/task", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
-        status, body, _ = self.get("/briefs")
+        status, body, _ = self.get("/skills")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
-        for path in ("/", "/jobs", "/ssh", "/taken"):  # TypeScript pages
+        for path in ("/", "/jobs", "/ssh", "/taken", "/briefs"):  # TypeScript pages
             self.assertEqual(self.get(path)[:2], (200, INDEX), path)
 
     def test_task_page_is_the_ported_path_for_a_known_task(self):
@@ -72,6 +72,23 @@ class PortedPages(unittest.TestCase):
                 status, body, _ = self.get(path)
                 self.assertEqual(status, 503, path)
                 self.assertIn(b"frontend", body)
+
+    def test_a_brief_gets_the_briefs_page_but_an_unknown_one_does_not(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        saved = server.brief_by_id
+        self.addCleanup(lambda: setattr(server, "brief_by_id", saved))
+        server.brief_by_id = lambda bid: {"id": bid} if bid == "H-001" else None
+        self.assertEqual(self.get("/briefs")[:2], (200, INDEX))
+        self.assertEqual(self.get("/briefs/H-001")[:2], (200, INDEX))
+        self.assertEqual(self.get("/briefs/H-999")[0], 404)
+
+    def test_briefs_without_a_build_say_so(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        (self.dist / "index.html").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            status, body, _ = self.get("/briefs")
+        self.assertEqual(status, 503)
+        self.assertIn(b"frontend", body)
 
     def test_overview_without_a_build_says_so_instead_of_a_python_page(self):
         server.PORTED_PAGES = config.PORTED_PAGES
@@ -107,11 +124,11 @@ class PortedPages(unittest.TestCase):
         self.assertNotEqual(body, INDEX)
 
     def test_missing_dist_falls_back_and_warns(self):
-        server.PORTED_PAGES = frozenset({"/briefs"})
+        server.PORTED_PAGES = frozenset({"/skills"})
         (self.dist / "index.html").unlink()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status, body, _ = self.get("/briefs")
+            status, body, _ = self.get("/skills")
         self.assertEqual(status, 200)
         self.assertNotIn(b"ported</title>", body)
         self.assertIn("PORTED_PAGES", out.getvalue())

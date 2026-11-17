@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -33,7 +34,7 @@ class FakeEmbedder:
     def _vec(self, text):
         v = [0.0] * DIMS
         for w in text.lower().split():
-            v[hash(w.strip(".,:;()[]\"'")) % DIMS] += 1.0
+            v[zlib.crc32(w.strip(".,:;()[]\"'").encode()) % DIMS] += 1.0  # not hash(): that is salted per run
         return index.normalize(v)
 
     def documents(self, texts):

@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, brief_data, briefs_data, jobs_data, live_items, overview_json, task_view, tasks_view
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_state
+from .pages import Access, WEB, admin_ask, csrf_token, draft_page, entry_page, job_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_state
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -27,7 +27,12 @@ API_PREFIX = "/api/"
 
 def ported_index(path):
     """frontend/dist/index.html for a ported path, or None (not ported, or no build: then pages.py renders it).
-    Every /task/<id> is the ported path "/task"."""
+    Every /task/<id> is the ported path "/task"; a brief (/briefs/H-022) is the Briefs page's own page, and only for a
+    brief that exists (else the 404 page)."""
+    if m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", path):
+        if not brief_by_id(m.group(1)):
+            return None
+        path = "/briefs"
     if (re.fullmatch(r"/task/(\d+)", path) and "/task" or path) not in PORTED_PAGES:
         return None
     index = FRONTEND_DIST / "index.html"
@@ -341,10 +346,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, research_page())
         if self.path == "/skills":
             return self.send(200, skills_page())
-        if self.path == "/briefs":
-            return self.send(200, briefs_page())
-        if (m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", self.path)) and (b := brief_by_id(m.group(1))):
-            return self.send(200, brief_page(b))
+        if self.path == "/briefs" or ((m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", self.path)) and brief_by_id(m.group(1))):
+            # The Briefs pages are TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing.
+            return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
+                               "The frontend build is missing.")
         if (m := re.fullmatch(r"/job/([a-z0-9-]+)", self.path)) and m.group(1) in JOBS:
             return self.send(200, job_page(m.group(1)))
         if (m := re.fullmatch(r"/draft/(\d+)", self.path)) and (d := get_draft(int(m.group(1)))):
@@ -404,7 +409,7 @@ class Handler(BaseHTTPRequestHandler):
                                   f"brief:{m.group(1)}")
                 return self.send(303, "", location=f"/task/{tid}")
             except Exception as ex:
-                return self.send(400, briefs_page(error=str(ex)))
+                return self.send_upstream(400, {"error": str(ex)})
         if m := re.fullmatch(r"/run/(\d+)/cancel", self.path):
             return self.cancel_run(int(m.group(1)))
         if self.path == "/research/ask":

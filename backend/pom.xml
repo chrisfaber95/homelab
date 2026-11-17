@@ -22,6 +22,8 @@
     <java.version>21</java.version>
     <!-- Not managed by Spring Boot: the one version we pin ourselves (Unix socket for pgjdbc, Q2). -->
     <junixsocket.version>2.11.1</junixsocket.version>
+    <!-- Not managed by Spring Boot either: reads the old inbox.db in the one-off import-sqlite command (B5). -->
+    <sqlite-jdbc.version>3.50.3.0</sqlite-jdbc.version>
   </properties>
 
   <dependencies>
@@ -55,6 +57,11 @@
       <version>${junixsocket.version}</version>
       <type>pom</type>
       <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <version>${sqlite-jdbc.version}</version>
     </dependency>
 
     <dependency>

@@ -36,3 +36,10 @@ the app role needs nothing beyond owning its database.
 Revert the commit. The empty database and role may stay (nothing uses them); to remove them by hand as the
 `postgres` user: `DROP DATABASE inbox; DROP ROLE inbox_app;` and delete the two lines marked
 `homelab (scripts/28-inbox-db.sh)` from `pg_hba.conf` and `pg_ident.conf`.
+
+## Loading the old data (H-023, task B5)
+
+The one-off `import-sqlite` command of `backend/` fills the empty tables from `inbox.db` (read-only, one
+transaction, row counts compared, rolled back on a mismatch). How to run it and its exit codes: `backend/README.md`,
+section "One-off import of `inbox.db`". It needs this script (B2), the installed backend jar (B3) and the Flyway
+baseline (B4), and must run as `inbox-runner`.

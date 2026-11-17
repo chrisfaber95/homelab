@@ -47,7 +47,12 @@ final class ThrowawayPostgres implements AutoCloseable {
 
     /** pgjdbc URL over the Unix socket (junixsocket). */
     String jdbcUrl() {
-        return "jdbc:postgresql://localhost/postgres?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg"
+        return jdbcUrl("postgres");
+    }
+
+    /** Same, for another database of the cluster (create it first). */
+    String jdbcUrl(String database) {
+        return "jdbc:postgresql://localhost/" + database + "?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg"
                 + "&socketFactoryArg=" + root.resolve(".s.PGSQL." + PORT);
     }
 

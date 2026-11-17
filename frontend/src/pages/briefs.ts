@@ -3,7 +3,7 @@
 import { csrfToken, getJson, postForm } from "../api/client";
 import type { components } from "../api/schema";
 import { el, meta, type Child } from "../dom";
-import { shortDateTime } from "../format";
+import { shortDate } from "../format";
 
 type Brief = components["schemas"]["BriefView"];
 type Build = components["schemas"]["BuildView"];
@@ -66,7 +66,7 @@ function buildRow(t: Build, tz: string): HTMLElement {
     el("div", { class: "row-title" }, el("a", { href: t.url, text: t.label }),
       el("span", { class: `st ${t.status}`, text: t.status_label }), el("span", { text: t.what })),
     meta(t.repo, t.source ? `via ${t.source.charAt(0).toUpperCase()}${t.source.slice(1).toLowerCase()}` : "",
-      `aangemaakt ${shortDateTime(t.created, tz)}`, t.ended ? `klaar ${shortDateTime(t.ended, tz)}` : "",
+      `aangemaakt ${shortDate(new Date(t.created), tz)}`, t.ended ? `klaar ${shortDate(new Date(t.ended), tz)}` : "",
       t.pr_url ? el("a", { href: t.pr_url, text: `PR #${t.pr_number}` }) : ""));
 }
 

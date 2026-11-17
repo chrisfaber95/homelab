@@ -17,7 +17,7 @@ os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 os.environ.pop("PORTED_PAGES", None)
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import config, server  # noqa: E402
+from homelab_inbox import config, server, storage  # noqa: E402
 
 INDEX = b"<!doctype html><title>ported</title><script src=\"/app/assets/main.js\"></script>"
 
@@ -47,16 +47,31 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_the_overview_jobs_ssh_and_briefs(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/ssh", "/briefs"}))
+    def test_default_ports_the_overview_jobs_ssh_tasks_and_briefs(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/ssh", "/taken", "/task", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
-        status, body, _ = self.get("/taken")
+        status, body, _ = self.get("/skills")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
-        status, body, _ = self.get("/")  # the Overview is the TypeScript page
-        self.assertEqual((status, body), (200, INDEX))
-        self.assertEqual(self.get("/jobs")[1], INDEX)
-        self.assertEqual(self.get("/ssh")[1], INDEX)
+        for path in ("/", "/jobs", "/ssh", "/taken", "/briefs"):  # TypeScript pages
+            self.assertEqual(self.get(path)[:2], (200, INDEX), path)
+
+    def test_task_page_is_the_ported_path_for_a_known_task(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        tid = storage.new_task("homelab", "x")
+        self.assertEqual(self.get(f"/task/{tid}")[:2], (200, INDEX))
+        self.assertEqual(self.get("/task/99999999")[0], 404)  # unknown task
+        self.assertEqual(self.get(f"/task/{tid}?x=1")[0], 404)  # a query string is a 404, as before
+
+    def test_tasks_pages_without_a_build_say_so(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        tid = storage.new_task("homelab", "x")
+        (self.dist / "index.html").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            for path in ("/taken", f"/task/{tid}"):
+                status, body, _ = self.get(path)
+                self.assertEqual(status, 503, path)
+                self.assertIn(b"frontend", body)
 
     def test_a_brief_gets_the_briefs_page_but_an_unknown_one_does_not(self):
         server.PORTED_PAGES = config.PORTED_PAGES
@@ -109,11 +124,11 @@ class PortedPages(unittest.TestCase):
         self.assertNotEqual(body, INDEX)
 
     def test_missing_dist_falls_back_and_warns(self):
-        server.PORTED_PAGES = frozenset({"/taken"})
+        server.PORTED_PAGES = frozenset({"/skills"})
         (self.dist / "index.html").unlink()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status, body, _ = self.get("/taken")
+            status, body, _ = self.get("/skills")
         self.assertEqual(status, 200)
         self.assertNotIn(b"ported</title>", body)
         self.assertIn("PORTED_PAGES", out.getvalue())

@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, brief_data, briefs_data, jobs_data, live_items, overview_json, task_view, tasks_view
 from . import forge, search
-from .pages import Access, WEB, admin_ask, csrf_token, draft_page, entry_page, job_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_state, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, csrf_token, draft_page, entry_page, job_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_state
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -27,12 +27,13 @@ API_PREFIX = "/api/"
 
 def ported_index(path):
     """frontend/dist/index.html for a ported path, or None (not ported, or no build: then pages.py renders it).
-    A brief (/briefs/H-022) is the Briefs page's own page, and only for a brief that exists (else the 404 page)."""
+    Every /task/<id> is the ported path "/task"; a brief (/briefs/H-022) is the Briefs page's own page, and only for a
+    brief that exists (else the 404 page)."""
     if m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", path):
         if not brief_by_id(m.group(1)):
             return None
         path = "/briefs"
-    if path not in PORTED_PAGES:
+    if (re.fullmatch(r"/task/(\d+)", path) and "/task" or path) not in PORTED_PAGES:
         return None
     index = FRONTEND_DIST / "index.html"
     if not index.is_file():
@@ -87,6 +88,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.is_api():
             return self.send_upstream(code, {"error": error})
         return self.send(code, page({403: "geweigerd", 404: "niet gevonden"}.get(code, "fout"), html))
+
+    def no_build(self):
+        """The Overview and the Tasks pages are TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing."""
+        return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
+                           "The frontend build is missing.")
 
     def guard(self):
         ok, who = Access.allowed(self.client_address[0].removeprefix("::ffff:"))
@@ -254,7 +260,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard():
             return
         url = urllib.parse.urlsplit(self.path)
-        if (index := ported_index(url.path)) is not None:
+        task_id = re.fullmatch(r"/task/(\d+)", self.path)  # a query string or an unknown id is a 404, as before
+        if (not re.fullmatch(r"/task/(\d+)", url.path) or (task_id and get(int(task_id.group(1))))) \
+                and (index := ported_index(url.path)) is not None:
             return self.send(200, index)
         if (asset := dist_asset(url.path)) is not None:
             return self.send(200, asset[0], asset[1], cache="private, max-age=3600")
@@ -325,20 +333,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_upstream(200, task_view(t))
             return self.send_upstream(404, {"error": "Not found."})
         if url.path == "/taken":
-            return self.send(200, tasks_page())
+            return self.no_build()
         if url.path == "/api/ssh":
             return self.send_upstream(200, ssh_state())
         if url.path == "/memory":
             return self.send(200, memory_page(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
         if (m := re.fullmatch(r"/memory/e/(.+)", self.path)) and (entry := mem_get(m.group(1))):
             return self.send(200, entry_page(entry))
-        m = re.fullmatch(r"/task/(\d+)", self.path)
-        if self.path in ("/", "/jobs", "/ssh"):
-            # The Overview, Jobs and SSH are TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing.
-            return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
-                               "The frontend build is missing.")
-        if m and (t := get(int(m.group(1)))):
-            return self.send(200, task_page(t))
+        if self.path in ("/", "/jobs", "/ssh") or (task_id and get(int(task_id.group(1)))):
+            return self.no_build()
         if self.path in ("/research", f"/job/{RESEARCH_JOB}") and RESEARCH_JOB not in JOBS:
             return self.send(200, research_page())
         if self.path == "/skills":

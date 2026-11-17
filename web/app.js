@@ -1,4 +1,4 @@
-// homelab (F-024): de live logs en de Search-tab. De pagina werkt ook zonder dit script. (Het overzicht staat in frontend/.)
+// homelab (F-024): de live logs van job-runs en de Search-tab. De pagina werkt ook zonder dit script. (Het overzicht staat in frontend/.)
 "use strict";
 
 const POLL_LOG = 2000;   // ms; het log loopt hooguit ~2 s achter
@@ -69,7 +69,7 @@ class LogView {
   }
 }
 
-// Een losse log op een taak- of run-pagina.
+// Een losse log op een run-pagina (die van een taak is TypeScript, frontend/src/log.ts).
 for (const box of document.querySelectorAll(".log[data-key]")) {
   box.textContent = "";
   new LogView(box.dataset.key, box).start();

@@ -1180,7 +1180,7 @@ export interface paths {
         };
         /**
          * Tasks list and the new-task form
-         * @description Matched on `url.path`.
+         * @description Matched on `url.path`. Served from `frontend/dist` (TypeScript, data from `GET /api/tasks`); without a build 503.
          */
         get: {
             parameters: {
@@ -1421,7 +1421,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Task page
+         * Task page (TypeScript, data from `GET /api/tasks/{id}`; 503 without a build)
          * @description Matched on `self.path` (no query string). Unknown id: 404 page.
          */
         get: {
@@ -3576,6 +3576,8 @@ export interface components {
             pr_number: number | null;
         };
         TaskList: {
+            /** @description IANA zone (JOB_TIMEZONE) the page shows times in */
+            timezone: string;
             /** @description sorted */
             repos: string[];
             /** @description the repo value that lets homelab decide */
@@ -3586,6 +3588,8 @@ export interface components {
         };
         /** @description A TaskRow plus everything the task page shows. */
         TaskDetail: components["schemas"]["TaskRow"] & {
+            /** @description IANA zone (JOB_TIMEZONE) the page shows times in */
+            timezone: string;
             text: string;
             question: string | null;
             answer: string | null;

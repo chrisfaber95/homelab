@@ -10,14 +10,12 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from .briefs import WITHOUT_ME, build_left_nothing
-from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, STATUS_NL, TZ
+from .config import CONF, JOBS, ROOT, SECRET_FILE, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
-from .overview import CHANGES_LOG, DAYS_NL, day_time, model_name
-from .router import blocked_by, blocked_followups, children
-from .storage import db, log, tasks
+from .overview import CHANGES_LOG, DAYS_NL, day_time
+from .storage import db, log
 
 
 def secret():
@@ -131,22 +129,6 @@ def task_row(t, link=True):
                    f'klaar {local(t["ended"])}' if t["ended"] else "", pr) + '</div>')
 
 
-def tasks_page():
-    e = html.escape
-    opts = "".join(f'<option value="{e(n)}">{e(n)}</option>' for n in sorted(repo_list()))
-    auto = f'<option value="{AUTO}">auto (homelab beslist)</option>'
-    all_tasks = tasks()
-    queue = [t for t in all_tasks if t["status"] in ACTIVE + ("waiting",)][::-1]
-    body = (f'<h1>Taken</h1><form method="post" action="/tasks" id="nieuw">'
-            f'<input type="hidden" name="csrf" value="{csrf_token()}"><label for="repo">Repo</label>'
-            f'<select name="repo" id="repo">{auto}{opts}</select><label for="text">Wat moet Claude doen of uitzoeken?</label>'
-            f'<textarea name="text" id="text" required></textarea><button>Taak sturen</button></form>'
-            f'<h2>Nu</h2>{"".join(task_row(t) for t in queue) or "<p class=empty>Niets in de rij.</p>"}'
-            f'<h2>Geschiedenis</h2>'
-            f'{"".join(task_row(t) for t in all_tasks if t not in queue) or "<p class=empty>Nog geen taken.</p>"}')
-    return page("taken", body, refresh=bool(queue))
-
-
 def log_html(key):
     """Het log van een taak of run; app.js houdt het bij zolang hij loopt (zonder script: de stand bij het laden)."""
     lines, _ = read_log(key, 0, 2000)
@@ -156,77 +138,6 @@ def log_html(key):
             f'{rows or "<div class=log-end>Nog geen regels.</div>"}</div>')
 
 
-def task_page(t):
-    e = html.escape
-    parts = [f'<h1>{e(label(t))}</h1>', task_row(t, link=False), f'<h2>Taak</h2><pre>{e(t["text"])}</pre>']
-    if t["source"]:
-        parts.insert(2, f'<p class="muted">Sent from {e(t["source"].capitalize())}'
-                     + (', approved there (two-step confirm)' if t["repo"] == BRIEF else '') + '.</p>')
-    if t["question"]:
-        parts.append(f'<h2>Vraag van Claude</h2><pre>{e(t["question"])}</pre>')
-        if t["status"] == "waiting":
-            parts.append(form(f'/task/{t["id"]}/answer', '<label for="answer">Jouw antwoord</label>'
-                              '<textarea name="answer" id="answer" required></textarea>', "Antwoorden"))
-    if t["answer"]:
-        parts.append(f'<h2>Antwoord</h2><pre>{e(t["answer"])}</pre>')
-        if t["status"] == "answered" and not t["job"]:
-            parts.append(form(f'/task/{t["id"]}/answer', '<label for="answer">Reageren op dit antwoord</label>'
-                              '<textarea name="answer" id="answer" required></textarea>', "Reactie sturen"))
-    if t["parent"]:
-        parts.append(f'<p class="muted">Onderdeel van <a href="/task/{t["parent"]}">bericht #{t["parent"]}</a>'
-                     + (f': {e(t["reason"])}' if t["reason"] else "")
-                     + (f'. Start pas na <a href="/task/{t["after_task"]}">#{t["after_task"]}</a>' if t["after_task"] else "")
-                     + '.</p>')
-    if t["criteria"]:
-        parts.append("<h2>Acceptance criteria</h2><ul>"
-                     + "".join(f"<li>{e(c)}</li>" for c in json.loads(t["criteria"])) + "</ul>")
-    if t["review"]:
-        parts.append(f'<h2>Brief review</h2><p>{e(t["review"])}</p>'
-                     + (f'<p class="muted">{t["reviews"]} automatic rework round(s) used.</p>' if t["reviews"] else ""))
-    if t["repo"] == BRIEF and t["unattended"]:
-        parts.append('<h2>Build without me</h2><p class="muted">' + html.escape(WITHOUT_ME) + '</p>'
-                     + form(f'/task/{t["id"]}/attended', "", "Stop: I merge the rest myself", cls="small quiet"))
-    elif t["repo"] == BRIEF and t["brief"]:
-        parts.append('<p class="muted">You merge the PRs of this build yourself.</p>')
-    if t["repo"] == BRIEF and t["brief"] and build_left_nothing(t):
-        parts.append('<p class="muted">Nothing of this build is left: no task of it is still running or merged. '
-                     f'A build has no Retry; start it again on the brief itself '
-                     f'(<a href="/briefs/{e(t["brief"])}">{e(t["brief"])}</a>), as long as it is still approved. '
-                     'A new build plans the brief as it stands on main then.</p>')
-    if t["repo"] == BRIEF and t["handoff"]:
-        parts.append(f'<h2>Handoff</h2><p>' + (f'<a href="{e(t["handoff"])}">{e(t["handoff"])}</a>'
-                                              if t["handoff"].startswith("http") else e(t["handoff"])) + '</p>')
-    kids = children(t["id"])
-    if kids:
-        parts.append(f"<h2>{'Planned tasks' if t['repo'] == BRIEF else 'Doorgestuurd naar'}</h2>"
-                     + "".join(task_row(k) for k in kids))
-    if t["summary"]:
-        parts.append(f'<h2>{"Reden" if t["status"] == "refused" else "Samenvatting"}</h2><pre>{e(t["summary"])}</pre>')
-    if t["note"]:
-        parts.append(f'<p class="muted">{e(t["note"])}</p>')
-    parts.append(f'<p class="muted">{t["turns"]} beurten in {t["rounds"]} ronde(s), {e(model_name(t["model"]))}. '
-                 f'Grens per ronde: {CONF["MAX_TURNS"]} beurten of {CONF["MAX_MINUTES"]} minuten.</p>')
-    if t["status"] in ACTIVE + ("waiting",) or (t["status"] == "routed" and not t["ended"]):
-        parts.append(form(f'/task/{t["id"]}/cancel', "", "Annuleren", ghost=True))
-    if t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF):
-        pre = blocked_by(t)
-        if pre:  # a retry would be cancelled again on the next pass of the scheduler
-            parts.append(f'<p class="muted">Waits for <a href="/task/{pre["id"]}">#{pre["id"]}</a>: continue, '
-                         'retry or mark that task as fine first; this one then comes back in the queue by itself.</p>')
-        else:
-            hint = ("Why it is fine to do after all, or what to do differently (optional)" if t["status"] == "refused"
-                    else "Note for Claude (optional)")
-            parts.append(form(f'/task/{t["id"]}/retry', f'<label for="note">{hint}</label>'
-                              '<textarea name="note" id="note"></textarea>',
-                              "Continue" if t["status"] == "capped" else "Retry"))
-    if t["accepted"]:
-        parts.append('<p class="muted">You marked this task as fine; its follow-ups may run.</p>')
-    elif t["status"] in ACCEPTABLE and blocked_followups(t):
-        pr = f'PR #{t["pr_number"]} is not merged as far as the inbox knows. ' if t["pr_number"] else ""
-        parts.append(f'<p class="muted">{pr}Follow-ups start from main, so work of this task that is not merged will '
-                     'not be in them.</p>' + form(f'/task/{t["id"]}/accept', "", "Mark as fine, continue follow-ups"))
-    parts.append(log_html(f"t{t['id']}"))
-    return page(f"inbox #{t['id']}", "".join(parts), refresh=t["status"] == "queued")
 
 
 def when(dt):

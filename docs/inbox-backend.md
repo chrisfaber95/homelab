@@ -40,6 +40,11 @@ box, that port 8130 listens on `127.0.0.1` only. The `exposure-checker` agent kn
 
 ## Measuring the heap on the box
 
+**Automatic record.** Every run of `scripts/27-backend.sh` waits 10 s after the health check, forces a full GC with
+`jcmd` as `inbox-runner` and appends one line to `/var/lib/homelab-inbox/backend-heap.log` (heap used after GC,
+heap committed, metaspace, `MemoryCurrent`/`MemoryPeak`, limits, jar hash); it prints the same line. Read it with
+`tail /var/lib/homelab-inbox/backend-heap.log`. The commands below are for measuring by hand, under load.
+
 Do this after the first install, and again when the backend gets real work (B4/B5, import and parity runs). The
 numbers go in the table below. `claude` has no sudo and cannot read system journals, so ask Chris to run the
 commands with sudo, or use the output of `scripts/27-backend.sh` (it ends with a snapshot).
@@ -75,10 +80,10 @@ Fill this in from a real run on the box (date, what the service was doing, the n
 
 | Date | State | Heap used after full GC | Heap committed | Metaspace used | `MemoryCurrent` / `MemoryPeak` | Measured by |
 | --- | --- | --- | --- | --- | --- | --- |
-| *not measured yet* | idle, just started (skeleton, no database connection) | | | | | |
+| *no value yet* | idle, just started | see `/var/lib/homelab-inbox/backend-heap.log` after the first install | | | | `scripts/27-backend.sh` |
 
-The first row is open: the box has no JDK or Maven until `scripts/27-backend.sh` has run once (checked on
-2026-11-17, task 210), and an inbox task has no root, so this task could install and measure nothing.
+No number is written here yet: it appears on the box only once `scripts/27-backend.sh` has run (the box had no JDK on
+2026-11-17 and an inbox task has no root). After the merge, copy the first log line into this table.
 
 ## Rollback
 

@@ -7,7 +7,7 @@
 # This script runs no npm. (Q3: should one ever be added, it runs the same way, with `npm ci --ignore-scripts`.)
 # Then it installs systemd/homelab-inbox-backend.service (account inbox-runner, loopback only, PostgreSQL over its unix
 # socket, explicit max heap, hardened), starts it and checks it: health answers, the TCP listeners of the process
-# are loopback only. It prints a heap snapshot; the measured value is recorded in docs/inbox-backend.md.
+# are loopback only. It measures the heap (full GC, jcmd) and appends the numbers to /var/lib/homelab-inbox/backend-heap.log.
 # Needs scripts/28-inbox-db.sh (B2) to have run: the account inbox-runner and the database `inbox`. Nothing is
 # switched over to the backend; the old inbox (homelab-inbox, inbox.db) is not touched. Docs: docs/inbox-backend.md.
 # Run as: sudo bash <homelab-repo>/scripts/27-backend.sh
@@ -20,6 +20,7 @@ DEST=/usr/local/lib/homelab/inbox-backend
 JAR=$DEST/inbox-backend.jar
 SRC_COPY=/var/lib/homelab-backend-src       # root-owned copy of backend/, read by the build account
 BUILD_STATE=/var/lib/private/homelab-backend-build   # StateDirectory of the DynamicUser build (Maven cache, output)
+HEAP_LOG=/var/lib/homelab-inbox/backend-heap.log   # one line per install: the measured heap
 JAVA_HOME_DIR=/usr/lib/jvm/java-21-openjdk-amd64      # the unit's ExecStart uses the same path
 HOST=127.0.0.1
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -139,10 +140,20 @@ grep -qx "$HOST:$PORT" <<<"$mine" || { echo "the backend does not listen on $HOS
 pg_listen="$(cd / && runuser -u postgres -- psql -AtXc 'show listen_addresses')"
 [[ -z $pg_listen ]] || { echo "PostgreSQL listens on '$pg_listen': it must stay socket only (Q2)" >&2; exit 1; }
 
-echo "== Heap snapshot (record the numbers in docs/inbox-backend.md, section Measured values)"
-echo "heap limit: -Xmx256m, unit MemoryMax=640M; pid $pid"
-systemctl show -p MemoryCurrent -p MemoryPeak "$SERVICE" || true
-# jcmd attaches only as the same account; best effort, the snapshot is not part of the pass/fail.
-(cd / && runuser -u "$SERVICE_USER" -- "$JAVA_HOME_DIR/bin/jcmd" "$pid" GC.heap_info) 2>&1 | head -n 12 \
-  || echo "jcmd could not attach: see docs/inbox-backend.md for the manual commands"
+echo "== Heap measurement (recorded in $HEAP_LOG; copy it to docs/inbox-backend.md, Measured values)"
+# Let the JVM settle, force a full GC (the live set is what sizes -Xmx), read the heap and the kernel's accounting.
+# jcmd attaches only as the account of the service. A failed measurement is loud but does not undo the install.
+sleep 10
+JCMD="$JAVA_HOME_DIR/bin/jcmd"
+as_service_cmd() { (cd / && runuser -u "$SERVICE_USER" -- "$@"); }
+if as_service_cmd "$JCMD" "$pid" GC.run >/dev/null 2>&1 && info="$(as_service_cmd "$JCMD" "$pid" GC.heap_info 2>&1)"; then
+  to_kb() { awk -v pat="$1" -v key="$2" '$0 ~ pat { for (i = 1; i < NF; i++) if ($i == key) { v = $(i + 1); gsub(/[^0-9]/, "", v); t += v } } END { print t + 0 }' <<<"$info"; }
+  heap_used="$(to_kb generation used)"; heap_total="$(to_kb generation total)"; meta_used="$(to_kb Metaspace used)"
+  mem_cur="$(systemctl show -p MemoryCurrent --value "$SERVICE")"; mem_peak="$(systemctl show -p MemoryPeak --value "$SERVICE")"
+  line="$(date -u +%FT%TZ) pid=$pid state=just-started heap_used_after_gc_kb=$heap_used heap_committed_kb=$heap_total metaspace_used_kb=$meta_used MemoryCurrent=$mem_cur MemoryPeak=$mem_peak Xmx=256m MemoryMax=640M jar=$(sha256sum "$JAR" | cut -c1-12)"
+  echo "$line" >> "$HEAP_LOG"
+  echo "$line"
+else
+  echo "WARNING: could not measure the heap with jcmd as $SERVICE_USER; see docs/inbox-backend.md for the manual commands" >&2
+fi
 echo "inbox backend ready: http://$HOST:$PORT/api/backend/health (loopback only), jar $JAR"

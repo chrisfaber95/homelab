@@ -6,9 +6,11 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 from . import conversation, forge
-from .config import CONF, JOBS, SERVICES, TZ, _round_started
-from .helpers import first_line, label, read_json
+from .briefs import WITHOUT_ME, build_left_nothing
+from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, SERVICES, STATUS_NL, TZ, _round_started
+from .helpers import first_line, label, read_json, read_log, repo_list
 from .jobs import JOB_KINDS, LLM_URL, RESEARCH_JOB, RUN_NL, claude_runs_today, job_runs, load_agents, run_view
+from .router import blocked_by, blocked_followups, children
 from .storage import db, tasks
 
 
@@ -334,4 +336,54 @@ def overview_json():
         "usage": {"days": [d.isoformat() for d in u["days"]], "llm": u["llm"], "claude_jobs": u["claude_jobs"],
                   "inbox": u["inbox"], "cap": u["cap"], "saved_minutes": u["saved"]},
         "health": {"checks": checks, "last": h["last"], "deploys": deploys, "backup": backup},
+    }
+
+
+def task_row_view(t):
+    """One row of the task lists: what pages.task_row renders, with the times as stored (ISO, UTC)."""
+    return {"id": t["id"], "label": label(t), "status": t["status"], "status_text": STATUS_NL[t["status"]],
+            "what": JOB_KINDS.get(JOBS.get(t["job"], {}).get("kind"), "job") if t["job"] else first_line(t["text"]),
+            "repo": t["repo"], "source": t["source"], "created": t["created"], "ended": t["ended"],
+            "pr_url": t["pr_url"], "pr_number": t["pr_number"]}
+
+
+def tasks_view():
+    """What pages.tasks_page renders: the repos for the new-task form, the queue (oldest first) and the history."""
+    all_tasks = tasks()
+    queue = [t for t in all_tasks if t["status"] in ACTIVE + ("waiting",)][::-1]
+    return {"repos": sorted(repo_list()), "auto": AUTO, "queue": [task_row_view(t) for t in queue],
+            "history": [task_row_view(t) for t in all_tasks if t not in queue], "refresh": bool(queue)}
+
+
+def task_view(t):
+    """What pages.task_page renders: the task with every derived fact the page shows, which forms apply (`actions`) and
+    the log so far. Keep polling GET /api/log/t<id>?from=<log.next> until `done`."""
+    pre = blocked_by(t) if t["status"] in RETRYABLE and t["repo"] not in (AUTO, BRIEF) else None
+    is_build = t["repo"] == BRIEF
+    lines, nxt = read_log(f"t{t['id']}", 0, 2000)
+    active = t["status"] in ACTIVE + ("waiting",)
+    more = read_log(f"t{t['id']}", nxt, 1)[0]  # past the 2000 lines: not done yet, the poll fetches the rest
+    actions = {
+        "answer": (t["status"] == "waiting" and bool(t["question"])) or (t["status"] == "answered" and not t["job"] and bool(t["answer"])),
+        "cancel": active or (t["status"] == "routed" and not t["ended"]),
+        "retry": t["status"] in RETRYABLE and not is_build and t["repo"] != AUTO and pre is None,
+        "accept": not t["accepted"] and t["status"] in ACCEPTABLE and bool(blocked_followups(t)),
+        "attended": is_build and bool(t["unattended"]),
+    }
+    return {
+        **task_row_view(t), "text": t["text"], "question": t["question"], "answer": t["answer"], "parent": t["parent"],
+        "reason": t["reason"], "after_task": t["after_task"], "brief": t["brief"], "handoff": t["handoff"],
+        "criteria": json.loads(t["criteria"]) if t["criteria"] else [], "review": t["review"], "reviews": t["reviews"],
+        "unattended": bool(t["unattended"]), "without_me": WITHOUT_ME, "is_build": is_build,
+        "build_left_nothing": bool(is_build and t["brief"] and build_left_nothing(t)),
+        "children": [task_row_view(k) for k in children(t["id"])], "summary": t["summary"], "summary_title":
+        "Reden" if t["status"] == "refused" else "Samenvatting", "note": t["note"], "turns": t["turns"],
+        "rounds": t["rounds"], "model": model_name(t["model"]), "max_turns": CONF["MAX_TURNS"],
+        "max_minutes": CONF["MAX_MINUTES"], "accepted": bool(t["accepted"]),
+        "blocked_by": pre["id"] if pre else None,
+        "retry_label": "Continue" if t["status"] == "capped" else "Retry",
+        "retry_hint": "Why it is fine to do after all, or what to do differently (optional)" if t["status"] == "refused"
+        else "Note for Claude (optional)",
+        "accept_pr_unmerged": bool(t["pr_number"]) and actions["accept"], "actions": actions,
+        "refresh": t["status"] == "queued", "log": {"lines": lines, "next": nxt, "done": t["status"] not in ACTIVE and not more},
     }

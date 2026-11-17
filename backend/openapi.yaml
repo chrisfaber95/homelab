@@ -491,6 +491,44 @@ paths:
         "502": {$ref: "#/components/responses/UpstreamUnreachable"}
         "403": {$ref: "#/components/responses/ApiForbiddenCsrf"}
   # ------------------------------------------------------------------------------------------------ pages (GET)
+  /api/tasks:
+    x-code: ["/api/tasks"]
+    get:
+      tags: [machine]
+      summary: What the Tasks page (/taken) renders, as JSON
+      x-access: page
+      description: |
+        Added for the page port (H-022 F10). Matched on `url.path`. `repos` fills the new-task form (`auto` is the extra
+        option "auto (homelab beslist)"); `queue` holds queued, running and waiting tasks, oldest first; `history` the
+        rest of the 200 newest, newest first. Times are the stored ISO 8601 UTC strings. `refresh` is true while the
+        queue is not empty (the HTML page reloads itself then).
+      responses:
+        "200":
+          description: The lists of the Tasks page.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/TaskList"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/tasks/{id}:
+    x-code: ["/api/tasks/(\\d+)"]
+    get:
+      tags: [machine]
+      summary: What the task page (/task/<id>) renders, as JSON, with the log so far
+      x-access: page
+      description: |
+        Added for the page port (H-022 F10). Matched on `url.path`. Unknown id: 404 `{"error": "Not found."}`.
+        `actions` says which forms the page shows (answer, cancel, retry, accept, attended); the POSTs stay the form
+        routes of `/task/{id}/{action}`. `log` holds the first 2000 lines and `next`; the page keeps polling
+        `GET /api/log/t<id>?from=<next>` until `done` (no server-sent events).
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses:
+        "200":
+          description: The task page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/TaskDetail"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
   /:
     x-code: ["/"]
     get:
@@ -1854,6 +1892,80 @@ components:
         at: {type: string}
         kind: {type: string, description: "info, claude, tool, result, error, out (forge: info, claude, tool, error)"}
         text: {type: string, maxLength: 600}
+    TaskRow:
+      type: object
+      required: [id, label, status, status_text, what, repo, source, created, ended, pr_url, pr_number]
+      properties:
+        id: {type: integer}
+        label: {type: string, description: "'Inbox <id>' or 'Job <name>'"}
+        status: {type: string, description: "queued, running, waiting, pr_open, ... (config.STATUS_NL)"}
+        status_text: {type: string, description: "Dutch status text of the page"}
+        what: {type: string, description: "first line of the task text (max 70), or the kind of the job"}
+        repo: {type: string}
+        source: {type: string, nullable: true, description: "the client it came from; null = the page"}
+        created: {type: string}
+        ended: {type: string, nullable: true}
+        pr_url: {type: string, nullable: true}
+        pr_number: {type: integer, nullable: true}
+    TaskList:
+      type: object
+      required: [repos, auto, queue, history, refresh]
+      properties:
+        repos: {type: array, items: {type: string}, description: "sorted"}
+        auto: {type: string, description: "the repo value that lets homelab decide"}
+        queue: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+        history: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+        refresh: {type: boolean}
+    TaskDetail:
+      description: A TaskRow plus everything the task page shows.
+      allOf:
+        - {$ref: "#/components/schemas/TaskRow"}
+        - type: object
+          required: [text, question, answer, parent, reason, after_task, brief, handoff, criteria, review, reviews,
+                     unattended, without_me, is_build, build_left_nothing, children, summary, summary_title, note,
+                     turns, rounds, model, max_turns, max_minutes, accepted, blocked_by, retry_label, retry_hint,
+                     accept_pr_unmerged, actions, refresh, log]
+          properties:
+            text: {type: string}
+            question: {type: string, nullable: true}
+            answer: {type: string, nullable: true}
+            parent: {type: integer, nullable: true}
+            reason: {type: string, nullable: true}
+            after_task: {type: integer, nullable: true}
+            brief: {type: string, nullable: true}
+            handoff: {type: string, nullable: true}
+            criteria: {type: array, items: {type: string}}
+            review: {type: string, nullable: true}
+            reviews: {type: integer, nullable: true, description: "automatic rework rounds used"}
+            unattended: {type: boolean}
+            without_me: {type: string, description: "the 'Build without me' explanation"}
+            is_build: {type: boolean, description: "a brief build (repo `brief`)"}
+            build_left_nothing: {type: boolean}
+            children: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+            summary: {type: string, nullable: true}
+            summary_title: {type: string, description: "'Reden' for a refused task, else 'Samenvatting'"}
+            note: {type: string, nullable: true}
+            turns: {type: integer, nullable: true}
+            rounds: {type: integer, nullable: true}
+            model: {type: string, description: "e.g. 'Claude (opus-5-5)'"}
+            max_turns: {description: "limit per round, as configured"}
+            max_minutes: {description: "limit per round, as configured"}
+            accepted: {type: boolean}
+            blocked_by: {type: integer, nullable: true, description: "the predecessor that stops a retry"}
+            retry_label: {type: string, enum: [Continue, Retry]}
+            retry_hint: {type: string}
+            accept_pr_unmerged: {type: boolean, description: "show 'PR #n is not merged as far as the inbox knows'"}
+            actions:
+              type: object
+              required: [answer, cancel, retry, accept, attended]
+              properties:
+                answer: {type: boolean}
+                cancel: {type: boolean}
+                retry: {type: boolean}
+                accept: {type: boolean}
+                attended: {type: boolean}
+            refresh: {type: boolean, description: "true while queued (the HTML page reloads itself)"}
+            log: {$ref: "#/components/schemas/LogChunk"}
     LogChunk:
       type: object
       required: [lines, next, done]

@@ -10,7 +10,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from .briefs import build_left_nothing, builds, live_build, load_briefs, split_frontmatter
+from .briefs import WITHOUT_ME, build_left_nothing, builds, live_build, load_briefs, split_frontmatter
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
@@ -250,11 +250,6 @@ def brief_row(b, actions=True):
             f'<span>{e(b["title"])}</span></div>'
             + meta(e(b["project"]), e(b["priority"]), "repos: " + e(", ".join(b["repos"]) or "-"))
             + (brief_actions(b) if actions else "") + '</div>')
-
-
-WITHOUT_ME = ("The inbox merges each task PR itself once the brief reviewer finds every criterion met and CI is green, "
-              "and then the handoff. A PR on homelab, a missed criterion after the rework round, red CI or criteria "
-              "only you can check still wait for you.")
 
 
 def briefs_page(error=None):

@@ -167,7 +167,9 @@ Other keys under `/api/log/` are 404 `{"error": "Not found."}`; a `from` that is
 `backend/src/main/java/dev/homelab/inbox/read/`; it is a port of `overview.py`, the log branch of `server.py`, `forge.py`
 (read half) and `jobs.parse_job`/`Cron`, with the same Dutch sentences.
 
-**Where it reads.** No store is switched: Python is still the only writer of every table, so Java reads **the live files of
+**Where it reads (and why SQLite, not PostgreSQL).** The PostgreSQL `inbox` database is a one-off import and nothing writes to it
+yet, so reading it would show stale running tasks, runs and logs. `InboxDb` is therefore a bridge: each table's queries move to
+PostgreSQL when that table's writer moves to Java (M4, H-026), and the class goes when the last one has. No store is switched: Python is still the only writer of every table, so Java reads **the live files of
 the Python inbox, read-only**, not the PostgreSQL copy (that one is a one-off import and is stale as soon as Python writes).
 `inbox.db` is opened with sqlite-jdbc read-only (`InboxDb`), `logs/`, `jobs-repo/jobs/*.md`, `repos/homelab/skills/`,
 `new-repos.json`, the monitor and deploy state, `changes.jsonl` and `backup.json` are read from the same paths as Python,

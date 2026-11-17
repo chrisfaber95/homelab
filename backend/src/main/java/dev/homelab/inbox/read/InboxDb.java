@@ -15,9 +15,12 @@ import org.springframework.stereotype.Component;
 import org.sqlite.SQLiteConfig;
 
 /**
- * Read-only access to the Python inbox's {@code inbox.db} (H-024 M1). The Python inbox stays the only writer of every
- * table in M1, so the routes read the live file instead of the PostgreSQL copy (which is a one-off import and would
- * be stale at once). The connection is opened read-only with a busy timeout, one per query, and nothing here
+ * Read-only access to the Python inbox's {@code inbox.db} (H-024 M1). Why SQLite when the target is PostgreSQL: the
+ * PostgreSQL {@code inbox} database is only a one-off import (B5) and nothing writes to it yet; the queue, job runs and
+ * switches that these routes show are still written by the Python inbox into SQLite. Reading PostgreSQL now would show
+ * stale "Nu bezig" and log state. This class is a bridge: when the owning store moves to Java (M4 conversation and
+ * {@code kv}, H-026 tasks and job runs) the matching queries here are replaced by PostgreSQL repositories, and this
+ * class goes away with the last one. The connection is opened read-only with a busy timeout, one per query, and nothing here
  * can write. A missing file or a missing table reads as "no rows", as an empty inbox would.
  */
 @Component

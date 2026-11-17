@@ -106,6 +106,26 @@ else
 fi
 ports+=("$kitt_gate_port")
 svc_ports+=("$kitt_gate_port")
+# --- H-023 inbox backend (Spring Boot): loopback only. No ufw rule, no tailnet port: it binds 127.0.0.1 and the unit
+#     drops every non-loopback address (IPAddressDeny=any). The old inbox forwards to it later (B6). ---
+backend_unit="$REPO/systemd/homelab-inbox-backend.service"
+backend_port=$(sed -n 's/^BACKEND_PORT=//p' "$REPO/config/inbox.conf" | tr -d '"')
+if [[ -e $backend_unit ]]; then
+  if [[ $(sed -n 's/^Environment=BACKEND_HOST=//p' "$backend_unit") == 127.0.0.1 \
+        && $(sed -n 's/^Environment=BACKEND_PORT=//p' "$backend_unit") == "$backend_port" && $backend_port =~ ^81[0-9][0-9]$ ]] \
+     && grep -q '^IPAddressDeny=any' "$backend_unit" \
+     && ! grep -vE '^[[:space:]]*#' "$backend_unit" | grep -qE '0\.0\.0\.0|BACKEND_HOST=(::|\*)' \
+     && grep -qE '^server\.address=\$\{BACKEND_HOST:127\.0\.0\.1\}' "$REPO/backend/src/main/resources/application.properties"; then
+    report OK "exposure:backend:bind" "systemd/homelab-inbox-backend.service: listens on 127.0.0.1:$backend_port only (BACKEND_PORT in config/inbox.conf), non-loopback traffic denied"
+  else
+    report FAIL "exposure:backend:bind" "the backend unit must set BACKEND_HOST=127.0.0.1, the BACKEND_PORT of config/inbox.conf (8100-8199) and IPAddressDeny=any; application.properties must default server.address to 127.0.0.1"
+  fi
+  if grep -vE '^[[:space:]]*#' "$REPO/scripts/27-backend.sh" | grep -q ufw; then
+    report FAIL "exposure:backend:no-ufw" "scripts/27-backend.sh touches ufw; the backend is loopback only and gets no rule"
+  else
+    report OK "exposure:backend:no-ufw" "scripts/27-backend.sh opens no port"
+  fi
+fi
 # --- H-015 ashfall-world: the Rust server binds the --host it is given, on the Tailscale address in 8100-8199 ---
 ashfall_unit="$REPO/deploy/ashfall-world.service"
 if [[ -e $ashfall_unit ]]; then
@@ -166,6 +186,17 @@ if (( live )) && [[ $kitt_port =~ ^[0-9]+$ ]]; then
     report FAIL "exposure:live:$kitt_port" "kitt's adapter listens on $(paste -sd' ' <<<"$adapter"), expected only 127.0.0.1:$kitt_port"
   else
     report OK "exposure:live:$kitt_port" "kitt's adapter listens on 127.0.0.1:$kitt_port only"
+  fi
+fi
+
+if (( live )) && [[ $backend_port =~ ^[0-9]+$ ]]; then
+  backend=$(ss -Htln "sport = :$backend_port" | awk '{print $4}')
+  if [[ -z $backend ]]; then
+    report FAIL "exposure:live:$backend_port" "nothing listens on $backend_port (is homelab-inbox-backend running?)"
+  elif [[ $(grep -v -x -F "127.0.0.1:$backend_port" <<<"$backend" || true) ]]; then
+    report FAIL "exposure:live:$backend_port" "the inbox backend listens on $(paste -sd' ' <<<"$backend"), expected only 127.0.0.1:$backend_port"
+  else
+    report OK "exposure:live:$backend_port" "the inbox backend listens on 127.0.0.1:$backend_port only"
   fi
 fi
 

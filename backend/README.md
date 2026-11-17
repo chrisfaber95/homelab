@@ -47,8 +47,14 @@ curl http://127.0.0.1:8130/api/backend/health
 ```
 
 It binds to loopback only. `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`) override this; the
-install task (B3) records the real port in `config/inbox.conf`. Never set `BACKEND_HOST` to anything but a loopback
+port is also in `config/inbox.conf` (`BACKEND_PORT`). Never set `BACKEND_HOST` to anything but a loopback
 address.
+
+## On the box
+
+`scripts/27-backend.sh` builds the jar as a throwaway user and runs it as `homelab-inbox-backend.service` on
+`127.0.0.1:8130`; see `docs/inbox-backend.md` (install, hardening, how to measure the heap). The unit passes the
+PostgreSQL socket URL (junixsocket, `junixsocket.version` in `pom.xml`).
 
 ## Changing versions
 

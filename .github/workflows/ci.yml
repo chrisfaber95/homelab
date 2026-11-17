@@ -42,6 +42,8 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      # The migration test starts a throwaway cluster with initdb and pg_ctl (Q5); it needs the server binaries.
+      - run: sudo apt-get install -y postgresql
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

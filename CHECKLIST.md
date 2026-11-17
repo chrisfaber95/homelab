@@ -244,6 +244,8 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
   - [ ] `http://homelab.tail4eb878.ts.net:8104` op de telefoon toont het overzicht.
   - [ ] Test: een gedeployde dienst stoppen (`sudo systemctl stop homelab-app-claude-dashboard`): binnen 10 minuten
         een melding, en na `start` een melding "weer in orde".
+  - [ ] H-023 B8: after the next merge, rerun `scripts/20-monitor.sh`, then do the one-time restore test of the `inbox` dump
+        (`docs/monitor.md`, "Restore test checklist") and record date and result in the table there.
   - [ ] Later: de offline-melding (healthchecks.io, `/etc/homelab/heartbeat-url`) en de backups naar de USB-HDD.
 
 - [ ] F-021 (task inbox): zie `docs/inbox.md`.

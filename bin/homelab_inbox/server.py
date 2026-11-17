@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, brief_data, briefs_data, jobs_data, live_items, overview_json, task_view, tasks_view
 from . import forge, search
-from .pages import Access, WEB, admin_ask, csrf_token, draft_page, job_page, research_page, page, run_page, search_page, skills_data, ssh_state
+from .pages import Access, WEB, admin_ask, csrf_token, draft_page, job_page, research_page, page, run_page, skills_data, ssh_state
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -315,8 +315,6 @@ class Handler(BaseHTTPRequestHandler):
             more = read_log(f"{m.group(1)}{m.group(2)}", nxt, 1)[0]
             return self.send(200, json.dumps({"lines": lines, "next": nxt, "done": done and not more}),
                              "application/json")
-        if url.path == "/search":
-            return self.send(200, search_page())
         if url.path == "/api/briefs":
             return self.send_upstream(200, briefs_data())
         if (m := re.fullmatch(r"/api/briefs/([A-Z]-\d{3,4})", url.path)):
@@ -340,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.no_build()
         if url.path == "/api/ssh":
             return self.send_upstream(200, ssh_state())
-        if self.path in ("/", "/jobs", "/skills", "/ssh") or url.path == "/memory" \
+        if self.path in ("/", "/jobs", "/skills", "/ssh") or url.path in ("/memory", "/search") \
                 or ((m := re.fullmatch(r"/memory/e/(.+)", self.path)) and mem_get(m.group(1))) or (task_id and get(int(task_id.group(1)))):
             return self.no_build()
         if self.path in ("/research", f"/job/{RESEARCH_JOB}") and RESEARCH_JOB not in JOBS:

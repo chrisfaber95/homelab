@@ -163,14 +163,11 @@ class Session(unittest.TestCase):
 
     def test_the_page_script_sends_the_header_and_reads_the_flat_error(self):
         js = (ROOT / "web/app.js").read_text()
-        self.assertIn('fetch("/api/session"', js)
-        self.assertEqual(len(re.findall(r'"X-CSRF-Token": await csrfToken\(\)', js)), 1)  # search
-        ts = (ROOT / "frontend/src/api/client.ts").read_text()  # the Overview's forge buttons
-        self.assertIn('"X-CSRF-Token": await csrfToken()', ts)
         self.assertNotIn("error?.message", js)
-        html = pages.search_page()
-        self.assertIn('id="search-form"', html)
-        self.assertNotRegex(html, r'id="search-form"[^>]*data-csrf')
+        ts = (ROOT / "frontend/src/api/client.ts").read_text()  # the Overview's forge buttons, the Search page
+        self.assertIn('fetch(path', ts)
+        self.assertIn('"X-CSRF-Token": await csrfToken()', ts)
+        self.assertIn('postForm("/api/search/ask"', (ROOT / "frontend/src/pages/search.ts").read_text())
 
 
 if __name__ == "__main__":

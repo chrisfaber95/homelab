@@ -246,7 +246,7 @@ looks up the caller (`search`), tier and backend of that request and stores them
 (`docs/router.md`) at once. The button is hidden when there is no request id (the "nothing relevant" answer never
 called the router). A second click on the same answer returns the first feedback. A search service that is down gives
 a visible error with status 502, not an empty list. Settings: `SEARCH_URL` and `ROUTER_URL` in `config/inbox.conf`
-(loopback). Code: `bin/homelab_inbox/search.py`, `search_page()` in `pages.py`, the Search part of `web/app.js` and
+(loopback). Code: `bin/homelab_inbox/search.py`, the Search page `frontend/src/pages/search.ts` (served for `/search`, `PORTED_PAGES`) and
 `web/app.css`. Tests: `tests/test_inbox_search.py`.
 
 ### Exposure check

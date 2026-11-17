@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.update(INBOX_RUNNER_HOME=tempfile.mkdtemp(), NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import conversation, jobs, pages  # noqa: E402
+from homelab_inbox import conversation, jobs, overview  # noqa: E402
 
 HEAD = '---\nwhen: daily\nschedule: "0 7 * * *"\nkind: box-report\nmodel: local\n{extra}---\n{body}\n'
 NOTHING = "Nothing broke: answer NOTHING TO REPORT as the first line."
@@ -49,8 +49,8 @@ class Format(unittest.TestCase):
     def test_page_shows_the_statement(self):
         j = parse("deliver: conversation\n", NOTHING)
         self.assertIn("NOTHING TO REPORT", jobs.nothing_statement(j))
-        self.assertIn("Niets te melden", pages.job_facts(j))
-        self.assertNotIn("Niets te melden", pages.job_facts(parse()))
+        self.assertIn("NOTHING TO REPORT", overview.job_facts(j)["nothing"])
+        self.assertIsNone(overview.job_facts(parse())["nothing"])
 
 
 class Delivery(unittest.TestCase):

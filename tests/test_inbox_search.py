@@ -95,7 +95,6 @@ class SearchTab(unittest.TestCase):
         status, _ = self.req("GET", "/search")
         self.assertIn(status, (200, 503))  # 200 with a frontend build, else the "build is missing" answer
         self.assertIn("/search", server.PORTED_PAGES)
-        self.assertIn('<a href="/search">Search</a>', self.req("GET", "/research")[1])
         ts = (ROOT / "frontend/src/pages/search.ts").read_text()
         for needle in ('id: "sq"', 'name: "hard"', 'id: "sproject"', 'id: "stype"', 'id: "sanswer"', 'id: "sresults"',
                        "/api/search/filters", "/api/search/results", "/api/search/ask", "/api/search/feedback"):

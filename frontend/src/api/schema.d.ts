@@ -140,6 +140,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/job/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the job page (/job/<name>) renders, as JSON
+         * @description Added for the page port (H-022 F7). The job with its parsed facts (`facts` is null when the file is broken and
+         *     `error` says why), its file, and its 30 latest runs. `refresh` is true while a run is queued or running (the
+         *     page reloads itself every 20 seconds). The forms post to `/job/{name}/{action}`. Unknown job: 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: components["parameters"]["JobName"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The job page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["JobDetail"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/draft/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the draft page (/draft/<id>) renders, as JSON
+         * @description A job draft. Only a `ready` draft has `facts` (the parsed file) or `text_error` (why the file is not valid yet).
+         *     `refresh` is true while the draft is `drafting`. Unknown draft: 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["NumericId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The draft page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["DraftDetail"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/run/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the run page (/run/<id>) renders, as JSON
+         * @description One run of a job: the fields of a list row plus the result `text`, the `note`, whether it can be cancelled on
+         *     the page (`cancellable`: a running run) and `log_key` for `GET /api/log/<key>` (a local run only). Unknown run: 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["NumericId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The run page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["RunDetail"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/research": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Research page (/research) renders, as JSON
+         * @description The Claude-run counter, the modes of the form and the 30 latest research questions (newest first). `refresh`
+         *     is true while one is queued or running. Asking goes through `POST /research/ask`. Not `/api/jobs`: that is kitt's door.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Research page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["ResearchPage"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory": {
         parameters: {
             query?: never;
@@ -1647,9 +1821,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Research page (also served at /job/research when no job of that name exists)
-         * @description `self.path in ("/research", f"/job/{RESEARCH_JOB}")` and `RESEARCH_JOB not in JOBS`. When a real job named
-         *     like RESEARCH_JOB exists, `/job/<name>` shows that job instead and `/research` is a 404.
+         * Research page (also served at /job/research when no job of that name exists; TypeScript on `/api/research`)
+         * @description `url.path in ("/research", f"/job/{RESEARCH_JOB}")` and `RESEARCH_JOB not in JOBS`. When a real job named
+         *     like RESEARCH_JOB exists, `/job/<name>` shows that job instead and `/research` is a 404. Served from
+         *     `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
          */
         get: {
             parameters: {
@@ -1663,6 +1838,15 @@ export interface paths {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
                 404: components["responses"]["PageNotFound"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;
@@ -1685,8 +1869,7 @@ export interface paths {
         /**
          * Ask a research question
          * @description Form `question`, `mode` (default `quick`; `quick` or `deep`). Success 303 to `/research`. Errors come from
-         *     `jobs.ask_research`: 400 (empty question or bad mode) and 429 (daily Claude cap), rendered as the research page
-         *     with the message.
+         *     `jobs.ask_research`: 400 (empty question or bad mode) and 429 (daily Claude cap), as `{"error": "..."}`.
          */
         post: {
             parameters: {
@@ -1710,23 +1893,23 @@ export interface paths {
             };
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Research page with error */
+                /** @description Empty question or bad mode */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];
-                /** @description Research page with the daily-limit message */
+                /** @description The daily Claude limit is reached */
                 429: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
             };
@@ -1914,8 +2097,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * One job
-         * @description Matched on `self.path`; only when the job exists in `JOBS`, else 404 page.
+         * One job (TypeScript on `/api/job/{name}`)
+         * @description Matched on `url.path`; only when the job exists in `JOBS`, else 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
          */
         get: {
             parameters: {
@@ -1931,6 +2114,15 @@ export interface paths {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
                 404: components["responses"]["PageNotFound"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;
@@ -1955,7 +2147,7 @@ export interface paths {
          * @description Unknown job: 404 page. `change` with text starts a draft with the job as base (303 `/draft/<id>`); `run`
          *     dispatches it now; `pause`/`resume` commit to the `jobs` branch; `save` with text validates and commits;
          *     `delete` commits the removal and redirects to `/jobs`. Everything else (including `run` on a job with an error)
-         *     redirects to `/job/<name>`. An exception is 400 with the job page and the message.
+         *     redirects to `/job/<name>`. An exception is 400 `{"error": "..."}`.
          */
         post: {
             parameters: {
@@ -1973,13 +2165,13 @@ export interface paths {
             requestBody: components["requestBodies"]["TextForm"];
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Job page with error */
+                /** @description The reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];
@@ -2000,8 +2192,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A job draft
-         * @description Matched on `self.path`; unknown draft: 404 page.
+         * A job draft (TypeScript on `/api/draft/{id}`)
+         * @description Matched on `url.path`; unknown draft: 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
          */
         get: {
             parameters: {
@@ -2017,6 +2209,15 @@ export interface paths {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
                 404: components["responses"]["PageNotFound"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;
@@ -2039,7 +2240,7 @@ export interface paths {
         /**
          * Confirm or cancel a job draft
          * @description Only for a draft with status `ready`; otherwise 404 page. `cancel` 303 to `/jobs`. `confirm` validates `text`,
-         *     commits the job and 303 to `/job/<name>`; a validation error is 400 with the draft page and the message.
+         *     commits the job and 303 to `/job/<name>`; a validation error is 400 `{"error": "..."}`.
          */
         post: {
             parameters: {
@@ -2057,13 +2258,13 @@ export interface paths {
             requestBody: components["requestBodies"]["TextForm"];
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Draft page with error */
+                /** @description The reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];
@@ -2084,8 +2285,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A job run
-         * @description Matched on `self.path` (no query string). Unknown run: 404 page.
+         * A job run (TypeScript on `/api/run/{id}`)
+         * @description Matched on `url.path`. Unknown run: 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
          */
         get: {
             parameters: {
@@ -2101,6 +2302,15 @@ export interface paths {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
                 404: components["responses"]["PageNotFound"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;
@@ -3272,6 +3482,76 @@ export interface components {
             catalogue: components["schemas"]["CatalogueAgent"][];
             jobs: components["schemas"]["JobSummary"][];
             runs: components["schemas"]["JobRunSummary"][];
+        };
+        JobFacts: {
+            /** @description the job's own words, '' when none */
+            when: string;
+            /** @description cron expression */
+            schedule: string;
+            timezone: string;
+            paused: boolean;
+            /** @description the next runs as 'ma 17-11 07:00' (a few of them) */
+            next_times: string[];
+            /** @description Dutch kind label */
+            kind: string;
+            /** @enum {string} */
+            model: "local" | "claude";
+            /** @enum {string|null} */
+            mode: "quick" | "deep" | null;
+            repo: string | null;
+            /** @description script with its arguments */
+            script: string | null;
+            sources: string[];
+            /** @enum {string} */
+            deliver: "page" | "ntfy" | "conversation";
+            /** @description the lines that define 'nothing to report'; null when deliver is page */
+            nothing: string | null;
+            skills: string[];
+            /** @description minutes saved per run */
+            minutes: number | null;
+            instruction: string;
+        };
+        JobDetail: {
+            name: string;
+            /** @description why the job file is broken */
+            error: string | null;
+            paused: boolean;
+            /** @description the job file */
+            text: string;
+            facts: components["schemas"]["JobFacts"] | null;
+            runs: components["schemas"]["JobRunSummary"][];
+            refresh: boolean;
+        };
+        DraftDetail: {
+            id: number;
+            /** @description the job this draft changes; null for a new job */
+            base: string | null;
+            request: string;
+            /** @description drafting, ready, failed, confirmed or cancelled */
+            status: string;
+            /** @description why drafting failed */
+            error: string | null;
+            /** @description the job file as drafted */
+            text: string;
+            facts: components["schemas"]["JobFacts"] | null;
+            text_error: string | null;
+            refresh: boolean;
+        };
+        RunDetail: components["schemas"]["JobRunSummary"] & {
+            /** @description the result as stored on the run */
+            text: string;
+            note: string | null;
+            cancellable: boolean;
+            /** @description key for GET /api/log/{key}; null for a Claude run (its log is on the task) */
+            log_key: string | null;
+            refresh: boolean;
+        };
+        ResearchPage: {
+            claude_runs_today: number;
+            claude_cap: number;
+            modes: string[];
+            runs: components["schemas"]["JobRunSummary"][];
+            refresh: boolean;
         };
         /** @description With `error` set only `name` and `error` are present. */
         CatalogueAgent: {

@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
-os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
+os.environ.update(NTFY_FAKE="1", BACKEND_ROUTES="", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 os.environ.pop("PORTED_PAGES", None)
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))

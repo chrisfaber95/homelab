@@ -18,6 +18,13 @@ INBOX_CONTRACT_BASE_URL
     /api/memory/e/*) answer what the spec says. Those
     tests read only and need no arranged state, so they run in both modes; the tests that arrange state skip.
 
+INBOX_CONTRACT_JAVA_URL (H-024 M3)
+    In-process mode, but the forge and search routes (`/api/forge*`, `/api/search/*`, `/api/log/f1`) are forwarded by the
+    Python server's facade to the Java backend at that URL, as `BACKEND_ROUTES` does in production, so the same cases
+    run against the Java implementation. Needs INBOX_CONTRACT_JAVA_SECRET (the backend's `BACKEND_SECRET`) and
+    INBOX_CONTRACT_UPSTREAM_PORT: the fake forge/search/router listens on that port, and the backend must be started
+    with FORGE_URL, SEARCH_URL and ROUTER_URL set to `http://127.0.0.1:<that port>` (see docs/inbox-backend.md).
+
 Run: python3 -m unittest discover -s tests   (or: INBOX_CONTRACT_BASE_URL=http://127.0.0.1:PORT python3 tests/test_inbox_contract.py)
 """
 import http.client
@@ -48,9 +55,14 @@ CLIENTS = {"clients": {
     "reader": {"permissions": ["read"]},
     "kitt": {"permissions": KITT_ALL, "tasks_per_day": 5}}}
 
+JAVA_URL = os.environ.get("INBOX_CONTRACT_JAVA_URL", "").rstrip("/")
+UPSTREAM_PORT = int(os.environ.get("INBOX_CONTRACT_UPSTREAM_PORT") or 0)
+if JAVA_URL and not EXTERNAL:  # before homelab_inbox is imported: the facade reads these once
+    os.environ.update(BACKEND_ROUTES="/api/forge,/api/search,/api/log/f1", BACKEND_URL=JAVA_URL,
+                      BACKEND_SECRET=os.environ["INBOX_CONTRACT_JAVA_SECRET"])
 if not EXTERNAL:
     HOME, TOKENS = tempfile.mkdtemp(), tempfile.mkdtemp()
-    os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
+    os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", BACKEND_ROUTES=os.environ.get("BACKEND_ROUTES", ""), REPOS_CONF=str(ROOT / "config/repos.conf"),
                       CHAT_TOKEN_DIR=TOKENS)
     os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
     sys.path.insert(0, str(ROOT / "bin"))
@@ -109,7 +121,7 @@ def violations(schema, value, where="body"):
 class Reply:
     def __init__(self, status, headers, raw):
         self.status, self.headers, self.raw = status, headers, raw
-        self.ctype = headers.get("Content-Type", "")
+        self.ctype = re.sub(r";\s*", "; ", headers.get("Content-Type", ""))  # Tomcat writes "type;charset=utf-8"
         try:
             self.body = json.loads(raw) if "json" in self.ctype else raw.decode()
         except ValueError:
@@ -165,7 +177,11 @@ class Contract(unittest.TestCase):
         cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.host, cls.port = "127.0.0.1", cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
-        cls.upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        cls.open_upstream()
+
+    @classmethod
+    def open_upstream(cls):
+        cls.upstream = ThreadingHTTPServer(("127.0.0.1", UPSTREAM_PORT), Upstream)  # port 0: any free one
         threading.Thread(target=cls.upstream.serve_forever, daemon=True).start()
 
     @classmethod
@@ -200,6 +216,8 @@ class Contract(unittest.TestCase):
                    "filters": (200, {"projects": ["homelab"], "types": ["doc"]}),
                    "results": (200, {"query": "x", "results": []}), "ask": (200, {"found": False}),
                    "feedback": (200, {"ok": True})}
+        if self.upstream is None:  # a test of the Java mode closed it (dead_upstreams)
+            self.open_upstream()
         self.upstream.state = self.up
         base = f"http://127.0.0.1:{self.upstream.server_address[1]}"
         self._saved = (forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL, kitt.account_uid, kitt.peer_uid,
@@ -241,6 +259,10 @@ class Contract(unittest.TestCase):
         url = f"http://127.0.0.1:{closed_port()}"
         forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL = url, url, url
         forge.forget()
+        if JAVA_URL:  # the backend's upstream addresses are fixed: close the fake, so nothing answers there
+            self.upstream.shutdown()
+            self.upstream.server_close()
+            type(self).upstream = None
 
     # -- calling --
     def call(self, method, path, body=None, headers=None, raw=None):

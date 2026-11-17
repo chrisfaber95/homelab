@@ -19,7 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Forge's row in "Nu bezig" and forge's log, read from forge's own endpoints on the tailnet address (a port of
- * the read half of {@code forge.py}, H-024 M1). Start and Stop stay in Python (M3). As in Python, the state is kept for
+ * the read half of {@code forge.py}, H-024 M1). Start and Stop are in {@code proxy.ForgeController} (M3). As in Python, the state is kept for
  * two seconds and a forge that does not answer is not asked again for thirty.
  */
 @Component
@@ -100,6 +100,12 @@ public class Forge {
         lastData = view(2);
         lastAtNanos = System.nanoTime();
         return lastData;
+    }
+
+    /** Drops the kept answer: after a Start or Stop the next question must reach forge itself. */
+    public synchronized void forget() {
+        lastAtNanos = null;
+        lastData = null;
     }
 
     /** Forge's row in "Nu bezig", or empty when it is not working. */

@@ -160,6 +160,14 @@ public class Settings {
         return stripSlash(conf("FORGE_URL", "http://100.85.70.34:8120"));
     }
 
+    public String searchUrl() {
+        return stripSlash(conf("SEARCH_URL", "http://127.0.0.1:8019"));
+    }
+
+    public String routerUrl() {
+        return stripSlash(conf("ROUTER_URL", "http://127.0.0.1:8018"));
+    }
+
     public String forgePageUrl() {
         return stripSlash(conf("FORGE_PAGE_URL", forgeUrl()));
     }

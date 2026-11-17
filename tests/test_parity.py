@@ -74,6 +74,11 @@ class Routes(unittest.TestCase):
         self.assertEqual(parity.build_routes(paths, cfg), [
             ("/a", None), ("/t/1", None), ("/t/2", None), ("/u/{id}", "no example in parity.json"), ("/s", "listed in skip")])
 
+    def test_queries_add_routes_after_their_path(self):
+        cfg = {"queries": {"/a": ["?q=1", "?q=2"]}, "skip": ["/s"]}
+        self.assertEqual(parity.build_routes(["/a", "/b"], cfg), [("/a", None), ("/a?q=1", None), ("/a?q=2", None), ("/b", None)])
+        self.assertEqual(parity.spec_key("/a?q=1", cfg), "/a")
+
     def test_spec_paths_only_get(self):
         spec = {"paths": {"/a": {"get": {}}, "/b": {"post": {}}, "/c": {"get": {}, "post": {}}}}
         self.assertEqual(parity.spec_paths(spec), ["/a", "/c"])
@@ -89,7 +94,7 @@ class Routes(unittest.TestCase):
             self.skipTest("PyYAML not installed")
         cfg = json.loads((ROOT / "backend/parity/parity.json").read_text())
         paths = parity.spec_paths(yaml.safe_load((ROOT / "backend/openapi.yaml").read_text()))
-        for key in list(cfg["examples"]) + cfg["exclude"] + cfg["skip"] + [k for k in cfg["ignore"] if k != "*"]:
+        for key in list(cfg["examples"]) + list(cfg["queries"]) + cfg["exclude"] + cfg["skip"] + [k for k in cfg["ignore"] if k != "*"]:
             self.assertIn(key, paths, f"parity.json names {key}, which is not a GET path of openapi.yaml")
 
 

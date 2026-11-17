@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HOME = tempfile.mkdtemp()
 TOKENS = tempfile.mkdtemp()
-os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
+os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", BACKEND_ROUTES="", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   CHAT_TOKEN_DIR=TOKENS, INBOX_ALLOW_ALL="1")
 os.environ["CLIENTS_JSON"] = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer"]},

@@ -17,7 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 HOME = tempfile.mkdtemp()
 TOKENS = tempfile.mkdtemp()
-os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
+os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", BACKEND_ROUTES="", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   INBOX_ALLOW_ALL="1")
 CLIENTS = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer", "approve"]},

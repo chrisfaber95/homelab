@@ -117,20 +117,6 @@ paths:
       responses:
         "200":
           description: The sections and the add-form choices.
-  /api/skills:
-    x-code: ["/api/skills"]
-    get:
-      tags: [machine]
-      summary: What the Skills tab shows, as JSON
-      x-access: page
-      x-machine: true
-      description: |
-        The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
-        20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
-        `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
-      responses:
-        "200":
-          description: The Skills page data.
           content:
             application/json; charset=utf-8:
               schema:
@@ -151,6 +137,49 @@ paths:
                           type: array
                           items: {$ref: "#/components/schemas/MemoryEntry"}
                   abouts: {type: array, items: {type: string}}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/skills:
+    x-code: ["/api/skills"]
+    get:
+      tags: [machine]
+      summary: What the Skills tab shows, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+        20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+        `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+      responses:
+        "200":
+          description: The Skills page data.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [intro, empty, proposals_empty, skills, proposals]
+                properties:
+                  intro: {type: string}
+                  empty: {type: string, description: "shown when `skills` is empty"}
+                  proposals_empty: {type: string, description: "shown when `proposals` is empty"}
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description, jobs]
+                      properties:
+                        name: {type: string}
+                        description: {type: string}
+                        jobs: {type: array, items: {type: string}, description: "names of the jobs that use it; empty shows 'geen'"}
+                  proposals:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, pr_url, task_id, created]
+                      properties:
+                        name: {type: string}
+                        pr_url: {type: string}
+                        task_id: {type: integer, nullable: true}
+                        created: {type: string}
         "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/memory/e/{id}:
     x-code: ["/api/memory/e/(.+)"]
@@ -178,30 +207,23 @@ paths:
                       data_repo: {type: string, description: "DATA_REPO"}
         "403": {$ref: "#/components/responses/ApiForbidden"}
         "404": {description: "`{\"error\": \"No such memory entry.\"}`", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
-                required: [intro, empty, proposals_empty, skills, proposals]
-                properties:
-                  intro: {type: string}
-                  empty: {type: string, description: "shown when `skills` is empty"}
-                  proposals_empty: {type: string, description: "shown when `proposals` is empty"}
-                  skills:
-                    type: array
-                    items:
-                      type: object
-                      required: [name, description, jobs]
-                      properties:
-                        name: {type: string}
-                        description: {type: string}
-                        jobs: {type: array, items: {type: string}, description: "names of the jobs that use it; empty shows 'geen'"}
-                  proposals:
-                    type: array
-                    items:
-                      type: object
-                      required: [name, pr_url, task_id, created]
-                      properties:
-                        name: {type: string}
-                        pr_url: {type: string}
-                        task_id: {type: integer, nullable: true}
-                        created: {type: string}
+  /api/overview:
+    x-code: ["/api/overview"]
+    get:
+      tags: [machine]
+      summary: Everything the Overview page ("/") shows, as data
+      x-access: page
+      x-machine: true
+      description: |
+        The data behind `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
+        five changes, services, the Discord and kitt switches, a week of usage and the health block. Texts are the
+        same Dutch sentences the HTML page shows; times are ISO strings. Not cached.
+      responses:
+        "200":
+          description: The Overview data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/Overview"}
         "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/live:
     x-code: ["/api/live"]
@@ -1569,6 +1591,127 @@ components:
         kind_label: {type: string, enum: [voorkeur, feit, geschiedenis]}
         added_local: {type: string}
         changed_local: {type: string}
+    Overview:
+      type: object
+      required: [status, live, timeline, changes, services, forge_link, switches, usage, health]
+      properties:
+        status:
+          type: object
+          required: [sentence, class, at, activity]
+          properties:
+            sentence: {type: string, description: "e.g. 'Alles in orde.'"}
+            class: {type: string, enum: [ok, attention, bad]}
+            at: {type: string, description: "ISO time of this answer, in the inbox time zone"}
+            activity: {type: string, description: "same sentence as GET /api/live"}
+        live:
+          type: object
+          required: [items, queued]
+          properties:
+            items: {type: array, items: {$ref: "#/components/schemas/LiveItem"}}
+            queued: {type: integer}
+        timeline:
+          type: object
+          required: [lanes, ticks, now_x]
+          properties:
+            now_x: {type: number, description: "x of 'nu' in percent"}
+            ticks:
+              type: array
+              items:
+                type: object
+                required: [x, label, day]
+                properties: {x: {type: number}, label: {type: string}, day: {type: boolean}}
+            lanes:
+              type: array
+              items:
+                type: object
+                required: [name, state, model, when, marks]
+                properties:
+                  name: {type: string}
+                  state: {type: string, enum: [active, paused, error, deleted]}
+                  model: {type: string, nullable: true, description: "local or claude; null for error and deleted"}
+                  when: {type: string, nullable: true}
+                  marks:
+                    type: array
+                    items:
+                      type: object
+                      required: [x, status, link, label]
+                      properties:
+                        x: {type: number}
+                        status: {type: string, description: "ok, pr, failed, held, running or plan"}
+                        link: {type: string}
+                        label: {type: string}
+        changes:
+          type: array
+          description: the last five, newest first
+          items:
+            type: object
+            required: [ok, text, at, user, reason]
+            properties:
+              ok: {type: boolean}
+              text: {type: string}
+              at: {type: string, nullable: true}
+              user: {type: string}
+              reason: {type: string}
+        services:
+          type: array
+          items:
+            type: object
+            required: [name, address, note]
+            properties: {name: {type: string}, address: {type: string}, note: {type: string}}
+        forge_link: {type: string, description: "address of the Forge line in config/services.conf, or empty"}
+        switches:
+          type: object
+          required: [discord, discord_approvals, discord_on, kitt, kitt_may]
+          properties:
+            discord: {type: boolean, description: "the stored Discord switch"}
+            discord_approvals: {type: boolean, description: "the stored approvals switch"}
+            discord_on: {type: boolean, description: "Discord is on (the page's 'Discord is off' note shows when false)"}
+            kitt: {type: boolean}
+            kitt_may: {type: array, items: {type: string}, description: "kitt's permissions, sorted"}
+        usage:
+          type: object
+          required: [days, llm, claude_jobs, inbox, cap, saved_minutes]
+          properties:
+            days: {type: array, items: {type: string, format: date}, description: "the last 7 days, oldest first"}
+            llm: {type: array, nullable: true, items: {type: integer}, description: "null: the helper is unreachable"}
+            claude_jobs: {type: array, items: {type: integer}}
+            inbox: {type: array, items: {type: integer}}
+            cap: {type: integer}
+            saved_minutes: {type: object, additionalProperties: {type: integer}, description: "per kind of job"}
+        health:
+          type: object
+          required: [checks, last, deploys, backup]
+          properties:
+            last: {type: string, nullable: true}
+            checks:
+              type: object
+              additionalProperties:
+                type: object
+                required: [status, text]
+                properties:
+                  status: {type: string, description: "OK, WARN or FAIL"}
+                  text: {type: string}
+                  since: {type: string, nullable: true}
+            deploys:
+              type: array
+              items:
+                type: object
+                required: [name, ok, at, sha, sync_error]
+                properties:
+                  name: {type: string}
+                  ok: {type: boolean, nullable: true, description: "null: not deployed yet"}
+                  at: {type: string, nullable: true}
+                  sha: {type: string, nullable: true}
+                  sync_error: {type: string, nullable: true}
+            backup:
+              type: object
+              nullable: true
+              required: [ok, at, free_bytes, free_pct]
+              properties:
+                ok: {type: boolean}
+                at: {type: string, nullable: true}
+                free_bytes: {type: integer}
+                free_pct: {nullable: true}
     LiveItem:
       type: object
       required: [key, title, what, repo, model, url, cancel, started]

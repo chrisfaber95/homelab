@@ -7,3 +7,6 @@ hacs-github-token
 # Frontend (frontend/): dependencies and build output.
 node_modules/
 frontend/dist/
+
+# Backend (backend/): Maven build output.
+backend/target/

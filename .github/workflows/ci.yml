@@ -34,3 +34,18 @@ jobs:
         run: |
           npm run gen:types
           git diff --exit-code -- src/api/schema.d.ts
+  backend:
+    # backend/: Spring Boot skeleton (H-023), built and tested with the pinned Maven wrapper on JDK 21.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - run: ./mvnw --batch-mode verify

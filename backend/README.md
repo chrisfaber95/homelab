@@ -6,9 +6,9 @@ Python inbox; nothing is switched over to it yet. For now it only has `GET /api/
 - Java 21, Spring Boot 4.1.2 (the parent POM pins all plugin and dependency versions), Maven 3.9.16 through the
   wrapper (`mvnw`, version and checksum in `.mvn/wrapper/maven-wrapper.properties`).
 - Dependencies: web, JDBC, Flyway (with its PostgreSQL module), pgjdbc, junixsocket (pgjdbc over the Unix socket; the
-  database has no TCP listener) and the test starter. The datasource and Flyway auto-configuration are still switched
+  database has no TCP listener), sqlite-jdbc (only for the one-off import) and the test starter. The datasource and Flyway auto-configuration are still switched
   off in `application.properties`: the running service has no database connection until the install and import tasks
-  (B3, B5) add it. The migrations below are exercised by the tests only.
+  (B3) add it. The migrations below are exercised by the tests and by `import-sqlite`.
 
 ## Build and test
 
@@ -37,6 +37,37 @@ Flyway migrations are in `src/main/resources/db/migration/`.
 - **`V1` is never edited.** Every later schema change is a new migration (`V2__<what>.sql`, `V3__...`), also a fix to
   a mistake in an earlier one. Flyway refuses to start when an applied migration changed (checksum).
 - `BaselineMigrationTest` runs the migrations on a throwaway cluster and checks the 9 tables and their columns.
+
+## One-off import of `inbox.db` (B5)
+
+`import-sqlite` loads the old SQLite database into the PostgreSQL database `inbox`. It is a command mode of the jar
+(no Spring context, no web server), run by hand on the box. It does not run on its own and nothing calls it.
+
+```sh
+# as inbox-runner (the only account the database lets in as inbox_app, see docs/inbox-db.md)
+sudo -u inbox-runner java -jar /path/to/inbox-backend-0.1.0.jar import-sqlite --sqlite /var/lib/homelab-inbox/inbox.db
+```
+
+Options: `--socket-dir` (default `/var/run/postgresql`), `--port` (`5432`), `--database` (`inbox`), `--user`
+(`inbox_app`), or `--url <jdbc url>` to replace the first three. Behaviour:
+
+- Applies the Flyway migrations first (a no-op when `V1` is there), then opens `inbox.db` **read-only**
+  (`SQLITE_OPEN_READONLY`) in one read transaction: one consistent snapshot, no write lock, the file is not changed.
+  A database in WAL mode is read through the `-wal` and `-shm` files next to it, so the account needs access to them.
+- Locks the nine tables in PostgreSQL and **refuses (exit 2, nothing written)** when any of them has a row.
+- Copies all nine tables in **one PostgreSQL transaction**, keeping the old ids, then compares the row count of every
+  table (SQLite snapshot against PostgreSQL). On any difference it prints `MISMATCH <table>: sqlite=<n> postgres=<m>`,
+  rolls back and exits 1. Any other error (a value that does not fit its column, a SQLite table or column PostgreSQL
+  lacks, a lost connection) also rolls back and exits 1.
+- Resets every identity sequence to `max(id) + 1` just before the commit (a sequence change is not transactional, so
+  this is the last step), then commits and prints the counts; exit 0.
+
+After a failure the database is empty again, so re-run the command after fixing the cause. To start over after a
+successful import, empty the nine tables by hand first (or drop and re-create the database with
+`scripts/28-inbox-db.sh`); the command never deletes anything itself. Exit codes: 0 done, 1 failed or count mismatch,
+2 target not empty or bad usage.
+
+Tested by `SqliteImporterTest` on a small SQLite fixture and the throwaway cluster, including a forced count mismatch.
 
 ## Run
 

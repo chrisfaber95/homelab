@@ -5,11 +5,11 @@ import urllib.request
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
-from . import forge
+from . import conversation, forge
 from .briefs import WITHOUT_ME, build_left_nothing
-from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, STATUS_NL, TZ, _round_started
+from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, SERVICES, STATUS_NL, TZ, _round_started
 from .helpers import first_line, label, read_json, read_log, repo_list
-from .jobs import JOB_KINDS, LLM_URL, RUN_NL, run_view
+from .jobs import JOB_KINDS, LLM_URL, RESEARCH_JOB, RUN_NL, claude_runs_today, job_runs, load_agents, run_view
 from .router import blocked_by, blocked_followups, children
 from .storage import db, tasks
 
@@ -233,6 +233,110 @@ def usage():
             saved[kind] = saved.get(kind, 0) + mins
     return {"days": days, "llm": llm, "claude_jobs": per_day(claude_jobs), "inbox": per_day(inbox),
             "cap": int(CONF.get("JOB_CLAUDE_CAP", 10)), "saved": saved}
+
+
+def local_time(iso):
+    """'dd-mm HH:MM' in the inbox's time zone, '-' when empty, the text as is when it is not a date."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    except ValueError:
+        return iso  # a date edited by hand in the memory
+
+
+def jobs_data():
+    """What the Jobs page renders, as data (GET /api/jobs-page): the counter, the open drafts, the catalogue, all jobs and
+    the latest runs. The texts are the ones the page shows (Dutch); a broken job or catalogue file has `error`."""
+    def model(m):
+        return "lokaal" if m == "local" else "Claude"
+
+    jobs = []
+    for name, job in sorted(JOBS.items()):
+        if "error" in job:
+            jobs.append({"name": name, "error": job["error"]})
+            continue
+        last = job_runs(name, 1)
+        status = run_view(last[0])[0] if last else None
+        nxt = "gepauzeerd" if job["paused"] else day_time(job["cron"].next_after(datetime.now(timezone.utc)))
+        jobs.append({"name": name, "error": None, "kind": JOB_KINDS[job["kind"]], "model": model(job["model"]),
+                     "when": job["when"] or job["schedule"], "next": nxt, "paused": bool(job["paused"]),
+                     "last": RUN_NL.get(status, "") if status else None})
+    catalogue = []
+    for a in load_agents():
+        if "error" in a:
+            catalogue.append({"name": a["name"], "error": a["error"]})
+            continue
+        j = a["job"]
+        catalogue.append({"name": a["name"], "error": None, "on": bool(a["on"]),
+                          "what": j["instruction"].split("\n\n")[0][:300], "when": j["when"] or j["schedule"],
+                          "model": model(j["model"]), "deliver": j["deliver"], "fill": a.get("fill") or None})
+    with db() as c:
+        drafts = c.execute("SELECT * FROM drafts WHERE status IN ('drafting','ready','failed') ORDER BY id DESC "
+                           "LIMIT 10").fetchall()
+    runs = []
+    for r in job_runs(limit=20):
+        status, summary, link, pr = run_view(r)
+        runs.append({"id": r["id"], "job": r["job"],
+                     "job_url": "/research" if r["job"] == RESEARCH_JOB and r["job"] not in JOBS else f"/job/{r['job']}",
+                     "due": local_time(r["due"]), "status": status, "status_label": RUN_NL.get(status, status),
+                     "url": link, "model": model(r["model"]), "manual": bool(r["manual"]), "pr": pr,
+                     "summary": first_line(summary) if summary else ""})
+    return {"claude_runs_today": claude_runs_today(), "claude_cap": int(CONF.get("JOB_CLAUDE_CAP", 10)),
+            "timezone": TZ.key, "refresh": any(d["status"] == "drafting" for d in drafts),
+            "drafts": [{"id": d["id"], "status": d["status"], "request": first_line(d["request"])} for d in drafts],
+            "catalogue": catalogue, "jobs": jobs, "runs": runs}
+
+
+def change_text(c):
+    if c.get("kind") in ("instant", "refused"):
+        what = f"{c.get('action')} {' '.join(c.get('args') or [])}"
+    else:
+        what = f"{c.get('change', 'machine.conf')}: {c.get('summary') or c.get('result', '')}"
+    return what.strip()[:90]
+
+
+def overview_json():
+    """Everything the Overview page (pages.overview_page) shows, as data for GET /api/overview. Texts are the same
+    Dutch sentences the HTML page uses; times are ISO strings (UTC offset kept), not "vandaag 07:00"."""
+    h = health()
+    sentence, cls = status_sentence(h)
+    items, queued = live_items()
+    lanes, ticks = timeline()
+    u = usage()
+    now_dt = datetime.now(TZ)
+
+    def lane(l):
+        job = l["job"]
+        state = ("deleted" if not job else "error" if "error" in job else "paused" if job["paused"] else "active")
+        return {"name": l["name"], "state": state,
+                "model": job["model"] if state in ("active", "paused") else None,
+                "when": (job["when"] or job["schedule"]) if state in ("active", "paused") else None,
+                "marks": l["marks"]}
+    checks = {n: {"status": c.get("status", "?"), "text": c.get("text", ""), "since": c.get("since")}
+              for n, c in h["checks"].items()}
+    deploys = [{"name": d["name"], "ok": (d.get("last_deploy") or {}).get("ok") if d.get("last_deploy") else None,
+                "at": (d.get("last_deploy") or {}).get("at"), "sha": d.get("deployed_sha"),
+                "sync_error": d.get("sync_error")} for d in h["deploys"]]
+    b = h["backup"]
+    backup = ({"ok": bool(b.get("ok")), "at": b.get("at"), "free_bytes": b.get("free_bytes", 0),
+               "free_pct": b.get("free_pct")} if b else None)
+    return {
+        "status": {"sentence": sentence, "class": cls, "at": now_dt.isoformat(timespec="seconds"),
+                   "activity": activity_sentence(items, queued)},
+        "live": {"items": items, "queued": queued},
+        "timeline": {"lanes": [lane(l) for l in lanes], "ticks": ticks, "now_x": TL_NOW},
+        "changes": [{"ok": bool(c.get("ok")), "text": change_text(c), "at": c.get("at"), "user": c.get("user", ""),
+                     "reason": (c.get("reason") or "")[:80]} for c in h["changes"]],
+        "services": [{"name": s["name"], "address": s["address"], "note": s["note"]} for s in SERVICES],
+        "forge_link": next((s["address"] for s in SERVICES if s["name"] == "Forge"), ""),
+        "switches": {"discord": conversation.switch("discord"),
+                     "discord_approvals": conversation.switch("discord_approvals"),
+                     "discord_on": conversation.state()["discord"],
+                     "kitt": conversation.switch("kitt"),
+                     "kitt_may": sorted(conversation.clients().get("kitt", set()))},
+        "usage": {"days": [d.isoformat() for d in u["days"]], "llm": u["llm"], "claude_jobs": u["claude_jobs"],
+                  "inbox": u["inbox"], "cap": u["cap"], "saved_minutes": u["saved"]},
+        "health": {"checks": checks, "last": h["last"], "deploys": deploys, "backup": backup},
+    }
 
 
 def task_row_view(t):

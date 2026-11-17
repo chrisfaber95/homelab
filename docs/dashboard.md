@@ -70,6 +70,8 @@ In short, how the frontend fits into the inbox (details in the sections below):
 
 - `GET /api/session` returns the CSRF token; mutating `/api/*` requests send it as `X-CSRF-Token`; errors under `/api/*`
   are `{"error": "..."}`.
+- `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
+  (`overview.jobs_data`). The HTML page is unchanged until the page is ported; `/api/jobs` is kitt's door, hence the name.
 - `PORTED_PAGES` is empty by default and no page is ported yet, so the Python inbox still renders every page and the user
   sees no change. A path listed there gets `frontend/dist/index.html` instead.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as

@@ -178,12 +178,12 @@ class EmptyList(unittest.TestCase):
             s.server_close()
 
     def test_the_tests_forward_nothing_by_default(self):
-        self.assertEqual(facade.ROUTES, ())  # the tests set BACKEND_ROUTES="" (the shipped config lists the M1 routes)
+        self.assertEqual(facade.ROUTES, ())  # the tests set BACKEND_ROUTES="" (the shipped config lists the M1 and M2 routes)
         self.assertFalse(facade.matches("/api/backend/health"))
 
-    def test_the_shipped_config_forwards_exactly_the_m1_routes(self):
+    def test_the_shipped_config_forwards_exactly_the_moved_routes(self):
         conf = (ROOT / "config" / "inbox.conf").read_text()
-        self.assertIn('\nBACKEND_ROUTES="/api/overview,/api/live,/api/log"\n', conf)
+        self.assertIn('\nBACKEND_ROUTES="/api/overview,/api/live,/api/log,/api/skills,/api/memory"\n', conf)
 
     def test_nothing_is_forwarded_and_answers_are_the_python_ones(self):
         FakeBackend.calls = []

@@ -1,5 +1,5 @@
-"""H-024 M1: the Python inbox and the Java backend answer the moved read routes (`/api/overview`, `/api/live`,
-`/api/log/*`) the same, on the same state (tests/m1_fixture.py). Uses the parity harness of H-023 B7 and the contract
+"""H-024 M1 and M2: the Python inbox and the Java backend answer the moved read routes (`/api/overview`, `/api/live`,
+`/api/log/*`, `/api/skills`, `/api/memory`, `/api/memory/e/*`) the same, on the same state (tests/m1_fixture.py). Uses the parity harness of H-023 B7 and the contract
 tests of H-020 against the Java base URL. Skipped without a built jar: `cd backend && ./mvnw -DskipTests package`, or set
 BACKEND_JAR. Run: python3 -m unittest tests.test_inbox_m1_parity"""
 import importlib.util
@@ -27,8 +27,9 @@ SERVE_PYTHON = f"""
 import sys
 from http.server import ThreadingHTTPServer
 sys.path.insert(0, {str(ROOT / 'bin')!r})
-from homelab_inbox import jobs, server
+from homelab_inbox import jobs, memory, server
 jobs.load_jobs(fetch=False)  # the job files of the fixture, as the scheduler loads them on the box
+memory.load_memory(fetch=False)  # and the memory clone
 srv = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), server.Handler)
 srv.serve_forever()
 """
@@ -107,13 +108,32 @@ class M1Parity(unittest.TestCase):
                       "/api/log/r2", "/api/log/r2?from=500", "/api/log/r99", "/api/log/f1", "/api/log/f1?from=3",
                       "/api/log/t1?from=abc", "/api/log/t", "/api/log/x1", "/api/log/t1/extra"])
 
+    def test_skills_are_the_same(self):
+        self.compare(["/api/skills"])
+
+    def test_memory_list_is_the_same(self):
+        self.compare(["/api/memory", "/api/memory?q=", "/api/memory?q=taak", "/api/memory?q=TAAK%20merged",
+                      "/api/memory?q=%20%20", "/api/memory?q=nietsditbestaatniet", "/api/memory?q=%C3%A9",
+                      "/api/memory?q=" + "taak%20" * 60, "/api/memory?q=a&q=b", "/api/memory?x=1"])
+
+    def test_memory_entries_are_the_same(self):
+        ids = [e["id"] for sec in json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{self.python_port}/api/memory?q=%20").read())["sections"] for e in sec["entries"]]
+        self.assertGreater(len(ids), 40)  # every entry of the fixture, also the odd ones
+        self.compare([f"/api/memory/e/{i}" for i in ids]
+                     + ["/api/memory/e/", "/api/memory/e/nietbestaand", "/api/memory/e/voorkeuren/Bad/x",
+                        "/api/memory/e/voorkeuren/algemeen/klein?x=1", "/api/memory/e/geschiedenis/2026-1/kort",
+                        "/api/memory/e/voorkeuren/algemeen/klein/", "/api/memory/e/README", "/api/memory/e/%C3%A9",
+                        "/api/memory/", "/api/memory/other", "/api/skills/x"])
+
     def test_contract_tests_pass_against_java(self):
         env = {**os.environ, "INBOX_CONTRACT_BASE_URL": f"http://127.0.0.1:{self.java_port}",
                "INBOX_CONTRACT_FACADE_SECRET": SECRET}
-        done = subprocess.run([sys.executable, "-m", "unittest", "tests.test_inbox_contract.MovedReads", "-v"], env=env,
+        done = subprocess.run([sys.executable, "-m", "unittest", "tests.test_inbox_contract.MovedReads",
+                               "tests.test_inbox_contract.MovedMemoryAndSkills", "-v"], env=env,
                               cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("Ran 6 tests", done.stderr)
+        self.assertIn("Ran 12 tests", done.stderr)
 
 
 if __name__ == "__main__":

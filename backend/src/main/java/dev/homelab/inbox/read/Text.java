@@ -44,6 +44,24 @@ final class Text {
         }
     }
 
+    /** overview.local: {@code dd-mm hh:mm} in the box's time zone, "-" for nothing, a value that is no date as it is. */
+    static String local(String iso, ZoneId tz) {
+        if (iso == null || iso.isEmpty()) {
+            return "-";
+        }
+        Instant at;
+        try {
+            try {
+                at = ts(iso);
+            } catch (DateTimeParseException e) {
+                at = java.time.LocalDate.parse(iso.strip()).atStartOfDay().toInstant(ZoneOffset.UTC);
+            }
+        } catch (DateTimeParseException e) {
+            return iso;
+        }
+        return at.atZone(tz).format(DateTimeFormatter.ofPattern("dd-MM HH:mm"));
+    }
+
     /** {@code text[:n]} counted in code points, as Python counts. */
     static String cut(String text, int n) {
         return text.codePointCount(0, text.length()) <= n ? text : text.substring(0, text.offsetByCodePoints(0, n));

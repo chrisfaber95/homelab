@@ -29,7 +29,7 @@ public class Jobs {
 
     /** A job file: valid ({@code error == null}) or not. */
     public record Job(String name, String error, Cron cron, String when, String schedule, String kind, String model,
-                      boolean paused, Long minutes) {
+                      boolean paused, Long minutes, List<String> skills) {
 
         public boolean ok() {
             return error == null;
@@ -101,7 +101,7 @@ public class Jobs {
             try {
                 found.put(name, parse(name, text, repos, skills));
             } catch (IllegalArgumentException | IllegalStateException e) {
-                found.put(name, new Job(name, String.valueOf(e.getMessage()), null, null, null, null, null, false, null));
+                found.put(name, new Job(name, String.valueOf(e.getMessage()), null, null, null, null, null, false, null, List.of()));
             }
         }
         return found;
@@ -288,6 +288,6 @@ public class Jobs {
                 throw new IllegalArgumentException("minutes is een heel aantal minuten (0 of meer)");
             }
         }
-        return new Job(name, null, cron, when, schedule, k, (String) model, paused, mins);
+        return new Job(name, null, cron, when, schedule, k, (String) model, paused, mins, skillList);
     }
 }

@@ -1,4 +1,4 @@
-"""One inbox state for the M1 parity test (H-024): a RUNNER_HOME with an inbox.db, logs and job files, the monitor,
+"""One inbox state for the M1 and M2 parity tests (H-024): a RUNNER_HOME with an inbox.db, logs, job files, skills and a memory clone, the monitor,
 deploy and changes files of the overview, and a fake forge and LLM helper. The Python inbox and the Java backend are
 both pointed at it, so any difference in their answers is a difference in code, not in data. Times are relative to
 `build()`, so the state always has something running, queued, recent and planned."""
@@ -31,6 +31,15 @@ repo: homelab
 skills: [demo-skill]
 ---
 Ruim iets op.
+"""
+JOB_CHORE2 = """---
+schedule: "0 5 * * 1"
+kind: repo-chore
+model: claude
+repo: homelab
+skills: [andere, demo-skill]
+---
+Ruim nog iets op.
 """
 JOB_PAUSED = """---
 schedule: "0 12 * * 1-5"
@@ -66,6 +75,51 @@ Iets.
 """
 
 
+def memory_text(about, body, added="2026-11-01T10:00:00+00:00", changed=None, source="test", **extra):
+    """An entry as memory.entry_text writes it: a front matter of JSON-quoted values, then the body."""
+    head = {"over": about, "toegevoegd": added, "gewijzigd": changed or added, "bron": source}
+    head.update({k: v for k, v in extra.items() if v})
+    return "---\n" + "".join(f"{k}: {json.dumps(v, ensure_ascii=False)}\n" for k, v in head.items()) + f"---\n{body.strip()}\n"
+
+
+def write_memory(root: Path):
+    """The memory clone: preferences, facts and history as the inbox writes them, plus what a hand edit can leave."""
+    files = {
+        "voorkeuren/algemeen/klein": memory_text("algemeen", "Keep PRs small\nmore"),
+        "voorkeuren/algemeen/kaal": "Geen front matter, alleen tekst.\n",
+        "voorkeuren/homelab/engels": memory_text("homelab", "Schrijf in het Engels é", changed="2026-11-05T08:00:00+00:00"),
+        "voorkeuren/box/leeg": "---\nover: box\n---\n",
+        "feiten/box/deploy": memory_text("box", "Deploy runs at night", source="inbox 5", link="http://x/task/5"),
+        "feiten/box/deploy-x": memory_text("box", "# Kop\nTweede regel"),
+        "feiten/product/een": memory_text("product", "x" * 100),
+        "feiten/homelab/hand": "---\nover: homelab\ntoegevoegd: 2026-11-02\nbron: met de hand\n---\nPlain unquoted values.\n",
+        "feiten/homelab/zonder-over": "---\nbron: hand\n---\nOver ontbreekt.\n",
+        "feiten/homelab/kapot": "---\nover: [unclosed\n---\nKapotte YAML.\n",
+        "feiten/homelab/lijst": "---\n- een\n- twee\n---\nGeen mapping.\n",
+        "feiten/homelab/naive": memory_text("homelab", "Zonder tijdzone", added="2026-11-03T09:00:00"),
+        "feiten/homelab/rare-datum": memory_text("homelab", "Geen datum", added="gisteren"),
+        "feiten/homelab/zonder-datum": "---\nover: homelab\n---\nGeen datums.\n",
+        "feiten/homelab/pr": memory_text("homelab", "Met nummer", pr=12, status="open"),
+        "geschiedenis/2026-10/taak-1": memory_text("homelab", "# Oude taak\n\nGevraagd:\nx", added="2026-10-01T10:00:00+00:00",
+                                                    status="merged", link="http://x/task/1"),
+        "geschiedenis/2026-11/stuk": "---\nover: [kapot\n---\n# Kapotte geschiedenis\n",
+        "geschiedenis/2026-11/leeg": memory_text("product", "", added="2026-11-02T10:00:00+00:00"),
+    }
+    for n in range(2, 38):  # more than the 30 the page shows; several share a timestamp (a stable sort keeps their order)
+        files[f"geschiedenis/2026-11/taak-{n}"] = memory_text(
+            "homelab" if n % 3 else "product", f"# Taak {n} é\n\nResultaat {n}", added=f"2026-11-{n % 14 + 1:02d}T10:00:00+00:00",
+            status="merged" if n % 2 else "failed", link=f"http://x/task/{n}")
+    for mid, text in files.items():
+        f = root / f"{mid}.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+    for ignored in ("README.md", "voorkeuren/Bad/x.md", "voorkeuren/algemeen/Hoofd.md", "voorkeuren/algemeen/notitie.txt",
+                    "geschiedenis/2026-1/kort.md", "overig/algemeen/x.md"):
+        f = root / ignored
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("niet een entry\n")
+
+
 def build(root: Path, forge_url: str, llm_url: str) -> dict:
     """Write the state under `root`; returns the environment variables that point an inbox at it."""
     now = datetime.now(timezone.utc)
@@ -73,8 +127,16 @@ def build(root: Path, forge_url: str, llm_url: str) -> dict:
     for d in (home / "logs", home / "jobs-repo" / "jobs", home / "repos" / "homelab" / "skills" / "demo-skill",
               monitor, state):
         d.mkdir(parents=True, exist_ok=True)
-    (home / "repos" / "homelab" / "skills" / "demo-skill" / "SKILL.md").write_text("---\ndescription: demo\n---\n")
-    for name, text in {"nachtrapport": JOB_BOX, "klus": JOB_CHORE, "wacht": JOB_PAUSED, "stuk": JOB_BROKEN,
+    skills = home / "repos" / "homelab" / "skills"
+    for name, text in {"demo-skill": "---\ndescription: demo\n---\n",
+                       "andere": '---\nname: andere\ndescription: "Een \\"aangehaalde\\" beschrijving é"\n---\n\nBody\n',
+                       "zonder": "---\nname: zonder\n---\n\nGeen beschrijving.\n",
+                       "a": "---\ndescription: eerst\n---\n", "a-b": "---\ndescription:   met spaties  \n---\n",
+                       "leeg-regel": "---\ndescription:\n  op de volgende regel\n---\n"}.items():
+        (skills / name).mkdir(parents=True, exist_ok=True)
+        (skills / name / "SKILL.md").write_text(text)
+    (skills / "geen-bestand").mkdir()  # a directory without SKILL.md is not a skill
+    for name, text in {"nachtrapport": JOB_BOX, "klus": JOB_CHORE, "klus-2": JOB_CHORE2, "wacht": JOB_PAUSED, "stuk": JOB_BROKEN,
                        "slechtschema": JOB_BADCRON, "onbekende-skill": JOB_UNKNOWN_SKILL}.items():
         (home / "jobs-repo" / "jobs" / f"{name}.md").write_text(text)
 
@@ -87,6 +149,8 @@ def build(root: Path, forge_url: str, llm_url: str) -> dict:
         CREATE TABLE job_runs (id INTEGER PRIMARY KEY, job TEXT NOT NULL, kind TEXT, model TEXT, due TEXT,
             created TEXT NOT NULL, started TEXT, ended TEXT, dispatched TEXT, status TEXT NOT NULL, summary TEXT,
             note TEXT, task_id INTEGER, manual INTEGER DEFAULT 0, minutes INTEGER);
+        CREATE TABLE skill_prs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, task_id INTEGER, pr_url TEXT,
+            created TEXT NOT NULL);
         CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE conversation (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, author TEXT NOT NULL,
             client TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, link TEXT, ref TEXT);
@@ -115,6 +179,10 @@ def build(root: Path, forge_url: str, llm_url: str) -> dict:
             (6, "klus", "repo-chore", "claude", t(hours=1), t(hours=1), None, None, t(hours=1), "queued", None, None, 7, 0, 12),
             (7, "nachtrapport", "box-report", "local", t(days=9), t(days=9), t(days=9), t(days=9), None, "ok", "oud", None, None, 0, 5),
         ])
+    db.executemany("INSERT INTO skill_prs (name, task_id, pr_url, created) VALUES (?,?,?,?)",
+                   [(f"voorstel-{n}", n if n % 4 else None, f"https://example.test/pr/{n}",
+                     f"2026-11-{n % 28 + 1:02d}T{n % 24:02d}:30:00+00:00") for n in range(1, 23)]
+                   + [("rare-datum", 3, "https://example.test/pr/99", "gisteren")])
     db.execute("INSERT INTO kv VALUES ('switch:kitt', 'off')")
     db.commit()
     db.close()
@@ -125,6 +193,8 @@ def build(root: Path, forge_url: str, llm_url: str) -> dict:
     (home / "logs" / "r1.log").write_text(json.dumps({"at": t(minutes=1), "kind": "info", "text": "bezig"}) + "\n")
     (home / "logs" / "r2.log").write_text("".join(json.dumps({"at": t(days=1), "kind": "info", "text": f"r{i}"}) + "\n"
                                                   for i in range(600)))
+
+    write_memory(home / "memory-repo")
 
     (monitor / "checks.json").write_text(json.dumps({
         "disk": {"status": "OK", "text": "50% vrij"}, "gpu": {"status": "WARN", "text": "heet", "since": t(hours=1)},

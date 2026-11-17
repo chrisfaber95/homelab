@@ -106,6 +106,19 @@ public class Settings {
         return runnerHome().resolve("jobs-repo").resolve("jobs");
     }
 
+    /** The clone of the {@code memory} branch of DATA_REPO (entries {@code voorkeuren/}, {@code feiten/}, {@code geschiedenis/}). */
+    public Path memoryDir() {
+        return runnerHome().resolve("memory-repo");
+    }
+
+    public String memoryBranch() {
+        return conf("MEMORY_BRANCH", "memory");
+    }
+
+    public String dataRepo() {
+        return conf("DATA_REPO", "");
+    }
+
     public Path skillsDir() {
         return runnerHome().resolve("repos").resolve("homelab").resolve("skills");
     }

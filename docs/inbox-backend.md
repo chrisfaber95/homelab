@@ -25,6 +25,31 @@ Installer: `scripts/27-backend.sh` (root, idempotent,
 | Heap | `-Xms64m -Xmx256m`, `-XX:MaxMetaspaceSize=128m`, `-XX:MaxDirectMemorySize=64m`, serial GC (one small service, few threads), `-XX:+ExitOnOutOfMemoryError`; the unit has `MemoryMax=640M` as a ceiling for everything else (metaspace, code cache, thread stacks, junixsocket's native library) |
 | Hardening | `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernel*`, `ProtectControlGroups`, `ProtectClock`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, empty capability set. No `MemoryDenyWriteExecute`: the JVM's JIT needs it |
 
+## The facade: forwarding from the Python server (B6)
+
+The old Python inbox stays in front (Q6). Routes listed in `BACKEND_ROUTES` are forwarded to the backend; everything
+else is handled as before. **With `BACKEND_ROUTES` empty (the default) nothing is forwarded** and the server behaves
+exactly as before; rollback of a moved route is removing its prefix.
+
+| Setting | Where | Meaning |
+| --- | --- | --- |
+| `BACKEND_ROUTES` | env, or `config/inbox.conf` (empty by default) | Comma-separated path prefixes, each under `/api/` (`/api/backend` matches `/api/backend` and `/api/backend/...`, not `/api/backendx`). Others are ignored: pages and `/internal/...` are never forwarded. Set it in the inbox unit (`Environment=BACKEND_ROUTES=/api/backend`) or in `config/inbox.conf`, then run `scripts/21-inbox.sh` |
+| `BACKEND_URL` | env | Default `http://127.0.0.1:<BACKEND_PORT>`. Must be `http` on loopback; anything else makes every forward fail with 502 |
+| `BACKEND_SECRET_FILE` | env, both processes | File with the shared secret. Default for the inbox: `$RUNNER_HOME/backend-secret` (`/var/lib/homelab-inbox/backend-secret`); the backend unit sets the same path. Made by `scripts/27-backend.sh` (random, 0600, `inbox-runner`), never in the repo |
+| `BACKEND_SECRET` | env, both processes | The secret itself instead of the file (it wins over the file). For tests and one-off use; keep it out of the repo |
+
+Order of a forwarded request: Tailscale owner check (`guard`), then, for POST/PUT/PATCH/DELETE, the same Origin and
+`X-CSRF-Token` check as every `/api/*` request, then the forward. The facade sends method, path with query and body
+(`Content-Length` required, at most 8 MiB) and the headers `Content-Type`, `Accept`, `Accept-Language`, `If-None-Match`,
+`If-Modified-Since`, plus `X-Inbox-Facade: <secret>` and `X-Inbox-Who: <device>`; cookies and anything the client put in
+those two headers are dropped. Status, headers (not hop-by-hop ones) and body come back unchanged. Paths with `..`,
+backslashes, `//` or `%2f` are refused (400). If the backend cannot be reached, times out (30 s) or no secret is
+configured, the answer is 502 `{"error": ...}`; there is no fallback to a Python handler.
+
+The backend (`FacadeSecretFilter`) answers 403 to every request without the right `X-Inbox-Facade` (constant-time
+compare), except `GET /api/backend/health`. Without a configured secret it refuses everything but health.
+Doors with their own token (chat, kitt) do not pass the owner check, so they cannot be forwarded.
+
 ## Checks (the script fails loudly when one fails)
 
 1. B2 is in place: account `inbox-runner`, PostgreSQL running, database `inbox` exists.
@@ -33,6 +58,7 @@ Installer: `scripts/27-backend.sh` (root, idempotent,
 4. The main process runs as `inbox-runner`; every TCP listener of that process is on loopback, and `127.0.0.1:8130`
    is one of them.
 5. PostgreSQL still has an empty `listen_addresses`.
+6. The facade secret file exists (0600, `inbox-runner`); a request without it gets 403, with it not 403.
 
 `bin/homelab-exposure` checks the same from the repo side (the unit sets `BACKEND_HOST=127.0.0.1`, the port agrees with
 `config/inbox.conf`, `IPAddressDeny=any`, `server.address` defaults to loopback, the script touches no ufw) and, on the

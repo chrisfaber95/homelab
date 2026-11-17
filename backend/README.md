@@ -87,6 +87,13 @@ address.
 `127.0.0.1:8130`; see `docs/inbox-backend.md` (install, hardening, how to measure the heap). The unit passes the
 PostgreSQL socket URL (junixsocket, `junixsocket.version` in `pom.xml`).
 
+## Facade secret
+
+Every route but `GET /api/backend/health` needs the header `X-Inbox-Facade` with the shared secret, which the Python
+server adds when it forwards (`BACKEND_ROUTES`, see `docs/inbox-backend.md`). The backend reads it from `BACKEND_SECRET`
+or the file `BACKEND_SECRET_FILE`; with neither, it refuses everything but health. For a local run:
+`BACKEND_SECRET=dev ./mvnw spring-boot:run` and `curl -H 'X-Inbox-Facade: dev' ...`.
+
 ## Changing versions
 
 Raise the parent version in `pom.xml`, or the Maven version and its `distributionSha256Sum` in the wrapper properties,

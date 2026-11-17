@@ -71,12 +71,6 @@ class TasksApi(unittest.TestCase):
         self.assertTrue(body["refresh"])
         self.assertEqual([r["id"] for r in body["history"]], sorted(hist, reverse=True))  # newest first
 
-    def test_list_matches_the_html_page_ids(self):
-        self.task("failed")
-        page = self.get("/taken")[2]
-        for r in self.ok("/api/tasks")["queue"] + self.ok("/api/tasks")["history"]:
-            self.assertIn(f'href="/task/{r["id"]}"', page)
-
     def test_task_detail_carries_what_the_page_shows(self):
         tid = self.task("waiting", question="Welke kant op?", turns=3, rounds=1)
         d = self.ok(f"/api/tasks/{tid}")
@@ -87,9 +81,8 @@ class TasksApi(unittest.TestCase):
         self.assertEqual(d["actions"], {"answer": True, "cancel": True, "retry": False, "accept": False, "attended": False})
         self.assertEqual(d["criteria"], [])
         self.assertFalse(d["refresh"])
-        page = self.get(f"/task/{tid}")[2]
-        self.assertIn("Welke kant op?", page)
-        self.assertIn(f'action="/task/{tid}/answer"', page)
+        self.assertTrue(d["timezone"])
+        self.assertEqual(self.ok("/api/tasks")["timezone"], d["timezone"])
 
     def test_actions_follow_the_status(self):
         failed = self.ok(f"/api/tasks/{self.task('failed')}")

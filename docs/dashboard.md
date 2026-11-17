@@ -76,18 +76,22 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
   same HTML forms as before (hidden `csrf` field, same actions).
-- `PORTED_PAGES` defaults to `/,/jobs,/ssh` (Overview, Jobs and SSH; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed
-  there gets `frontend/dist/index.html`. Without a build, `/`, `/jobs` and `/ssh` answer 503 ("The frontend build is missing"), because
-  their Python pages are gone; other listed paths fall back to their Python page.
+- `PORTED_PAGES` defaults to `/,/jobs,/ssh,/taken,/task` (Overview, Jobs, SSH and the Tasks pages; `/task` stands for every `/task/<id>`; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
+  build, these pages answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
+  paths fall back to their Python page.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
 
-## JSON for the Tasks pages (H-022 F10)
+## Tasks pages (H-022 F10)
+
+`/taken` and `/task/<id>` are TypeScript (`frontend/src/pages/tasks.ts`, `task.ts`; the live log is `log.ts`). Forms are
+plain HTML forms (hidden `csrf` field, POST, 303 redirect) as before. The page reloads itself every 20 s while tasks
+are queued (`refresh`), and the log polls every 2 s. An unknown task id or a query string on `/task/<id>` is still a 404.
 
 `GET /api/tasks` returns what `/taken` renders (repos for the form, `queue`, `history`) and `GET /api/tasks/<id>` what
 `/task/<id>` renders: the task, its derived facts, `actions` (which forms apply) and `log` (the lines so far, `next`,
 `done`). The live log keeps polling `GET /api/log/t<id>?from=<next>`; there are no server-sent events. The builders are
-`tasks_view` and `task_view` in `overview.py`; the HTML pages are unchanged. Contract: `backend/openapi.yaml`; tests:
+`tasks_view` and `task_view` in `overview.py`; both carry the `timezone` the times are shown in. Contract: `backend/openapi.yaml`; tests:
 `tests/test_inbox_tasks_api.py`.
 
 ## JSON API: CSRF token and errors (H-021)
@@ -111,16 +115,16 @@ Tests: `tests/test_inbox_session.py`. Pages that are not under `/api/` still ans
 Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`, `bin/homelab_inbox/`, `web/` of de config:
 `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`. Logs van taken en runs staan in
 `/var/lib/homelab-inbox/logs/` (één bestand per taak of run). Testen zonder root: zie de docstring van
-`bin/homelab-inbox` (de HTML staat in `bin/homelab_inbox/pages.py`, de gegevens in `overview.py`, de HTTP-handler in `server.py`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
+`bin/homelab-inbox` (de HTML van de nog niet geporte pagina's staat in `bin/homelab_inbox/pages.py`, de gegevens in `overview.py`, de HTTP-handler in `server.py`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; `/,/jobs,/ssh` by default)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/ssh,/taken,/task`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
 listed path has no `frontend/dist/index.html`, a warning goes to the journal and the Python page is served; for a page
-whose Python code is deleted (`/`, `/jobs`, `/ssh`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
+whose Python code is deleted (`/`, `/jobs`, `/ssh`, `/taken`, `/task/<id>`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
 Tests: `tests/test_inbox_ported_pages.py`.
 
 Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs

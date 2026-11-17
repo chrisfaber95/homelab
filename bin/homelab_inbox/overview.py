@@ -352,7 +352,8 @@ def tasks_view():
     all_tasks = tasks()
     queue = [t for t in all_tasks if t["status"] in ACTIVE + ("waiting",)][::-1]
     return {"repos": sorted(repo_list()), "auto": AUTO, "queue": [task_row_view(t) for t in queue],
-            "history": [task_row_view(t) for t in all_tasks if t not in queue], "refresh": bool(queue)}
+            "history": [task_row_view(t) for t in all_tasks if t not in queue], "refresh": bool(queue),
+            "timezone": str(TZ)}
 
 
 def task_view(t):
@@ -385,7 +386,7 @@ def task_view(t):
         "retry_hint": "Why it is fine to do after all, or what to do differently (optional)" if t["status"] == "refused"
         else "Note for Claude (optional)",
         "accept_pr_unmerged": bool(t["pr_number"]) and actions["accept"], "actions": actions,
-        "refresh": t["status"] == "queued", "log": {"lines": lines, "next": nxt, "done": t["status"] not in ACTIVE and not more},
+        "refresh": t["status"] == "queued", "timezone": str(TZ), "log": {"lines": lines, "next": nxt, "done": t["status"] not in ACTIVE and not more},
     }
 
 

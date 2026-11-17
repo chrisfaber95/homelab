@@ -628,7 +628,8 @@ paths:
       tags: [page]
       summary: Tasks list and the new-task form
       x-access: page
-      description: Matched on `url.path`.
+      description: |
+        Matched on `url.path`. Served from `frontend/dist` (TypeScript, data from `GET /api/tasks`); without a build 503.
       responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
   /search:
     x-code: ["/search"]
@@ -711,7 +712,7 @@ paths:
     x-code: ["/task/(\\d+)"]
     get:
       tags: [page]
-      summary: Task page
+      summary: Task page (TypeScript, data from `GET /api/tasks/{id}`; 503 without a build)
       x-access: page
       description: "Matched on `self.path` (no query string). Unknown id: 404 page."
       parameters: [{$ref: "#/components/parameters/NumericId"}]
@@ -2015,8 +2016,9 @@ components:
         pr_number: {type: integer, nullable: true}
     TaskList:
       type: object
-      required: [repos, auto, queue, history, refresh]
+      required: [repos, auto, queue, history, refresh, timezone]
       properties:
+        timezone: {type: string, description: "IANA zone (JOB_TIMEZONE) the page shows times in"}
         repos: {type: array, items: {type: string}, description: "sorted"}
         auto: {type: string, description: "the repo value that lets homelab decide"}
         queue: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
@@ -2030,8 +2032,9 @@ components:
           required: [text, question, answer, parent, reason, after_task, brief, handoff, criteria, review, reviews,
                      unattended, without_me, is_build, build_left_nothing, children, summary, summary_title, note,
                      turns, rounds, model, max_turns, max_minutes, accepted, blocked_by, retry_label, retry_hint,
-                     accept_pr_unmerged, actions, refresh, log]
+                     accept_pr_unmerged, actions, refresh, timezone, log]
           properties:
+            timezone: {type: string, description: "IANA zone (JOB_TIMEZONE) the page shows times in"}
             text: {type: string}
             question: {type: string, nullable: true}
             answer: {type: string, nullable: true}

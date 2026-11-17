@@ -155,7 +155,7 @@ class Session(unittest.TestCase):
         self.assertEqual((code, "text/html" in ctype, "Verlopen formulier" in raw), (403, True, True))
 
     def test_pages_stay_html(self):
-        for path in ("/taken", "/search"):
+        for path in ("/briefs", "/search"):
             code, ctype, raw = self.call("GET", path)
             self.assertEqual((code, ctype), (200, "text/html; charset=utf-8"), path)
         code, ctype, _ = self.call("GET", "/nope")

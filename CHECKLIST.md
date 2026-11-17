@@ -409,3 +409,9 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       **Make this a task** button; `!status` works; a message from another account or a server channel does nothing (see the
       journal); `!drafts` buttons ask for a Confirm; with approvals off on the homelab page they say so.
       `bin/homelab-exposure` still passes and nothing new listens.
+
+## H-023: inbox database (B2)
+
+- [ ] After the merge `homelab-admin` runs `28-inbox-db.sh` (or: `sudo bash /var/lib/homelab/repo/scripts/28-inbox-db.sh`). It ends with
+      "inbox database ready" (round trip as `inbox-runner` → `inbox_app` over the socket). `ss -ltnp | grep -i postgres` prints nothing;
+      `sudo -u postgres psql -c 'show listen_addresses'` is empty; forge and ashfall still work. Docs: `docs/inbox-db.md`.

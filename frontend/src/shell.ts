@@ -1,24 +1,22 @@
-import { esc } from "./html";
+import { el } from "./dom";
 
-/** The tabs of the homelab page, same order and labels as TABS in pages.py. */
-export const TABS: ReadonlyArray<readonly [string, string, string]> = [
-  ["overzicht", "/", "Overzicht"],
-  ["taken", "/taken", "Taken"],
-  ["briefs", "/briefs", "Briefs"],
-  ["jobs", "/jobs", "Jobs"],
-  ["search", "/search", "Search"],
-  ["geheugen", "/memory", "Geheugen"],
-  ["skills", "/skills", "Skills"],
-  ["ssh", "/ssh", "SSH"],
-];
+// Same tabs as TABS in pages.py: [key, href, name].
+const TABS = [
+  ["overzicht", "/", "Overzicht"], ["taken", "/taken", "Taken"], ["briefs", "/briefs", "Briefs"],
+  ["jobs", "/jobs", "Jobs"], ["search", "/search", "Search"], ["geheugen", "/memory", "Geheugen"],
+  ["skills", "/skills", "Skills"], ["ssh", "/ssh", "SSH"],
+] as const;
 
-/** The header with the tabs and the main element around a page body, as the Python `page()` rendered it. */
-export function shellHtml(current: string, body: string): string {
-  const tabs = TABS.map(
-    ([key, href, name]) => `<a href="${href}"${key === current ? " aria-current=page" : ""}>${esc(name)}</a>`,
-  ).join("");
-  return (
-    `<header class="top"><a class="mark" href="/">homelab</a><nav class="tabs" aria-label="Onderdelen">${tabs}</nav>` +
-    `</header><main class="narrow">${body}</main>`
-  );
+/** The header with the tabs and the empty `<main>` of a page; returns the main element to fill. */
+export function renderShell(app: HTMLElement, current: string, title: string): HTMLElement {
+  document.title = title;
+  const tabs = el("nav", { class: "tabs", "aria-label": "Onderdelen" },
+    ...TABS.map(([key, href, name]) => {
+      const a = el("a", { href, text: name });
+      if (key === current) a.setAttribute("aria-current", "page");
+      return a;
+    }));
+  const main = el("main", { class: "narrow" });
+  app.replaceChildren(el("header", { class: "top" }, el("a", { class: "mark", href: "/", text: "homelab" }), tabs), main);
+  return main;
 }

@@ -86,10 +86,8 @@ class ForgeProxy(unittest.TestCase):
         self.assertIn("not reachable", d["error"]["message"])
 
     def test_page_has_controls_and_link(self):
-        html = pages.overview_page()
-        self.assertIn('data-forge="start"', html)
-        self.assertIn('data-forge="stop"', html)
-        self.assertIn('href="http://homelab:8120"', html)
+        # The buttons are drawn by frontend/src/pages/overview.ts; the server supplies the link to forge's page.
+        self.assertEqual(overview.overview_json()["forge_link"], "http://homelab:8120")
 
 
 class ForgeInLiveList(ForgeProxy):
@@ -120,11 +118,9 @@ class ForgeInLiveList(ForgeProxy):
     def test_the_hero_is_busy_and_shows_the_row(self):
         FakeForge.running = True
         forge.forget()
-        html = pages.overview_page()
-        self.assertIn("hero", html)
-        self.assertIn("busy", html)
-        self.assertIn(f'data-ssr="{forge.LIVE_KEY}"', html)
-        self.assertIn("Forge", html)
+        live = overview.overview_json()["live"]
+        self.assertEqual([i["key"] for i in live["items"]], [forge.LIVE_KEY])  # a non-empty list makes the hero busy
+        self.assertEqual(live["items"][0]["title"], "Forge")
 
     def test_without_a_start_time_the_row_still_has_one(self):
         FakeForge.running = True
@@ -153,7 +149,7 @@ class ForgeInLiveList(ForgeProxy):
         forge.forget()
         self.assertIsNone(forge.live_item())
         self.assertEqual(forge.log(0)[0], 502)
-        self.assertIn("Niets bezig", pages.overview_page())
+        self.assertIn("Niets bezig", overview.overview_json()["status"]["activity"])
 
     def test_forge_is_not_asked_again_for_every_poll(self):
         FakeForge.running = True

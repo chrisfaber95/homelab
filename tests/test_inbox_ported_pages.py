@@ -47,26 +47,30 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_is_only_the_pages_without_a_python_page(self):
-        self.assertEqual(config.PORTED_PAGES, config.FRONTEND_ONLY)
-        self.assertEqual(config.FRONTEND_ONLY, frozenset({"/jobs"}))
+    def test_default_ports_the_overview_and_jobs(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/taken")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
+        status, body, _ = self.get("/")  # the Overview is the TypeScript page
+        self.assertEqual((status, body), (200, INDEX))
         self.assertEqual(self.get("/jobs")[1], INDEX)
 
-    def test_jobs_without_a_build_is_503_not_a_python_page(self):
+    def test_overview_without_a_build_says_so_instead_of_a_python_page(self):
         server.PORTED_PAGES = config.PORTED_PAGES
         (self.dist / "index.html").unlink()
         with contextlib.redirect_stdout(io.StringIO()):
+            status, body, _ = self.get("/")
             self.assertEqual(self.get("/jobs")[0], 503)
+        self.assertEqual(status, 503)
+        self.assertIn(b"frontend", body)
 
     def test_setting_is_parsed_from_the_environment(self):
         import importlib
         os.environ["PORTED_PAGES"] = " /taken, /jobs ,,nonsense"
         try:
-            self.assertEqual(importlib.reload(config).PORTED_PAGES, frozenset({"/taken", "/jobs"}))  # /jobs is always on
+            self.assertEqual(importlib.reload(config).PORTED_PAGES, frozenset({"/taken", "/jobs"}))
         finally:
             del os.environ["PORTED_PAGES"]
             importlib.reload(config)

@@ -23,7 +23,7 @@ CLIENTS = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer", "approve"]},
     "jarvis": {"permissions": ["read"]}}})
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import conversation, helpers, pages, queue, server, storage  # noqa: E402
+from homelab_inbox import conversation, helpers, overview, pages, queue, server, storage  # noqa: E402
 
 LONG = "A long result sentence. " * 400  # about 9000 characters: far beyond ntfy's 300 and one Discord message
 
@@ -127,11 +127,11 @@ class Switches(unittest.TestCase):
 
     def test_page_shows_both_switches_in_their_state(self):
         conversation.set_switch("discord_approvals", False)
-        html = pages.discord_html()
-        self.assertIn('action="/discord/discord/off"', html)
-        self.assertIn('action="/discord/discord_approvals/on"', html)
+        sw = overview.overview_json()["switches"]
+        self.assertEqual((sw["discord"], sw["discord_approvals"], sw["discord_on"]), (True, False, True))
         conversation.set_switch("discord", False)
-        self.assertIn("arrives when it is switched on", pages.discord_html())
+        sw = overview.overview_json()["switches"]
+        self.assertEqual((sw["discord"], sw["discord_on"]), (False, False))  # the page then shows "Discord is off"
 
 
 class Door(unittest.TestCase):

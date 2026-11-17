@@ -69,6 +69,7 @@ part load automatically from `.claude/rules/` when you work on that part.
 | H-016 conversation (store, client permissions, loopback door) | `bin/homelab_inbox/conversation.py` | `config/clients.json` | `docs/conversation.md` |
 | H-018 kitt (cockpit app: unit, gate on the tailnet, door for its adapter) | `deploy/kitt.service`, `bin/homelab_inbox/{gate,kitt}.py` | `config/clients.json` (client `kitt`), `config/inbox.conf` (`KITT_*`) | `docs/kitt.md` |
 | H-016 Discord bot (separate service, own account and venv, outward only) | `discord-bot/` (`bot_core.py` behaviour, `bot_run.py` discord.py glue, `requirements.txt` with hashes), `scripts/26-discord-bot.sh`, `systemd/homelab-discord-bot.service` | `/etc/homelab/discord-bot.env` (not in the repo) | `docs/discord.md` |
+| H-023 inbox database (PostgreSQL `inbox`, socket only, beside the old inbox) | `scripts/28-inbox-db.sh` | | `docs/inbox-db.md` |
 | F-022 jobs and skills, H-017 catalogue (`agents/`) | `bin/homelab_inbox/jobs.py`, `agents/` | `config/inbox.conf` | `docs/jobs.md` |
 | F-023 memory | `bin/homelab_inbox/memory.py` | `config/inbox.conf` | `docs/memory.md` |
 | H-012 search (index, query and answer, MCP tool, Search tab) | `search/`, `bin/homelab-search`, `bin/homelab-search-mcp`, `scripts/24-search.sh`, `systemd/homelab-search-*`, `bin/homelab_inbox/search.py` (tab proxy) | `config/search.json` | `docs/search.md` |

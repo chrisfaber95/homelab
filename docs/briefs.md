@@ -64,8 +64,8 @@ failed, refused, stopped at the limit or had its PR closed - the brief gets its 
 and the build's own page links to the brief. Setup PRs that the cancelled build already merged stay merged: the build
 kit is in the repo and a new build doesn't add it twice.
 
-- The **planner** is Claude without tools, on `PLAN_MODEL` (Claude Fable 5.2, with `FALLBACK_MODEL` Claude Opus 5.5
-  when Fable is overloaded or unavailable; `config/inbox.conf`). It gets the brief and the
+- The **planner** is Claude without tools, on `PLAN_MODEL` (Claude Opus 5.5; `FALLBACK_MODEL` in
+  `config/inbox.conf` is empty). It gets the brief and the
   profiles of the brief's `repos` (only those in `config/repos.conf` plus `homelab`) and returns up to
   `PLAN_MAX_TASKS` tasks, each with its own acceptance criteria and optionally `after`. A brief that needs more
   sets `max_tasks: N` in its frontmatter (`max_tasks: 0`: no limit), as the inbox migration briefs do. Criteria only you can check
@@ -83,8 +83,8 @@ kit is in the repo and a new build doesn't add it twice.
 
 ## 3. Review
 
-After every push of a brief task, the **brief reviewer** (Claude without tools, on `REVIEW_MODEL`: Fable 5.2 with Opus
-5.5 as fallback, like the planner) reads the task's criteria and the PR's
+After every push of a brief task, the **brief reviewer** (Claude without tools, on `REVIEW_MODEL`: Opus 5.5, like the
+planner) reads the task's criteria and the PR's
 diff (up to `REVIEW_MAX_DIFF` characters) and comments on the PR with ✅/❌/❔ per criterion. The diff leaves out
 lockfiles, generated files and fixture data (it lists their names), and puts code, tests and config before docs, so a
 large scaffold PR is still reviewed on its code.

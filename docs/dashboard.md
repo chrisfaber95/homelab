@@ -74,8 +74,9 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/session` returns the CSRF token; mutating `/api/*` requests send it as `X-CSRF-Token`; errors under `/api/*`
   are `{"error": "..."}`.
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
-  (`overview.jobs_data`). The HTML page is unchanged until the page is ported; `/api/jobs` is kitt's door, hence the name.
-- `PORTED_PAGES` defaults to `/,/taken,/task` (the Overview and the Tasks pages; `/task` stands for every `/task/<id>`);
+  (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
+  same HTML forms as before (hidden `csrf` field, same actions).
+- `PORTED_PAGES` defaults to `/,/jobs,/taken,/task` (Overview, Jobs and the Tasks pages; `/task` stands for every `/task/<id>`);
   every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
   build, these pages answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
   paths fall back to their Python page.
@@ -119,7 +120,7 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/jobs`; default `/,/taken,/task`)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/ssh`; default `/,/jobs,/taken,/task`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a

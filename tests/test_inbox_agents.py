@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.update(INBOX_RUNNER_HOME=tempfile.mkdtemp(), NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import jobs, pages  # noqa: E402
+from homelab_inbox import jobs, overview  # noqa: E402
 from homelab_inbox.config import JOBS  # noqa: E402
 
 GOOD = '---\nwhen: daily\nschedule: "0 7 * * *"\nkind: box-report\nmodel: local\n---\nReport what failed.\n'
@@ -40,15 +40,17 @@ class Catalogue(unittest.TestCase):
         self.assertIn("job", by["good"])
         self.assertIn("kop", by["bad"]["error"])
         self.assertIn("model", by["worse"]["error"])
-        html = pages.catalogue_html()
-        self.assertIn("fout in het bestand", html)
-        self.assertIn("Aanzetten", html)
+        cat = {a["name"]: a for a in overview.jobs_data()["catalogue"]}
+        self.assertIn("kop", cat["bad"]["error"])
+        self.assertIn("model", cat["worse"]["error"])
+        self.assertIsNone(cat["good"]["error"])
+        self.assertFalse(cat["good"]["on"])
 
     def test_catalogue_entry_shows_what_schedule_model_delivery(self):
         (self.dir / "good.md").write_text(GOOD)
-        html = pages.catalogue_html()
-        for s in ("Report what failed.", "daily", "lokaal", "bezorgt: page"):
-            self.assertIn(s, html)
+        a = {a["name"]: a for a in overview.jobs_data()["catalogue"]}["good"]
+        self.assertIn("Report what failed.", a["what"])
+        self.assertEqual((a["when"], a["model"], a["deliver"]), ("daily", "lokaal", "page"))
 
     def test_switch_on_makes_only_a_draft(self):
         (self.dir / "good.md").write_text(GOOD)
@@ -69,9 +71,8 @@ class Catalogue(unittest.TestCase):
 
     def test_on_once_a_job_exists(self):
         (self.dir / "good.md").write_text(GOOD)
-        JOBS["good"] = {"name": "good"}
-        self.assertIn("staat aan", pages.catalogue_html())
-        self.assertNotIn("/agents/good/on", pages.catalogue_html())
+        JOBS["good"] = jobs.parse_job("good", GOOD, {}, {})
+        self.assertTrue({a["name"]: a for a in overview.jobs_data()["catalogue"]}["good"]["on"])
 
 
 class FirstAgents(unittest.TestCase):
@@ -95,7 +96,7 @@ class FirstAgents(unittest.TestCase):
         with mock.patch.object(jobs, "AGENTS_DIR", ROOT / "agents"):
             did = jobs.switch_on_agent("morning-digest")
             self.assertIsNotNone(did)
-            self.assertIn("in te vullen", pages.catalogue_html())
+            self.assertIn("sources", {a["name"]: a for a in overview.jobs_data()["catalogue"]}["morning-digest"]["fill"])
         text = jobs.get_draft(did)["text"]
         with self.assertRaises(jobs.NeedsInput):  # cannot be confirmed until Chris fills them in
             jobs.parse_job("morning-digest", text, {}, {})

@@ -1,20 +1,22 @@
+import { renderJobs } from "./pages/jobs";
 import { renderOverview } from "./pages/overview";
 import { renderTask } from "./pages/task";
 import { renderTasks } from "./pages/tasks";
 import { renderShell } from "./shell";
 
 const app = document.getElementById("app");
-const path = location.pathname;
-const taskId = /^\/task\/(\d+)$/.exec(path)?.[1];
+const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLElement) => Promise<void> }> = {
+  "/": { tab: "overzicht", title: "homelab", render: renderOverview },
+  "/jobs": { tab: "jobs", title: "jobs", render: renderJobs },
+  "/taken": { tab: "taken", title: "taken", render: renderTasks },
+};
+const taskId = /^\/task\/(\d+)$/.exec(location.pathname)?.[1];
+const page = PAGES[location.pathname] ?? (taskId ? {
+  tab: "taken", title: `inbox #${taskId}`, render: async (main: HTMLElement) => { await renderTask(main, taskId); },
+} : undefined);
 
-function failed(e: unknown): void {
-  app?.append(`Could not load the page: ${e instanceof Error ? e.message : String(e)}`);
-}
-
-if (app && path === "/") {
-  renderOverview(renderShell(app, "overzicht", "homelab")).catch(failed);
-} else if (app && path === "/taken") {
-  renderTasks(renderShell(app, "taken", "taken")).catch(failed);
-} else if (app && taskId) {
-  renderTask(renderShell(app, "taken", `inbox #${taskId}`), taskId).catch(failed);
+if (app && page) {
+  page.render(renderShell(app, page.tab, page.title)).catch((e) => {
+    app.append(`Could not load the page: ${e instanceof Error ? e.message : String(e)}`);
+  });
 }

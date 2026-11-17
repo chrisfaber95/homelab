@@ -47,13 +47,13 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_the_overview_and_the_tasks_pages(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/taken", "/task"}))
+    def test_default_ports_the_overview_jobs_and_the_tasks_pages(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/taken", "/task"}))
         server.PORTED_PAGES = config.PORTED_PAGES
-        status, body, _ = self.get("/jobs")
+        status, body, _ = self.get("/briefs")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
-        for path in ("/", "/taken"):  # TypeScript pages
+        for path in ("/", "/jobs", "/taken"):  # TypeScript pages
             self.assertEqual(self.get(path)[:2], (200, INDEX), path)
 
     def test_task_page_is_the_ported_path_for_a_known_task(self):
@@ -78,6 +78,7 @@ class PortedPages(unittest.TestCase):
         (self.dist / "index.html").unlink()
         with contextlib.redirect_stdout(io.StringIO()):
             status, body, _ = self.get("/")
+            self.assertEqual(self.get("/jobs")[0], 503)
         self.assertEqual(status, 503)
         self.assertIn(b"frontend", body)
 
@@ -100,16 +101,16 @@ class PortedPages(unittest.TestCase):
 
     def test_unported_path_is_rendered_by_python(self):
         server.PORTED_PAGES = frozenset({"/taken"})
-        status, body, _ = self.get("/briefs")
+        status, body, _ = self.get("/ssh")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
 
     def test_missing_dist_falls_back_and_warns(self):
-        server.PORTED_PAGES = frozenset({"/jobs"})
+        server.PORTED_PAGES = frozenset({"/briefs"})
         (self.dist / "index.html").unlink()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status, body, _ = self.get("/jobs")
+            status, body, _ = self.get("/briefs")
         self.assertEqual(status, 200)
         self.assertNotIn(b"ported</title>", body)
         self.assertIn("PORTED_PAGES", out.getvalue())

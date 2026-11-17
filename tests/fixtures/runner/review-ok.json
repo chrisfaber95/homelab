@@ -8,5 +8,5 @@
   "exit_code": 0,
   "name": "review-ok",
   "stderr": "",
-  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"system for review\", \"--model\", \"claude-fable-5-2\", \"--fallback-model\", \"claude-opus-5-5\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/v522\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"prompt for review\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
+  "stdout": "{\"type\": \"system\", \"model\": \"fake-model\"}\n{\"argv\": [\"-p\", \"--append-system-prompt\", \"system for review\", \"--model\", \"claude-fable-5-1\", \"--fallback-model\", \"claude-opus-5-5\", \"--tools\", \"\", \"--output-format\", \"json\"], \"auto_memory_disabled\": false, \"cwd\": \"<tmp>/task/work/v522\", \"is_error\": false, \"result\": \"fake claude\", \"stdin\": \"prompt for review\", \"subtype\": \"success\", \"token_set\": false, \"type\": \"result\"}\n"
 }

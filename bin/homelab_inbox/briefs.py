@@ -12,7 +12,7 @@ import yaml
 
 from .config import ACCEPTABLE, BRIEF, CONF, HOME, NEW_REPOS, SETUP_PATHS, _cancel, _lock
 from . import conversation
-from .helpers import NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, task_cmd
+from .helpers import claude_result, NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, task_cmd
 from .router import children, repo_profiles
 from .storage import db, get, log, now, update
 
@@ -289,7 +289,7 @@ def plan_task(task_id):
         log_line(f"t{task_id}", "info", f"planner started for {b['id']}")
         # Its own action for its own model (PLAN_MODEL); a stronger model thinks longer, hence the extra minutes.
         code, out = task_cmd("plan", f"r{task_id}", timeout=900)
-        result = json.loads(out[out.find("{"):]) if "{" in out else {}
+        result = claude_result(out)
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
         if task_id in _cancel:
@@ -383,7 +383,7 @@ def review_pr(task_id, cache):
             os.chmod(share / f, 0o640)
         log_line(f"t{task_id}", "info", f"brief review of PR #{t['pr_number']} started")
         code, out = task_cmd("review", f"v{task_id}", timeout=900)
-        result = json.loads(out[out.find("{"):]) if "{" in out else {}
+        result = claude_result(out)
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
         rows, summary = parse_review(result.get("result") or "", criteria)

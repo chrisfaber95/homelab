@@ -91,3 +91,34 @@ Revert the commit and run nothing; to remove what was installed:
 `sudo systemctl disable --now homelab-inbox-backend && sudo rm /etc/systemd/system/homelab-inbox-backend.service
 && sudo systemctl daemon-reload && sudo rm -r /usr/local/lib/homelab/inbox-backend /var/lib/private/homelab-backend-build`.
 The JDK package and the database may stay. The old inbox is not touched by any of this.
+
+## Parity runs (B7)
+
+`backend/parity/parity.py` sends the same GET requests to the Python inbox and to the Java backend and compares status,
+media type and normalized body. It never writes: it only sends GET. Run it after `import-sqlite` (B5), so both sides
+read the same data (Python on `inbox.db`, Java on PostgreSQL `inbox`); a parity run against a database that was not
+freshly imported compares stale data and means nothing.
+
+- **Routes.** The GET operations of `backend/openapi.yaml` (the H-020 C1 contract; needs `python3-yaml`).
+  `backend/parity/parity.json` adds what the spec cannot say: `examples` (a real id for each `{param}` path; without one
+  the route is skipped), `exclude` (`/static/*`, `/api/session`: differ on purpose), `skip`, and `ignore` (JSON keys
+  that legitimately differ, for all routes under `*` or per spec path; `a.b` means the key `b` inside `a`).
+- **Result per route.** `OK`, `DIFF` (with a unified diff of the normalized answers, `-` Python, `+` Java) or `SKIP`.
+  Java answering 404 or 501 where Python does not means *not implemented yet*: skipped, not a failure. Today that is
+  every route (Java only has `/api/backend/health`), so a run prints only SKIP lines until the M slices land.
+  A Java 403 is a difference: it usually means the facade secret is missing.
+- **Exit code.** 0 no differences, 1 at least one `DIFF`, 2 the run could not start (a side is down, bad option).
+- **Options.** `--python-url` (default `http://127.0.0.1:8105`), `--java-url` (`http://127.0.0.1:8130`),
+  `--python-header` / `--java-header 'Name: value'` (repeatable), `--java-secret-file FILE` (sent as `X-Inbox-Facade`,
+  the secret of B6), `--only PREFIX`.
+
+```sh
+python3 backend/parity/parity.py --only /api/ --java-secret-file /var/lib/homelab-inbox/<facade-secret-file>
+python3 -m unittest tests.test_parity     # the comparison logic; no servers needed
+```
+
+Limits to know: the Python server answers 403 to the box itself on page routes (`x-access: page`), so on the box
+the Python side only answers the chat door and kitt door routes (give their headers with `--python-header`; none of
+those are GET routes in the spec that this harness covers well yet). For page routes run it from a tailnet device with
+`--python-url http://homelab.tail4eb878.ts.net:8105` and an SSH tunnel to `127.0.0.1:8130` for Java, passing the
+secret with `--java-header`. Do not start a second Python inbox for this: it would run the scheduler on the same data.

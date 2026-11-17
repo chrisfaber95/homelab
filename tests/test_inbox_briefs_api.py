@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -95,6 +96,36 @@ class BriefsApi(unittest.TestCase):
         self.assertEqual(d["brief"]["text"], "Body of the brief.")
         self.assertEqual(d["brief"]["path"], "homelab/briefs/H-001.md")
         self.assertIsNone(d["error"])
+
+    def test_times_come_with_their_zone(self):
+        self.assertEqual(self.get("/api/briefs")[2]["timezone"], str(overview.TZ))
+        self.assertEqual(self.get("/api/briefs/H-001")[2]["timezone"], str(overview.TZ))
+
+    def post(self, path, fields):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        c.request("POST", path, urllib.parse.urlencode({"csrf": server.csrf_token(), **fields}),
+                  {"Origin": f"http://127.0.0.1:{self.port}", "Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        out = r.status, r.getheader("Content-Type"), r.getheader("Location"), r.read().decode()
+        c.close()
+        return out
+
+    def test_a_failed_build_is_400_with_the_reason(self):
+        saved = server.start_build
+        self.addCleanup(lambda: setattr(server, "start_build", saved))
+        def refuse(*a, **k):
+            raise ValueError("H-003 is already being built")
+        server.start_build = refuse
+        code, ctype, _, body = self.post("/briefs/H-003/build", {"mode": "without-me"})
+        self.assertEqual((code, ctype), (400, JSON_UTF8))
+        self.assertEqual(json.loads(body), {"error": "H-003 is already being built"})
+
+    def test_park_redirects_to_the_briefs_page(self):
+        saved = server.set_brief_status
+        self.addCleanup(lambda: setattr(server, "set_brief_status", saved))
+        server.set_brief_status = lambda *a: None
+        code, _, location, _ = self.post("/briefs/H-001/park", {})
+        self.assertEqual((code, location), (303, "/briefs"))
 
     def test_unknown_brief(self):
         code, ctype, d = self.get("/api/briefs/H-999")

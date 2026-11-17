@@ -311,11 +311,11 @@ paths:
       x-access: page
       x-machine: true
       description: |
-        The data `briefs_page` renders: drafts, approved briefs and briefs that need design (from main of the product
+        The data the Briefs page shows: drafts, approved briefs and briefs that need design (from main of the product
         repo), the builds so far (newest first) and the number of briefs per status. A brief with a live build has
         `build` set and no `actions`; otherwise `actions` lists the buttons (`build`, `build-without-me`, and `park`
         on a draft; they POST to `/briefs/<id>/build` and `/briefs/<id>/park`). When the product repo can't be read
-        the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself).
+        the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself). `timezone` is the zone of the times of the builds.
       responses:
         "200":
           description: The page data.
@@ -329,7 +329,7 @@ paths:
       summary: What the page of one brief shows (H-022 F11a)
       x-access: page
       x-machine: true
-      description: "The data `brief_page` renders, the brief and its text without the front matter."
+      description: "The data the page of one brief shows: the brief and its text without the front matter."
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, pattern: "^[A-Z]-\\d{3,4}$"}, description: "e.g. H-022"}
       responses:
@@ -339,9 +339,10 @@ paths:
             application/json; charset=utf-8:
               schema:
                 type: object
-                required: [error, brief]
+                required: [error, timezone, brief]
                 properties:
                   error: {type: string, nullable: true}
+                  timezone: {type: string, description: "e.g. Europe/Amsterdam"}
                   brief: {$ref: "#/components/schemas/BriefView"}
         "403": {$ref: "#/components/responses/ApiForbidden"}
         "404": {$ref: "#/components/responses/ApiNotFound"}
@@ -849,8 +850,8 @@ paths:
       description: |
         `park` commits `status: parked` to main of the product repo and redirects to `/briefs`. `build` starts a build
         (`mode=without-me` makes it unattended), writes an `approval` entry to the conversation and redirects to
-        `/task/<build id>`. Any failure (not a draft, already being built, ...) is 400 with the briefs page and the
-        message.
+        `/task/<build id>`. Any failure (not a draft, already being built, ...) is 400 with `{"error": "..."}`; the
+        Briefs page shows it above the list.
       parameters:
         - {$ref: "#/components/parameters/BriefId"}
         - {name: action, in: path, required: true, schema: {type: string, enum: [build, park]}}
@@ -865,7 +866,7 @@ paths:
               properties: {csrf: {type: string}, mode: {type: string, enum: [without-me]}}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Briefs page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "The reason", content: {application/json; charset=utf-8: {schema: {type: object, required: [error], properties: {error: {type: string}}}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
   /job/{name}:
     x-code: ["/job/([a-z0-9-]+)"]
@@ -1953,9 +1954,10 @@ components:
         pr_url: {type: string, nullable: true}
     BriefsPage:
       type: object
-      required: [error, without_me, drafts, approved, needs_design, builds, counts, refresh]
+      required: [error, timezone, without_me, drafts, approved, needs_design, builds, counts, refresh]
       properties:
         error: {type: string, nullable: true}
+        timezone: {type: string, description: "e.g. Europe/Amsterdam"}
         without_me: {type: string, description: "The note under the heading about Build without me"}
         drafts: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
         approved: {type: array, items: {$ref: "#/components/schemas/BriefView"}}

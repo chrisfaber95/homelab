@@ -412,7 +412,7 @@ def build_view(t):
 
 
 def briefs_data(error=None):
-    """What `briefs_page` renders: drafts, approved, needs-design, the builds so far and the counts per status."""
+    """What the Briefs page shows: drafts, approved, needs-design, the builds so far and the counts per status."""
     try:
         items = load_briefs()
     except Exception as ex:
@@ -422,12 +422,12 @@ def briefs_data(error=None):
         counts[b["status"]] = counts.get(b["status"], 0) + 1
     done = builds()
     by = lambda status: [brief_view(b) for b in items if b["status"] == status]
-    return {"error": error, "without_me": WITHOUT_ME, "drafts": by("draft"), "approved": by("approved"),
+    return {"error": error, "timezone": str(TZ), "without_me": WITHOUT_ME, "drafts": by("draft"), "approved": by("approved"),
             "needs_design": by("needs-design"), "builds": [build_view(t) for t in done],
             "counts": [{"status": k, "count": n} for k, n in sorted(counts.items())],
             "refresh": any(t["status"] in ACTIVE for t in done)}
 
 
 def brief_data(b, error=None):
-    """What `brief_page` renders: one brief with its text (front matter removed)."""
-    return {"error": error, "brief": brief_view(b, text=True)}
+    """What the brief page shows: one brief with its text (front matter removed)."""
+    return {"error": error, "timezone": str(TZ), "brief": brief_view(b, text=True)}

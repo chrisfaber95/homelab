@@ -467,11 +467,11 @@ export interface paths {
         };
         /**
          * What the Briefs page shows (H-022 F11a)
-         * @description The data `briefs_page` renders: drafts, approved briefs and briefs that need design (from main of the product
+         * @description The data the Briefs page shows: drafts, approved briefs and briefs that need design (from main of the product
          *     repo), the builds so far (newest first) and the number of briefs per status. A brief with a live build has
          *     `build` set and no `actions`; otherwise `actions` lists the buttons (`build`, `build-without-me`, and `park`
          *     on a draft; they POST to `/briefs/<id>/build` and `/briefs/<id>/park`). When the product repo can't be read
-         *     the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself).
+         *     the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself). `timezone` is the zone of the times of the builds.
          */
         get: {
             parameters: {
@@ -511,7 +511,7 @@ export interface paths {
         };
         /**
          * What the page of one brief shows (H-022 F11a)
-         * @description The data `brief_page` renders, the brief and its text without the front matter.
+         * @description The data the page of one brief shows: the brief and its text without the front matter.
          */
         get: {
             parameters: {
@@ -533,6 +533,8 @@ export interface paths {
                     content: {
                         "application/json; charset=utf-8": {
                             error: string | null;
+                            /** @description e.g. Europe/Amsterdam */
+                            timezone: string;
                             brief: components["schemas"]["BriefView"];
                         };
                     };
@@ -1809,8 +1811,8 @@ export interface paths {
          * Approve and build a draft brief, or park it
          * @description `park` commits `status: parked` to main of the product repo and redirects to `/briefs`. `build` starts a build
          *     (`mode=without-me` makes it unattended), writes an `approval` entry to the conversation and redirects to
-         *     `/task/<build id>`. Any failure (not a draft, already being built, ...) is 400 with the briefs page and the
-         *     message.
+         *     `/task/<build id>`. Any failure (not a draft, already being built, ...) is 400 with `{"error": "..."}`; the
+         *     Briefs page shows it above the list.
          */
         post: {
             parameters: {
@@ -1836,13 +1838,15 @@ export interface paths {
             };
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Briefs page with error */
+                /** @description The reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": {
+                            error: string;
+                        };
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];
@@ -3489,6 +3493,8 @@ export interface components {
         };
         BriefsPage: {
             error: string | null;
+            /** @description e.g. Europe/Amsterdam */
+            timezone: string;
             /** @description The note under the heading about Build without me */
             without_me: string;
             drafts: components["schemas"]["BriefView"][];

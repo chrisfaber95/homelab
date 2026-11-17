@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, dayLabel, dayTime, elapsed, minutesNl } from "./format";
+import { clockTime, dayLabel, dayTime, elapsed, minutesNl, shortDateTime } from "./format";
 
 const TZ = "Europe/Amsterdam";
 const now = new Date("2026-11-17T10:00:00+01:00"); // a Tuesday
@@ -32,4 +32,13 @@ describe("small formats", () => {
     expect(elapsed("2026-11-17T10:00:00Z", t + 65 * 60_000)).toBe("1 u 5 min");
   });
   it("dayLabel", () => expect(dayLabel("2026-11-16")).toEqual({ weekday: "ma", short: "ma 16-11" }));
+});
+
+describe("shortDateTime", () => {
+  it("shows day-month and time in the zone", () => {
+    expect(shortDateTime("2026-11-16T06:05:00+00:00", TZ)).toBe("16-11 07:05");
+  });
+  it("leaves a date it cannot read as it is", () => {
+    expect(shortDateTime("gisteren", TZ)).toBe("gisteren");
+  });
 });

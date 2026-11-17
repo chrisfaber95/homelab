@@ -62,3 +62,11 @@ export function dayLabel(isoDate: string): { weekday: string; short: string } {
   const wd = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
   return { weekday: DAYS_NL[wd] ?? "", short: `${DAYS_NL[wd]} ${pad(d)}-${pad(m)}` };
 }
+
+/** '16-11 07:05' (day-month and time in a time zone): the dates of the task rows. */
+export function shortDateTime(iso: string, timeZone: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const l = localParts(date, timeZone);
+  return `${pad(l.d)}-${pad(l.m)} ${pad(l.h)}:${pad(l.min)}`;
+}

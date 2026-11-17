@@ -47,14 +47,31 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_only_the_overview(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/"}))
+    def test_default_ports_the_overview_and_briefs(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/taken")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
         status, body, _ = self.get("/")  # the Overview is the TypeScript page
         self.assertEqual((status, body), (200, INDEX))
+
+    def test_a_brief_gets_the_briefs_page_but_an_unknown_one_does_not(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        saved = server.brief_by_id
+        self.addCleanup(lambda: setattr(server, "brief_by_id", saved))
+        server.brief_by_id = lambda bid: {"id": bid} if bid == "H-001" else None
+        self.assertEqual(self.get("/briefs")[:2], (200, INDEX))
+        self.assertEqual(self.get("/briefs/H-001")[:2], (200, INDEX))
+        self.assertEqual(self.get("/briefs/H-999")[0], 404)
+
+    def test_briefs_without_a_build_say_so(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        (self.dist / "index.html").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            status, body, _ = self.get("/briefs")
+        self.assertEqual(status, 503)
+        self.assertIn(b"frontend", body)
 
     def test_overview_without_a_build_says_so_instead_of_a_python_page(self):
         server.PORTED_PAGES = config.PORTED_PAGES

@@ -97,6 +97,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Skills tab shows, as JSON
+         * @description The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+         *     20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Skills page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            intro: string;
+                            /** @description shown when `skills` is empty */
+                            empty: string;
+                            /** @description shown when `proposals` is empty */
+                            proposals_empty: string;
+                            skills: {
+                                name: string;
+                                description: string;
+                                /** @description names of the jobs that use it; empty shows 'geen' */
+                                jobs: string[];
+                            }[];
+                            proposals: {
+                                name: string;
+                                pr_url: string;
+                                task_id: number | null;
+                                created: string;
+                            }[];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ssh": {
         parameters: {
             query?: never;

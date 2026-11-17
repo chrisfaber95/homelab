@@ -47,14 +47,15 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_the_overview_and_briefs(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/briefs"}))
+    def test_default_ports_the_overview_jobs_and_briefs(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/taken")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
         status, body, _ = self.get("/")  # the Overview is the TypeScript page
         self.assertEqual((status, body), (200, INDEX))
+        self.assertEqual(self.get("/jobs")[1], INDEX)
 
     def test_a_brief_gets_the_briefs_page_but_an_unknown_one_does_not(self):
         server.PORTED_PAGES = config.PORTED_PAGES
@@ -78,6 +79,7 @@ class PortedPages(unittest.TestCase):
         (self.dist / "index.html").unlink()
         with contextlib.redirect_stdout(io.StringIO()):
             status, body, _ = self.get("/")
+            self.assertEqual(self.get("/jobs")[0], 503)
         self.assertEqual(status, 503)
         self.assertIn(b"frontend", body)
 
@@ -100,7 +102,7 @@ class PortedPages(unittest.TestCase):
 
     def test_unported_path_is_rendered_by_python(self):
         server.PORTED_PAGES = frozenset({"/taken"})
-        status, body, _ = self.get("/jobs")
+        status, body, _ = self.get("/ssh")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
 

@@ -763,10 +763,10 @@ paths:
     x-code: ["/jobs"]
     get:
       tags: [page]
-      summary: Jobs tab
+      summary: Jobs tab (frontend/dist/index.html; the page is TypeScript on `/api/jobs-page`)
       x-access: page
-      description: Matched on `self.path`.
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+      description: Matched on `url.path`. Always served from the frontend build (`config.FRONTEND_ONLY`); 503 when `frontend/dist/index.html` is missing.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "503": {description: "The frontend is not built.", content: {"text/html; charset=utf-8": {schema: {type: string}}}}}
   /jobs/draft:
     x-code: ["/jobs/draft"]
     post:

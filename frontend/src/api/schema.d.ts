@@ -140,6 +140,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Memory (Geheugen) list as JSON, what the /memory page renders
+         * @description The same data as `GET /memory`: preferences, facts and history filtered by `q` (every word must occur in id,
+         *     about, source, status or body; `q` is cut to 200 characters). The three sections always come in the order
+         *     `voorkeuren`, `feiten`, `geschiedenis`. History is sorted newest first and cut to the newest 30 unless `q` is
+         *     given (`truncated` is then true). `abouts` are the choices of the add form. Dates are the stored strings; the
+         *     `*_local` fields are what the page shows (dd-mm hh:mm).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The sections and the add-form choices. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            q: string;
+                            sections: {
+                                /** @enum {string} */
+                                kind: "voorkeuren" | "feiten" | "geschiedenis";
+                                /** @description matches, also those not shown */
+                                count: number;
+                                truncated: boolean;
+                                entries: components["schemas"]["MemoryEntry"][];
+                            }[];
+                            abouts: string[];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills": {
         parameters: {
             query?: never;
@@ -187,6 +244,105 @@ export interface paths {
                                 created: string;
                             }[];
                         };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/e/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One memory entry as JSON, what the /memory/e/{id} page renders
+         * @description The id contains slashes (`voorkeuren/<about>/<name>`, ...); in the template it stands for the whole remainder
+         *     after `/api/memory/e/`. Matched on `url.path`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The entry plus the branch and repo it is stored in. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["MemoryEntry"] & {
+                            /** @description MEMORY_BRANCH */
+                            branch: string;
+                            /** @description DATA_REPO */
+                            data_repo: string;
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                /** @description `{"error": "No such memory entry."}` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Everything the Overview page ("/") shows, as data
+         * @description The data behind `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
+         *     five changes, services, the Discord and kitt switches, a week of usage and the health block. Texts are the
+         *     same Dutch sentences the HTML page shows; times are ISO strings. Not cached.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Overview data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Overview"];
                     };
                 };
                 403: components["responses"]["ApiForbidden"];
@@ -2932,6 +3088,133 @@ export interface components {
             /** @description ISO 8601; null while paused or broken */
             nextRun: string | null;
             error: string | null;
+        };
+        MemoryEntry: {
+            /** @description voorkeuren/<about>/<name>, feiten/<about>/<name> or geschiedenis/<yyyy-mm>/taak-<n> */
+            id: string;
+            /** @enum {string} */
+            kind: "voorkeuren" | "feiten" | "geschiedenis";
+            about: string;
+            name: string;
+            body: string;
+            added: string;
+            changed: string;
+            source: string;
+            link: string;
+            status: string;
+            pr: string;
+            /** @description row title: first body line for history, else the name */
+            title: string;
+            /** @description first body line; empty for history */
+            summary: string;
+            /** @enum {string} */
+            kind_label: "voorkeur" | "feit" | "geschiedenis";
+            added_local: string;
+            changed_local: string;
+        };
+        Overview: {
+            status: {
+                /** @description e.g. 'Alles in orde.' */
+                sentence: string;
+                /** @enum {string} */
+                class: "ok" | "attention" | "bad";
+                /** @description ISO time of this answer, in the inbox time zone */
+                at: string;
+                /** @description same sentence as GET /api/live */
+                activity: string;
+            };
+            live: {
+                items: components["schemas"]["LiveItem"][];
+                queued: number;
+            };
+            timeline: {
+                /** @description x of 'nu' in percent */
+                now_x: number;
+                ticks: {
+                    x: number;
+                    label: string;
+                    day: boolean;
+                }[];
+                lanes: {
+                    name: string;
+                    /** @enum {string} */
+                    state: "active" | "paused" | "error" | "deleted";
+                    /** @description local or claude; null for error and deleted */
+                    model: string | null;
+                    when: string | null;
+                    marks: {
+                        x: number;
+                        /** @description ok, pr, failed, held, running or plan */
+                        status: string;
+                        link: string;
+                        label: string;
+                    }[];
+                }[];
+            };
+            /** @description the last five, newest first */
+            changes: {
+                ok: boolean;
+                text: string;
+                at: string | null;
+                user: string;
+                reason: string;
+            }[];
+            services: {
+                name: string;
+                address: string;
+                note: string;
+            }[];
+            /** @description address of the Forge line in config/services.conf, or empty */
+            forge_link: string;
+            switches: {
+                /** @description the stored Discord switch */
+                discord: boolean;
+                /** @description the stored approvals switch */
+                discord_approvals: boolean;
+                /** @description Discord is on (the page's 'Discord is off' note shows when false) */
+                discord_on: boolean;
+                kitt: boolean;
+                /** @description kitt's permissions, sorted */
+                kitt_may: string[];
+            };
+            usage: {
+                /** @description the last 7 days, oldest first */
+                days: string[];
+                /** @description null: the helper is unreachable */
+                llm: number[] | null;
+                claude_jobs: number[];
+                inbox: number[];
+                cap: number;
+                /** @description per kind of job */
+                saved_minutes: {
+                    [key: string]: number;
+                };
+            };
+            health: {
+                last: string | null;
+                checks: {
+                    [key: string]: {
+                        /** @description OK, WARN or FAIL */
+                        status: string;
+                        text: string;
+                        since?: string | null;
+                    };
+                };
+                deploys: {
+                    name: string;
+                    /** @description null: not deployed yet */
+                    ok: boolean | null;
+                    at: string | null;
+                    sha: string | null;
+                    sync_error: string | null;
+                }[];
+                backup: {
+                    ok: boolean;
+                    at: string | null;
+                    free_bytes: number;
+                    free_pct: unknown;
+                } | null;
+            };
         };
         LiveItem: {
             /** @description t<id> task, r<id> local run, f1 forge */

@@ -257,6 +257,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the SSH page shows (account, confirm window, key history)
+         * @description The data `ssh_page` renders (`pages.ssh_state`): the account a key is added for (`SSH_KEY_USER`), the minutes
+         *     the owner has to confirm on the phone (`CONFIRM_SECONDS` / 60) and the last 15 `sshkey` entries of the
+         *     changes log, newest first (empty when the log is missing or unreadable). `status` is `waiting` for a request
+         *     that still awaits confirmation, otherwise `ok` or `fail`. `at` is the ISO timestamp from the log; the page
+         *     shows it in local time. The request form (`POST /ssh`) is unchanged.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The state. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            /** @example chris */
+                            user: string;
+                            /** @example 5 */
+                            confirm_minutes: number;
+                            history: {
+                                /** @enum {string} */
+                                status: "waiting" | "ok" | "fail";
+                                summary: string;
+                                result: string;
+                                at: string;
+                                by: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory/e/{id}": {
         parameters: {
             query?: never;

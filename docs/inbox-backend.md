@@ -1,8 +1,8 @@
 # Inbox backend on the box (H-023, task B3)
 
 The Spring Boot backend (`backend/`, task B1) runs on the box beside the old Python inbox, as the systemd service
-`homelab-inbox-backend`. It answers `GET /api/backend/health` and, since H-024 M1, the overview, live and log reads
-([below](#overview-live-and-log-reads-m1-h-024)); nothing else is switched over (plan: [`docs/architecture/inbox-split.md`](architecture/inbox-split.md)). The database it will use is described in
+`homelab-inbox-backend`. It answers `GET /api/backend/health` and, since H-024 M1 and M2, the overview, live, log, skills and memory reads
+([M1](#overview-live-and-log-reads-m1-h-024), [M2](#skills-and-memory-reads-m2-h-024)); nothing else is switched over (plan: [`docs/architecture/inbox-split.md`](architecture/inbox-split.md)). The database it will use is described in
 [`docs/inbox-db.md`](inbox-db.md).
 
 Installer: `scripts/27-backend.sh` (root, idempotent,
@@ -131,8 +131,8 @@ freshly imported compares stale data and means nothing.
   that legitimately differ, for all routes under `*` or per spec path; `a.b` means the key `b` inside `a`).
 - **Result per route.** `OK`, `DIFF` (with a unified diff of the normalized answers, `-` Python, `+` Java) or `SKIP`.
   Java answering 404 or 501 where Python does not means *not implemented yet*: skipped, not a failure. Today that is
-  every route except the M1 ones (`/api/overview`, `/api/live`, `/api/log/*`), so a run prints SKIP lines for the rest
-  until the other M slices land.
+  every route except the M1 and M2 ones (`/api/overview`, `/api/live`, `/api/log/*`, `/api/skills`, `/api/memory`,
+  `/api/memory/e/*`), so a run prints SKIP lines for the rest until the other M slices land.
   A Java 403 is a difference: it usually means the facade secret is missing.
 - **Exit code.** 0 no differences, 1 at least one `DIFF`, 2 the run could not start (a side is down, bad option).
 - **Options.** `--python-url` (default `http://127.0.0.1:8105`), `--java-url` (`http://127.0.0.1:8130`),
@@ -203,3 +203,42 @@ Revert the PR (or only remove the three prefixes from `BACKEND_ROUTES` in `confi
 **These routes are read-only and no store changes owner, so no re-import and no data move are needed:** Java wrote nothing,
 and Python never stopped being the only writer. The extra files in the backend (`read/` package, unit settings) may stay; with the
 prefixes gone nothing calls them.
+
+## Skills and memory reads (M2, H-024)
+
+Three more read routes are served by Java, forwarded by the Python server (`BACKEND_ROUTES` now also has `/api/skills` and
+`/api/memory`) after its own tailnet owner check, so who may call them has not changed. Discord and kitt do not use them (their doors,
+`/api/chat/*` and kitt's, are never forwarded). The pages (`/skills`, `/memory`, `/memory/e/<id>`) and every memory **write** stay
+in Python: the add, save and delete forms post to `/memory/...`, which is not under a forwarded prefix, and the `GEHEUGEN:` blocks of
+a task are saved by the Python queue. Python is the only writer of the memory store; the writes move in M5.
+
+| Route | Answer (as before) |
+| --- | --- |
+| `GET /api/skills` | the merged skills of `repos/homelab/skills/*/SKILL.md` with the jobs that use each, the 20 newest skill proposals, the page's Dutch texts |
+| `GET /api/memory[?q=]` | preferences, facts and history (newest first, the newest 30 unless `q` is given) filtered by every word of `q` (cut to 200 characters), and the `abouts` of the add form |
+| `GET /api/memory/e/<id>` | one entry plus `branch` and `data_repo`; an unknown id is 404 `{"error": "No such memory entry."}` |
+
+Other GET and POST paths under these prefixes are 404 `{"error": "Not found."}`, PUT, PATCH and DELETE are 405 `{"error": "<METHOD> is not supported"}`:
+the same words as Python's. The code is in `read/` (`MemoryReader`, `SkillsService`, in `ReadController`); it ports `memory.py` (parse, view, entry),
+`jobs.skill_list` and `overview.skills_data`.
+
+**Where it reads.** Like M1, from the live files of the Python inbox, read-only, not from PostgreSQL (nothing writes there yet): the
+`memory-repo` clone (`<RUNNER_HOME>/memory-repo`, the `memory` branch of `DATA_REPO`) on each request, where Python keeps the entries in memory
+between writes; `repos/homelab/skills/`; the job files for the `jobs` of a skill; and `skill_prs` in `inbox.db` through `InboxDb`. Differences
+that are known and not bugs: Java sees a change of the clone as soon as the files are written, Python after its reload (a few ms to seconds
+later, once a write finished); a hand-edited front matter with an unquoted date **and time** with a `T` is shown as written, Python shows
+`datetime` with a space (a plain date, and the quoted values the inbox writes, are the same).
+
+**Checks.** `python3 -m unittest tests.test_inbox_m1_parity` (the M1 test, now also M2; needs a built jar) runs the parity harness on the
+fixture state of `tests/m1_fixture.py` (skills with quoted, missing and multi-line descriptions, 23 skill proposals, a memory clone with
+preferences, facts and 40 history entries, entries a hand edit leaves behind: no front matter, broken YAML, a list as front matter, a plain date,
+no offset, a text that is no date, files that are no entries) for `/api/skills`, `/api/memory` with ten queries and every entry id plus the
+not-found cases, and then `tests.test_inbox_contract.MovedReads` and `MovedMemoryAndSkills` against the Java base URL
+(`INBOX_CONTRACT_BASE_URL`, `INBOX_CONTRACT_FACADE_SECRET`). Java unit tests: `MemoryReaderTest`. On the box, after the merge:
+`python3 backend/parity/parity.py --only /api/skills --only /api/memory --java-secret-file /var/lib/homelab-inbox/backend-secret`.
+
+### Rollback of the M2 switch
+
+Revert the PR (or only remove `/api/skills` and `/api/memory` from `BACKEND_ROUTES` in `config/inbox.conf`) and let `scripts/21-inbox.sh`
+run again (a merge of the revert does that). The Python handlers are untouched, so they answer again at once. **No re-import and no data
+move are needed:** Java wrote nothing, and Python never stopped being the only writer of the memory clone, `skill_prs` and the job files.

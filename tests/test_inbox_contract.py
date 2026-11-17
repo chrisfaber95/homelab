@@ -14,7 +14,8 @@ INBOX_CONTRACT_BASE_URL
     the POST checks write there.
     INBOX_CONTRACT_FACADE_SECRET: the shared secret of the Java backend (H-023 B6), sent as X-Inbox-Facade on every
     request. Set it, with INBOX_CONTRACT_BASE_URL at the Java backend (http://127.0.0.1:8130), to run class MovedReads:
-    the routes that moved to Java (H-024 M1: /api/overview, /api/live, /api/log/*) answer what the spec says. Those
+    the routes that moved to Java (H-024 M1: /api/overview, /api/live, /api/log/*; M2: /api/skills, /api/memory,
+    /api/memory/e/*) answer what the spec says. Those
     tests read only and need no arranged state, so they run in both modes; the tests that arrange state skip.
 
 Run: python3 -m unittest discover -s tests   (or: INBOX_CONTRACT_BASE_URL=http://127.0.0.1:PORT python3 tests/test_inbox_contract.py)
@@ -677,6 +678,69 @@ class MovedReads(Contract):
         r = self.call("GET", "/api/log/f1?from=3")
         self.assertIn(r.status, (200, 502), r)
         self.conforms(r, "/api/log/{key}", "get", r.status, JSON_UTF8)  # forge's chunk is utf-8 under plain JSON in the spec
+
+
+# =====================================================================================================================
+class MovedMemoryAndSkills(Contract):
+    """The skills and memory reads that moved from Python to Java (H-024 M2): `/api/skills`, `/api/memory` and
+    `/api/memory/e/<id>`. Read only, so they run against the in-process Python server and, with INBOX_CONTRACT_BASE_URL
+    and INBOX_CONTRACT_FACADE_SECRET, against the Java backend. Checked against the spec, not against data."""
+
+    def setUp(self):
+        super().setUp()
+        if not EXTERNAL:
+            self.allow_page()
+
+    def test_skills(self):
+        r = self.conforms(self.call("GET", "/api/skills"), "/api/skills", "get", 200, JSON_UTF8)
+        self.assertEqual(set(r.body), {"intro", "empty", "proposals_empty", "skills", "proposals"})
+        self.assertEqual((r.body["empty"], r.body["proposals_empty"]), ("Nog geen skills.", "Nog geen voorstellen."))
+        self.assertLessEqual(len(r.body["proposals"]), 20)
+        for p in r.body["proposals"]:
+            self.assertRegex(p["created"], r"^(\d\d-\d\d \d\d:\d\d|-|.+)$")
+        self.assertEqual(r.headers.get("Cache-Control"), "no-store")
+
+    def test_memory_has_the_three_sections_in_page_order(self):
+        r = self.conforms(self.call("GET", "/api/memory"), "/api/memory", "get", 200, JSON_UTF8)
+        self.assertEqual([s["kind"] for s in r.body["sections"]], ["voorkeuren", "feiten", "geschiedenis"])
+        self.assertEqual(r.body["q"], "")
+        self.assertEqual(r.body["abouts"][:2], ["algemeen", "box"])
+        history = r.body["sections"][2]
+        self.assertLessEqual(len(history["entries"]), 30)
+        self.assertEqual(history["truncated"], len(history["entries"]) < history["count"])
+        added = [e["added"] for e in history["entries"]]
+        self.assertEqual(added, sorted(added, reverse=True))  # newest first
+
+    def test_a_query_filters_on_every_word_and_is_cut_to_200(self):
+        word = "zzqq-geen-treffer-" + "x" * 300
+        r = self.conforms(self.call("GET", "/api/memory?q=" + word), "/api/memory", "get", 200, JSON_UTF8)
+        self.assertEqual(r.body["q"], word[:200])
+        self.assertTrue(all(s["count"] == 0 and s["entries"] == [] and not s["truncated"] for s in r.body["sections"]))
+        r = self.call("GET", "/api/memory?q=%20")  # a query of spaces is a query: no history cut, but every word matches
+        self.assertEqual(r.body["q"], " ")
+        self.assertFalse(r.body["sections"][2]["truncated"])
+
+    def test_an_entry_is_what_the_list_shows_plus_branch_and_repo(self):
+        listed = [e for s in self.call("GET", "/api/memory").body["sections"] for e in s["entries"]]
+        if not listed:
+            self.skipTest("no memory entries on this server")
+        entry = listed[0]
+        r = self.conforms(self.call("GET", f"/api/memory/e/{entry['id']}"), "/api/memory/e/{id}", "get", 200, JSON_UTF8)
+        self.assertEqual({k: v for k, v in r.body.items() if k not in ("branch", "data_repo")}, entry)
+        self.assertEqual(r.body["branch"], "memory")
+
+    def test_an_unknown_entry_is_a_404_with_a_fixed_body(self):
+        for path in ("/api/memory/e/voorkeuren/algemeen/bestaat-niet", "/api/memory/e/zomaar", "/api/memory/e/..%2f..%2fetc"):
+            r = self.call("GET", path)
+            if r.status == 400:  # the facade refuses a path that climbs out of its prefix before the route is reached
+                continue
+            self.assertEqual((r.status, r.ctype.replace(" ", ""), r.body),
+                             (404, JSON_UTF8.replace(" ", ""), {"error": "No such memory entry."}), path)
+
+    def test_other_paths_under_the_prefixes_are_not_found(self):
+        for path in ("/api/memory/", "/api/memory/other", "/api/memory/e/", "/api/skills/x"):
+            r = self.call("GET", path)
+            self.assertEqual((r.status, r.ctype.replace(" ", ""), r.body), (404, JSON_UTF8.replace(" ", ""), {"error": "Not found."}), path)
 
 
 # =====================================================================================================================

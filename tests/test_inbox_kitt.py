@@ -17,7 +17,7 @@ HOME = tempfile.mkdtemp()
 os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"))
 ALL = ["read", "write", "ask", "start_task", "run_job", "approve"]
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import briefs, chat, config, conversation, gate, kitt, pages, server, storage  # noqa: E402
+from homelab_inbox import briefs, chat, config, conversation, gate, kitt, overview, pages, server, storage  # noqa: E402
 
 OWNER = "chris@example.com"
 BID = "H-018"
@@ -319,9 +319,9 @@ class Gate(unittest.TestCase):
 
 class Page(Base):
     def test_switch_form_and_route(self):
-        self.assertIn('id="switch-kitt"', pages.kitt_html())
+        self.assertTrue(overview.overview_json()["switches"]["kitt"])
         conversation.set_switch("kitt", False)
-        self.assertIn("Off", pages.kitt_html())
+        self.assertFalse(overview.overview_json()["switches"]["kitt"])
 
 
 if __name__ == "__main__":

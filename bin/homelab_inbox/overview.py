@@ -295,7 +295,7 @@ def change_text(c):
 
 
 def overview_json():
-    """Everything the Overview page (pages.overview_page) shows, as data for GET /api/overview. Texts are the same
+    """Everything the Overview page (frontend/src/pages/overview.ts) shows, as data for GET /api/overview. Texts are the same
     Dutch sentences the HTML page uses; times are ISO strings (UTC offset kept), not "vandaag 07:00"."""
     h = health()
     sentence, cls = status_sentence(h)
@@ -320,7 +320,7 @@ def overview_json():
     backup = ({"ok": bool(b.get("ok")), "at": b.get("at"), "free_bytes": b.get("free_bytes", 0),
                "free_pct": b.get("free_pct")} if b else None)
     return {
-        "status": {"sentence": sentence, "class": cls, "at": now_dt.isoformat(timespec="seconds"),
+        "status": {"sentence": sentence, "class": cls, "at": now_dt.isoformat(timespec="seconds"), "timezone": TZ.key,
                    "activity": activity_sentence(items, queued)},
         "live": {"items": items, "queued": queued},
         "timeline": {"lanes": [lane(l) for l in lanes], "ticks": ticks, "now_x": TL_NOW},

@@ -73,6 +73,8 @@ In short, how the frontend fits into the inbox (details in the sections below):
 
 - `GET /api/session` returns the CSRF token; mutating `/api/*` requests send it as `X-CSRF-Token`; errors under `/api/*`
   are `{"error": "..."}`.
+- `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
+  (`overview.jobs_data`). The HTML page is unchanged until the page is ported; `/api/jobs` is kitt's door, hence the name.
 - `PORTED_PAGES` defaults to `/` (the Overview); every other page is still rendered by the Python inbox. A path listed
   there gets `frontend/dist/index.html`. Without a build, `/` answers 503 ("The frontend build is missing"), because
   the Python Overview is gone; other listed paths fall back to their Python page.

@@ -20,6 +20,8 @@
 
   <properties>
     <java.version>21</java.version>
+    <!-- Not managed by Spring Boot: the one version we pin ourselves (Unix socket for pgjdbc, Q2). -->
+    <junixsocket.version>2.11.1</junixsocket.version>
   </properties>
 
   <dependencies>
@@ -38,6 +40,20 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <!-- Flyway 10+ keeps the PostgreSQL support in its own module. -->
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <!-- PostgreSQL is socket-only (no TCP listener): pgjdbc reaches it through an AF_UNIX socket factory. -->
+      <groupId>com.kohlschutter.junixsocket</groupId>
+      <artifactId>junixsocket-core</artifactId>
+      <version>${junixsocket.version}</version>
+      <type>pom</type>
       <scope>runtime</scope>
     </dependency>
 

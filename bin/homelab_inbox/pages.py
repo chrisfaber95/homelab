@@ -753,32 +753,42 @@ def admin_ask(req):
         s.close()
 
 
-def ssh_page(done=None, error=None, key="", name=""):
-    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
-    e = html.escape
-    user = CONF.get("SSH_KEY_USER", "chris")
-    minutes = int(CONF.get("CONFIRM_SECONDS", 300)) // 60
-    if done:
-        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
-               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
-               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
-    else:
-        top = f'<p class="error">{e(error)}</p>' if error else ""
+def ssh_state():
+    """What the SSH page shows besides the form: the account, the confirm window and the last 15 key requests (newest
+    first). `status` is waiting, ok or fail. Shared by ssh_page and GET /api/ssh."""
     try:
         entries = [c for l in CHANGES_LOG.read_text().splitlines() if '"sshkey"' in l
                    and (c := json.loads(l)).get("kind") == "sshkey"]
     except (OSError, ValueError):
         entries = []
 
-    def st(c):
+    def status(c):
         if c.get("result", "").startswith("aangevraagd"):
-            return "waiting", "aanvraag"
-        return ("ok", "ok") if c.get("ok") else ("fail", "fout")
+            return "waiting"
+        return "ok" if c.get("ok") else "fail"
+    return {"user": CONF.get("SSH_KEY_USER", "chris"),
+            "confirm_minutes": int(CONF.get("CONFIRM_SECONDS", 300)) // 60,
+            "history": [{"status": status(c), "summary": c.get("summary", ""), "result": c.get("result", ""),
+                         "at": c["at"], "by": c.get("user", "")} for c in entries[::-1][:15]]}
+
+
+def ssh_page(done=None, error=None, key="", name=""):
+    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
+    e = html.escape
+    state = ssh_state()
+    user, minutes = state["user"], state["confirm_minutes"]
+    if done:
+        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
+               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
+               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
+    else:
+        top = f'<p class="error">{e(error)}</p>' if error else ""
+    label = {"waiting": "aanvraag", "ok": "ok", "fail": "fout"}
     rows = "".join(
-        f'<div class="row"><div class="row-title"><span class="st {st(c)[0]}">{st(c)[1]}</span>'
-        f'<span>{e(c.get("summary", ""))}</span></div><div class="muted wrap">{e(c.get("result", ""))}</div>'
-        + meta(e(local(c["at"])), e(c.get("user", ""))) + '</div>'
-        for c in entries[::-1][:15])
+        f'<div class="row"><div class="row-title"><span class="st {h["status"]}">{label[h["status"]]}</span>'
+        f'<span>{e(h["summary"])}</span></div><div class="muted wrap">{e(h["result"])}</div>'
+        + meta(e(local(h["at"])), e(h["by"])) + '</div>'
+        for h in state["history"])
     body = (f'<h1>SSH</h1><p class="muted">Een publieke sleutel om als <code>{e(user)}</code> in te loggen. Hij komt pas '
             f'in <code>authorized_keys</code> als je binnen {minutes} minuten op <b>Bevestig</b> drukt in de melding op je '
             f'telefoon. Vergelijk daar de vingerafdruk met <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code>.</p>{top}'

@@ -23,7 +23,7 @@ CLIENTS = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer", "approve"]},
     "jarvis": {"permissions": ["read"]}}})
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import conversation, helpers, overview, pages, queue, server, storage  # noqa: E402
+from homelab_inbox import conversation, helpers, overview, queue, server, storage  # noqa: E402
 
 LONG = "A long result sentence. " * 400  # about 9000 characters: far beyond ntfy's 300 and one Discord message
 

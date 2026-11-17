@@ -47,7 +47,7 @@ if not EXTERNAL:
     os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                       CHAT_TOKEN_DIR=TOKENS)
     sys.path.insert(0, str(ROOT / "bin"))
-    from homelab_inbox import briefs, chat, config, conversation, forge, helpers, kitt, pages, search, server, storage  # noqa: E402
+    from homelab_inbox import access, briefs, chat, config, conversation, forge, helpers, kitt, search, server, storage  # noqa: E402
 
 try:
     import yaml
@@ -196,12 +196,12 @@ class Contract(unittest.TestCase):
         self.upstream.state = self.up
         base = f"http://127.0.0.1:{self.upstream.server_address[1]}"
         self._saved = (forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL, kitt.account_uid, kitt.peer_uid,
-                       pages.Access.owner, briefs.brief_by_id, chat.brief_by_id, briefs.set_brief_status,
+                       access.Access.owner, briefs.brief_by_id, chat.brief_by_id, briefs.set_brief_status,
                        briefs.add_new_repo, chat.notify, kitt.load_briefs, kitt.health, chat.clock, kitt.answer_question)
         forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL = base, base, base
         forge.forget()
         kitt.account_uid, kitt.peer_uid = lambda: 4242, lambda addr, port: 4242
-        pages.Access.owner = OWNER
+        access.Access.owner = OWNER
         self.brief = {"id": BID, "title": "Kitt", "status": "draft", "repos": ["homelab"], "build": {}}
         briefs.brief_by_id = chat.brief_by_id = lambda bid, max_age=60: self.brief if bid == BID else None
         briefs.add_new_repo = lambda b: None
@@ -213,7 +213,7 @@ class Contract(unittest.TestCase):
     def tearDown(self):
         if EXTERNAL:
             return
-        (forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL, kitt.account_uid, kitt.peer_uid, pages.Access.owner,
+        (forge.FORGE_URL, search.SEARCH_URL, search.ROUTER_URL, kitt.account_uid, kitt.peer_uid, access.Access.owner,
          briefs.brief_by_id, chat.brief_by_id, briefs.set_brief_status, briefs.add_new_repo, chat.notify,
          kitt.load_briefs, kitt.health, chat.clock, kitt.answer_question) = self._saved
         for k, v in self._env.items():
@@ -258,9 +258,9 @@ class Contract(unittest.TestCase):
         fields = dict(fields or {})
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         if csrf and path.startswith("/api/"):  # /api/* takes the token as a header (GET /api/session), pages as a field
-            headers["X-CSRF-Token"] = pages.csrf_token()
+            headers["X-CSRF-Token"] = access.csrf_token()
         elif csrf:
-            fields["csrf"] = pages.csrf_token()
+            fields["csrf"] = access.csrf_token()
         if origin:
             headers["Origin"] = f"http://{self.host}:{self.port}"
         return self.call(method, path, headers=headers, raw=urllib.parse.urlencode(fields) if method == "POST" else None)

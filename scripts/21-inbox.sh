@@ -118,7 +118,7 @@ done
 for f in inbox.conf services.conf clients.json admin.conf deploy.conf llm.conf backup.conf; do install -m 644 "$REPO/config/$f" "$DEST/config/$f"; done
 # De pagina (F-024): stijl, script en lettertypen.
 install -d -m 755 "$DEST/web" "$DEST/web/fonts"
-install -m 644 "$REPO"/web/app.css "$REPO"/web/app.js "$DEST/web/"
+install -m 644 "$REPO"/web/app.css "$DEST/web/"
 install -m 644 "$REPO"/web/fonts/* "$DEST/web/fonts/"
 # The modules of homelab-inbox next to the script (it imports them); --delete drops a module that left the repo.
 install -d -m 755 "$DEST/bin/homelab_inbox"

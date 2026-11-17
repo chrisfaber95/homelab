@@ -27,7 +27,7 @@ INBOX_RUNNER_HOME, REPOS_CONF, OWNER_LOGIN; voor jobs ook OVERVIEW_CMD en LLM_UR
 MONITOR_DIR, DEPLOY_STATE en BACKUP_STATUS.
 
 Overzicht (F-024): / is de homelab-pagina (statuszin, nu bezig met live logs, jobs-tijdlijn, deze week, gezondheid);
-stijl, script en lettertypen in web/. Live logs per taak of run in RUNNER_HOME/logs, via /api/live en /api/log.
+stijl en lettertypen in web/, de pagina's in frontend/ (gebouwd naar frontend/dist). Env: INBOX_HOST (bindadres, standaard ::), INBOX_PORT, FRONTEND_DIST. Live logs per taak of run in RUNNER_HOME/logs, via /api/live en /api/log.
 """
 import argparse
 import sys
@@ -40,7 +40,7 @@ from homelab_inbox.config import JOBS, STATUS_NL
 from homelab_inbox.helpers import first_line
 from homelab_inbox.jobs import RUN_NL, job_runs, load_jobs, run_view
 from homelab_inbox.memory import MEMORY, load_memory, mem_matches
-from homelab_inbox.pages import local, next_run
+from homelab_inbox.overview import local, next_run
 from homelab_inbox.server import serve
 from homelab_inbox.storage import tasks
 
@@ -56,7 +56,7 @@ from homelab_inbox.github import *  # noqa: F401,F403
 from homelab_inbox.jobs import *  # noqa: F401,F403
 from homelab_inbox.memory import *  # noqa: F401,F403
 from homelab_inbox.overview import *  # noqa: F401,F403
-from homelab_inbox.pages import *  # noqa: F401,F403
+from homelab_inbox.access import *  # noqa: F401,F403
 from homelab_inbox.server import *  # noqa: F401,F403
 
 

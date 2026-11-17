@@ -1,6 +1,7 @@
 """Overview data for the homelab page (F-024): health, timeline, usage, live items."""
 import json
 import os
+import socket
 import urllib.request
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ from . import conversation, forge
 from .briefs import WITHOUT_ME, build_left_nothing, builds, live_build, load_briefs, split_frontmatter
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, SERVICES, STATUS_NL, TZ, _round_started
 from .helpers import first_line, label, read_json, read_log, repo_list
-from .jobs import (JOB_KINDS, LLM_URL, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, claude_runs_today, draft_name, job_runs, load_agents,
+from .jobs import (JOB_KINDS, skill_list, LLM_URL, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, claude_runs_today, draft_name, job_runs, load_agents,
                    nothing_statement, parse_job, run_view)
 from .router import blocked_by, blocked_followups, children
 from .storage import db, tasks
@@ -493,3 +494,77 @@ def briefs_data(error=None):
 def brief_data(b, error=None):
     """What the brief page shows: one brief with its text (front matter removed)."""
     return {"error": error, "timezone": str(TZ), "brief": brief_view(b, text=True)}
+
+
+def local(iso):
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%d-%m %H:%M") if iso else "-"
+    except ValueError:
+        return iso  # een met de hand bewerkte datum in het geheugen
+
+
+def next_run(job):
+    if "error" in job:
+        return "-"
+    if job["paused"]:
+        return "gepauzeerd"
+    return day_time(job["cron"].next_after(datetime.now(timezone.utc)))
+
+
+SKILLS_INTRO = ("Gemergde skills op main; elke taak en Claude-job kan ze gebruiken. "
+                "Nieuwe en betere komen alleen via een PR die jij merget.")
+SKILLS_EMPTY, PROPOSALS_EMPTY = "Nog geen skills.", "Nog geen voorstellen."
+
+
+def skills_data():
+    """What the Skills page shows, as plain data (GET /api/skills): the skills with the jobs that use them and the
+    latest skill proposals, plus the page's texts."""
+    used = {}
+    for job in JOBS.values():
+        for s in job.get("skills", []):
+            used.setdefault(s, []).append(job["name"])
+    with db() as c:
+        prs = c.execute("SELECT * FROM skill_prs ORDER BY id DESC LIMIT 20").fetchall()
+    return {"intro": SKILLS_INTRO, "empty": SKILLS_EMPTY, "proposals_empty": PROPOSALS_EMPTY,
+            "skills": [{"name": n, "description": d, "jobs": used.get(n, [])} for n, d in skill_list().items()],
+            "proposals": [{"name": p["name"], "pr_url": p["pr_url"], "task_id": p["task_id"],
+                           "created": local(p["created"])} for p in prs]}
+
+
+def admin_ask(req):
+    """Een verzoek aan homelab-admin (F-019) via zijn socket; die kijkt zelf wie het vraagt (inbox-runner)."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    try:
+        s.connect(CONF["SOCKET"])
+        s.sendall(json.dumps(req).encode() + b"\n")
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        return json.loads(data)
+    except (OSError, ValueError) as ex:
+        return {"ok": False, "text": f"homelab-admin antwoordt niet ({ex})"}
+    finally:
+        s.close()
+
+
+def ssh_state():
+    """What the SSH page shows besides the form: the account, the confirm window and the last 15 key requests (newest
+    first). `status` is waiting, ok or fail. Served by GET /api/ssh."""
+    try:
+        entries = [c for l in CHANGES_LOG.read_text().splitlines() if '"sshkey"' in l
+                   and (c := json.loads(l)).get("kind") == "sshkey"]
+    except (OSError, ValueError):
+        entries = []
+
+    def status(c):
+        if c.get("result", "").startswith("aangevraagd"):
+            return "waiting"
+        return "ok" if c.get("ok") else "fail"
+    return {"user": CONF.get("SSH_KEY_USER", "chris"),
+            "confirm_minutes": int(CONF.get("CONFIRM_SECONDS", 300)) // 60,
+            "history": [{"status": status(c), "summary": c.get("summary", ""), "result": c.get("result", ""),
+                         "at": c["at"], "by": c.get("user", "")} for c in entries[::-1][:15]]}

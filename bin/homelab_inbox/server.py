@@ -1,7 +1,9 @@
 """The HTTP server: access check, request handler, serve()."""
 import hmac
+import html
 import json
 import mimetypes
+import os
 import re
 import threading
 import urllib.parse
@@ -10,20 +12,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import chat, conversation, gate, kitt
 from .briefs import brief_by_id, set_brief_status, start_build
-from .config import ACTIVE, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
+from .config import ACTIVE, ROOT, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import (activity_sentence, brief_data, briefs_data, draft_detail, job_detail, jobs_data, live_items, overview_json,
-                       research_data, run_detail, task_view, tasks_view)
+                       research_data, run_detail, admin_ask, skills_data, ssh_state, task_view, tasks_view)
 from . import forge, search
-from .pages import Access, WEB, admin_ask, csrf_token, page, skills_data, ssh_state
+from .access import Access, csrf_token
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
 
 API_PREFIX = "/api/"
+WEB = ROOT / "web"  # the stylesheet and fonts, served under /static/
+
+
+def page(title, body):
+    """The little HTML page of an error or a refused form; every real page is TypeScript (frontend/dist)."""
+    return (f'<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" '
+            f'content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title>'
+            f'<meta name="color-scheme" content="dark"><meta name="theme-color" content="#04070c">'
+            f'<link rel="stylesheet" href="/static/app.css"></head><body>'
+            f'<header class="top"><a class="mark" href="/">homelab</a></header><main class="narrow">{body}</main></body></html>')
 
 
 NEEDS_ID = frozenset({"/task", "/job", "/draft", "/run", "/research"})  # PORTED_PAGES names these; bare, they are no page
@@ -45,7 +57,7 @@ def job_route(path):
 
 
 def ported_index(path):
-    """frontend/dist/index.html for a ported path, or None (not ported, or no build: then pages.py renders it).
+    """frontend/dist/index.html for a ported path, or None (not ported, or no build: the server answers 503 instead).
     Every /task/<id> is the ported path "/task"; a brief (/briefs/H-022) is the Briefs page's own page, and only for a
     brief that exists (else the 404 page); likewise /memory/e/<id> is the Memory page's, for an entry that exists."""
     if m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", path):
@@ -63,7 +75,7 @@ def ported_index(path):
         return None
     index = FRONTEND_DIST / "index.html"
     if not index.is_file():
-        log(f"warning: PORTED_PAGES lists {path} but {index} is missing; serving the Python page instead")
+        log(f"warning: PORTED_PAGES lists {path} but {index} is missing; answering 503")
         return None
     return index.read_bytes()
 
@@ -624,6 +636,6 @@ def serve():
     gate.start()
     for target in (scheduler, poll_github, job_scheduler):
         threading.Thread(target=target, daemon=True).start()
-    srv = Server(("::", int(CONF["INBOX_PORT"])), Handler)
+    srv = Server((os.environ.get("INBOX_HOST", "::"), int(CONF["INBOX_PORT"])), Handler)
     log(f"homelab-inbox op poort {CONF['INBOX_PORT']}, eigenaar {Access.owner}")
     srv.serve_forever()

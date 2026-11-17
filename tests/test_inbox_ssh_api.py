@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import pages, server  # noqa: E402
+from homelab_inbox import overview, server  # noqa: E402
 
 JSON_UTF8 = "application/json; charset=utf-8"
 
@@ -41,9 +41,9 @@ class SshApi(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.log = Path(tmp.name) / "changes.jsonl"
-        old = pages.CHANGES_LOG
-        pages.CHANGES_LOG = self.log
-        self.addCleanup(lambda: setattr(pages, "CHANGES_LOG", old))
+        old = overview.CHANGES_LOG
+        overview.CHANGES_LOG = self.log
+        self.addCleanup(lambda: setattr(overview, "CHANGES_LOG", old))
 
     def get(self, path):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
@@ -121,9 +121,9 @@ class SshApi(unittest.TestCase):
         self.assertEqual((code, body), (400, {"error": "geen geldige sleutel"}))
 
     def test_config_values(self):
-        old = dict(pages.CONF)
-        pages.CONF.update(SSH_KEY_USER="alice", CONFIRM_SECONDS="600")
-        self.addCleanup(lambda: (pages.CONF.clear(), pages.CONF.update(old)))
+        old = dict(overview.CONF)
+        overview.CONF.update(SSH_KEY_USER="alice", CONFIRM_SECONDS="600")
+        self.addCleanup(lambda: (overview.CONF.clear(), overview.CONF.update(old)))
         body = self.api()
         self.assertEqual((body["user"], body["confirm_minutes"]), ("alice", 10))
 

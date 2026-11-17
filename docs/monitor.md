@@ -59,6 +59,14 @@ Also the Obsidian second-brain vault (`/srv/obsidian/second-brain`, with its git
 nightly timer again as `claude`: see "Nightly sync" in the vault's `CLAUDE.md`. The code map (`/srv/obsidian/code-map`)
 is not backed up: the vault's `bin/code-map.sh` rebuilds it.
 
+Also the PostgreSQL database `inbox` (H-023, `scripts/28-inbox-db.sh`): the line `pg_dump: inbox` in `config/backup.list`
+makes `homelab-backup run` write `homelab-<date>.inbox.dump` next to the tar.gz: `pg_dump --format=custom`, run as the
+`postgres` user over the unix socket (there is no TCP listener), first written to `.homelab-<date>.inbox.dump.tmp`
+(0600) and then renamed, so a half-written dump never carries the final name. Same folder, same schedule (03:30),
+same mode (`0600`, folder `0700`) and same retention as the tar.gz (14 days, the newest dump always stays). If the
+database does not exist yet it is listed under `missing` in the status; a failing `pg_dump` fails the whole run, so
+the health check notices. `homelab-backup list` shows the dumps too.
+
 **Wat er niet in zit**: alles wat de repo herbouwt (programma's, configuratie, diensten), de Ollama-modellen (opnieuw
 downloaden), Docker-images en -volumes, en dev-clones (wat telt, is gepusht).
 
@@ -84,3 +92,44 @@ sudo homelab-backup run         # nu een backup
    oude geschiedenis; `homelab-health` slaagt.
 
 Het is een gewone tar.gz: zonder het script kan het ook met `sudo tar -xzpf <bestand> -C /` (diensten eerst stoppen).
+
+## Restoring the inbox database (H-023)
+
+The `.dump` is not part of `homelab-backup restore` (that only unpacks the tar). Restore it by hand with
+`pg_restore`, always into a **fresh** database first, so a bad dump never replaces a working one. As root:
+
+```
+D=/var/backups/homelab/homelab-<date>.inbox.dump
+sudo runuser -u postgres -- pg_restore --list "$D" | head          # the dump is readable, lists 9+ tables
+sudo runuser -u postgres -- createdb -O inbox_app inbox_restore_test
+sudo runuser -u postgres -- pg_restore --dbname inbox_restore_test --no-owner --role inbox_app --exit-on-error "$D"
+```
+
+(`/var/backups/homelab` is 0700 root: if `postgres` cannot read the file, use `sudo cp "$D" /tmp/x.dump && sudo chown postgres /tmp/x.dump`,
+or pipe it: `sudo cat "$D" | sudo runuser -u postgres -- pg_restore --dbname inbox_restore_test --no-owner --role inbox_app --exit-on-error`.)
+
+Compare with the live database, then drop the test database:
+
+```
+sudo runuser -u postgres -- psql -d inbox_restore_test -c "select relname, n_live_tup from pg_stat_user_tables order by 1"
+sudo runuser -u postgres -- psql -d inbox -c "select relname, n_live_tup from pg_stat_user_tables order by 1"
+sudo runuser -u postgres -- dropdb inbox_restore_test
+```
+
+**Real restore after a rebuild**: run `scripts/28-inbox-db.sh` (empty `inbox` and role), stop the backend, then
+`pg_restore --clean --if-exists --no-owner --role inbox_app --dbname inbox "$D"` as `postgres`, start the backend again.
+Flyway sees its own history table in the dump and does not run `V1` twice.
+
+### Restore test checklist (once, on the box)
+
+- [ ] `sudo homelab-backup run` creates `homelab-<date>.inbox.dump` (mode `-rw-------`, no `.tmp` file left) and the status says `ok`.
+- [ ] `pg_restore --list` on it works.
+- [ ] Restore into `inbox_restore_test` finishes without errors.
+- [ ] Table list and row counts in `inbox_restore_test` match `inbox` (the 9 tables of `V1__baseline.sql`, once B4/B5 have run).
+- [ ] `inbox_restore_test` is dropped again (`\l` shows no leftovers).
+
+Result of the test (fill in, date and who):
+
+| Date | By | Dump file | Result |
+| --- | --- | --- | --- |
+| _not tested yet_ | | | |

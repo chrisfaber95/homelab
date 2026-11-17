@@ -1,0 +1,52 @@
+# homelab: H-023 (B3), the Spring Boot backend of the inbox, beside the old Python inbox. Installed by
+# scripts/27-backend.sh; the jar is built there. Loopback only: it binds 127.0.0.1:8130 (BACKEND_HOST/BACKEND_PORT)
+# and IPAddressDeny=any lets nothing but loopback traffic through; there is no ufw rule and no tailnet port.
+# Runs as inbox-runner, the account the PostgreSQL role inbox_app trusts (peer authentication over the unix socket,
+# scripts/28-inbox-db.sh): a DynamicUser would have another name and be refused. Docs: docs/inbox-backend.md.
+[Unit]
+Description=homelab inbox backend (H-023, Spring Boot, loopback only)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=inbox-runner
+Group=inbox-runner
+WorkingDirectory=/
+Environment=BACKEND_HOST=127.0.0.1
+Environment=BACKEND_PORT=8130
+# PostgreSQL through its unix socket (junixsocket), no TCP and no password: peer authentication as inbox_app.
+Environment="SPRING_DATASOURCE_URL=jdbc:postgresql://localhost/inbox?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg&socketFactoryArg=/var/run/postgresql/.s.PGSQL.5432"
+Environment=SPRING_DATASOURCE_USERNAME=inbox_app
+# Explicit heap: 256 MiB at most, and an OOM ends the process so systemd restarts it. Measure it (docs/inbox-backend.md).
+ExecStart=/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:MaxDirectMemorySize=64m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+# The whole process (heap, metaspace, threads, code cache) stays under this; above it the kernel kills it.
+MemoryMax=640M
+# Hardening. No MemoryDenyWriteExecute: the JVM's JIT needs writable code memory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+# IPv4/IPv6 for the loopback listener, AF_UNIX for the PostgreSQL socket in /var/run/postgresql.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8 ::1/128
+
+[Install]
+WantedBy=multi-user.target

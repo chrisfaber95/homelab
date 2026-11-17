@@ -45,7 +45,7 @@ Flyway migrations are in `src/main/resources/db/migration/`.
 
 ```sh
 # as inbox-runner (the only account the database lets in as inbox_app, see docs/inbox-db.md)
-sudo -u inbox-runner java -jar /path/to/inbox-backend-0.1.0.jar import-sqlite --sqlite /var/lib/homelab-inbox/inbox.db
+sudo -u inbox-runner java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar import-sqlite --sqlite /var/lib/homelab-inbox/inbox.db
 ```
 
 Options: `--socket-dir` (default `/var/run/postgresql`), `--port` (`5432`), `--database` (`inbox`), `--user`
@@ -78,8 +78,14 @@ curl http://127.0.0.1:8130/api/backend/health
 ```
 
 It binds to loopback only. `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`) override this; the
-install task (B3) records the real port in `config/inbox.conf`. Never set `BACKEND_HOST` to anything but a loopback
+port is also in `config/inbox.conf` (`BACKEND_PORT`). Never set `BACKEND_HOST` to anything but a loopback
 address.
+
+## On the box
+
+`scripts/27-backend.sh` builds the jar as a throwaway user and runs it as `homelab-inbox-backend.service` on
+`127.0.0.1:8130`; see `docs/inbox-backend.md` (install, hardening, how to measure the heap). The unit passes the
+PostgreSQL socket URL (junixsocket, `junixsocket.version` in `pom.xml`).
 
 ## Changing versions
 

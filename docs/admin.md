@@ -73,6 +73,7 @@ script in `scripts/` names its account and inputs in a header line:
 | `18-claude.sh` | claude | `claude/`, `config/claude.conf` |
 | `20-monitor.sh` | root | the `bin/` and `config/` files it installs |
 | `21-inbox.sh` | root | the `bin/`, `web/` and `config/` files it installs |
+| `27-backend.sh` | root | `backend/`, `systemd/homelab-inbox-backend.service`, `config/inbox.conf`; see `docs/inbox-backend.md` |
 | `28-inbox-db.sh` | root | none (only the script itself); see `docs/inbox-db.md` |
 | `05-09-base.sh`, `19-admin.sh`, `22-claude-chris.sh` | manual | |
 

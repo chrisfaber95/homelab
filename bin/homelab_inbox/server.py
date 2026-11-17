@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, jobs_data, live_items, overview_json
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, ssh_state, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_state, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -311,8 +311,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, tasks_page())
         if url.path == "/api/ssh":
             return self.send_upstream(200, ssh_state())
-        if url.path == "/ssh":
-            return self.send(200, ssh_page())
         if url.path == "/memory":
             return self.send(200, memory_page(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
         if (m := re.fullmatch(r"/memory/e/(.+)", self.path)) and (entry := mem_get(m.group(1))):
@@ -403,14 +401,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_jobs(form)
         if self.path.startswith("/agents/"):
             return self.post_agent()
-        if self.path == "/ssh":
+        if self.path == "/api/ssh":
             name, key = form.get("name", "").strip(), form.get("key", "").strip()
             r = admin_ask({"cmd": "sshkey", "label": name, "key": key, "by": self.who})
             if not r.get("ok"):
-                # Een geplakte privésleutel nooit terug op de pagina zetten.
-                return self.send(400, ssh_page(error=r.get("text", "mislukt"), name=name,
-                                               key="" if "PRIVATE KEY" in key else key))
-            return self.send(200, ssh_page(done=r, name=name))
+                return self.send_upstream(400, {"error": r.get("text", "mislukt")})
+            return self.send_upstream(200, {"fingerprint": r["fingerprint"], "deadline": r["deadline"], "id": r["id"]})
         if self.path.startswith("/memory/"):
             return self.post_memory(form)
         m = re.fullmatch(r"/task/(\d+)/(accept|answer|cancel|attended|retry)", self.path)

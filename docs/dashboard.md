@@ -72,8 +72,8 @@ In short, how the frontend fits into the inbox (details in the sections below):
   are `{"error": "..."}`.
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). The HTML page is unchanged until the page is ported; `/api/jobs` is kitt's door, hence the name.
-- `PORTED_PAGES` is empty by default and no page is ported yet, so the Python inbox still renders every page and the user
-  sees no change. A path listed there gets `frontend/dist/index.html` instead.
+- `PORTED_PAGES` is `/ssh` by default (H-022 F9b: the SSH page is TypeScript, `frontend/src/pages/ssh.ts`, with the
+  data from `GET /api/ssh` and the form posting to `POST /api/ssh`). A path listed there gets `frontend/dist/index.html`.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
 
@@ -102,11 +102,12 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/jobs`; empty by default)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/jobs`; `/ssh` by default)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
-listed path has no `frontend/dist/index.html`, the Python page is served and a warning goes to the journal.
+listed path has no `frontend/dist/index.html`, a warning goes to the journal and the Python page is served; for a page
+whose Python code is deleted (`/ssh`) that means the generic 404, so run `scripts/21-inbox.sh` to build the frontend.
 Tests: `tests/test_inbox_ported_pages.py`.
 
 Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs

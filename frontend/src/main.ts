@@ -3,6 +3,7 @@ import { renderDraft, renderJob, renderResearch, renderRun } from "./pages/job";
 import { renderJobs } from "./pages/jobs";
 import { renderMemory, renderMemoryEntry } from "./pages/memory";
 import { renderOverview } from "./pages/overview";
+import { renderSearch } from "./pages/search";
 import { renderSkills } from "./pages/skills";
 import { renderSsh } from "./pages/ssh";
 import { renderTask } from "./pages/task";
@@ -17,6 +18,7 @@ const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLEle
   "/taken": { tab: "taken", title: "taken", render: renderTasks },
   "/briefs": { tab: "briefs", title: "briefs", render: renderBriefs },
   "/memory": { tab: "geheugen", title: "geheugen", render: renderMemory },
+  "/search": { tab: "search", title: "search", render: renderSearch },
   "/skills": { tab: "skills", title: "skills", render: renderSkills },
   "/ssh": { tab: "ssh", title: "ssh", render: renderSsh },
 };

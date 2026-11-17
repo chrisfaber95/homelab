@@ -1386,7 +1386,8 @@ export interface paths {
         };
         /**
          * Search tab
-         * @description Matched on `url.path`.
+         * @description Matched on `url.path`. Served from `frontend/dist` (TypeScript, `frontend/src/pages/search.ts`, data from
+         *     `/api/search/*`); without a build 503.
          */
         get: {
             parameters: {

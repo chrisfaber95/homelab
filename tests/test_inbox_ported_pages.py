@@ -48,12 +48,12 @@ class PortedPages(unittest.TestCase):
             return e.code, e.read(), e.headers
 
     def test_default_ports_the_overview_jobs_ssh_tasks_and_briefs(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/job", "/draft", "/run", "/research", "/memory", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/job", "/draft", "/run", "/research", "/memory", "/search", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
-        status, body, _ = self.get("/search")
-        self.assertEqual(status, 200)
+        status, body, _ = self.get("/nope")
+        self.assertEqual(status, 404)
         self.assertNotEqual(body, INDEX)
-        for path in ("/", "/jobs", "/memory", "/skills", "/ssh", "/taken", "/briefs"):  # TypeScript pages
+        for path in ("/", "/jobs", "/research", "/memory", "/search", "/skills", "/ssh", "/taken", "/briefs"):  # TypeScript pages
             self.assertEqual(self.get(path)[:2], (200, INDEX), path)
 
     def test_task_page_is_the_ported_path_for_a_known_task(self):
@@ -99,6 +99,7 @@ class PortedPages(unittest.TestCase):
             self.assertEqual(self.get("/ssh")[0], 503)
             self.assertEqual(self.get("/skills")[0], 503)
             self.assertEqual(self.get("/memory")[0], 503)
+            self.assertEqual(self.get("/search")[0], 503)
         self.assertEqual(status, 503)
         self.assertIn(b"frontend", body)
 
@@ -121,17 +122,18 @@ class PortedPages(unittest.TestCase):
 
     def test_unported_path_is_rendered_by_python(self):
         server.PORTED_PAGES = frozenset({"/taken"})
-        status, body, _ = self.get("/search")
-        self.assertEqual(status, 200)
+        status, body, _ = self.get("/nope")
+        self.assertEqual(status, 404)
         self.assertNotEqual(body, INDEX)
+        self.assertEqual(self.get("/research")[0], 503)  # not listed: no Python page is left, so it says the build is missing
 
     def test_missing_dist_falls_back_and_warns(self):
-        server.PORTED_PAGES = frozenset({"/search"})
+        server.PORTED_PAGES = frozenset({"/research"})
         (self.dist / "index.html").unlink()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status, body, _ = self.get("/search")
-        self.assertEqual(status, 200)
+            status, body, _ = self.get("/research")
+        self.assertEqual(status, 503)
         self.assertNotIn(b"ported</title>", body)
         self.assertIn("PORTED_PAGES", out.getvalue())
 

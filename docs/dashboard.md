@@ -46,7 +46,7 @@ langzaam als het rustig is, snel zolang er iets draait, oker of rood als er iets
 De staafjes van Deze week zijn LED-staafjes. Alleen donker, zoals de KITT-skin (de brief vroeg licht en donker; de
 gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-dashboard, en raken alleen transform,
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
-wijzigingen. Stijl: `web/app.css`; de pagina's zijn TypeScript (`frontend/`); alleen Search gebruikt nog `web/app.js`.
+wijzigingen. Stijl: `web/app.css`; de pagina's zijn TypeScript (`frontend/`); `web/app.js` is leeg (inbox 197 verwijdert hem).
 
 ## Frontend project (H-021)
 
@@ -76,7 +76,7 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
   same HTML forms as before (hidden `csrf` field, same actions).
-- `PORTED_PAGES` defaults to `/,/jobs,/job,/draft,/run,/research,/memory,/skills,/ssh,/taken,/task,/briefs` (Overview, Jobs, Memory (`frontend/src/pages/memory.ts`, data from `GET /api/memory` and `GET /api/memory/e/<id>`; `/memory/e/<id>` is the Memory path for an entry that exists; the add, save and delete forms post to `/memory/add` and `/memory/e/<id>/save|delete` with fetch and show the `{error}` of a 400), Skills (`frontend/src/pages/skills.ts`, data from `GET /api/skills`), SSH, the Tasks pages and Briefs; `/task` stands for every `/task/<id>`, likewise `/job`, `/draft` and `/run` (for a job, draft or run that exists; see "Job pages") and `/research` (also at `/job/research`); the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
+- `PORTED_PAGES` defaults to `/,/jobs,/job,/draft,/run,/research,/memory,/search,/skills,/ssh,/taken,/task,/briefs` (Overview, Jobs, Search (`frontend/src/pages/search.ts`, data from `/api/search/*`), Memory (`frontend/src/pages/memory.ts`, data from `GET /api/memory` and `GET /api/memory/e/<id>`; `/memory/e/<id>` is the Memory path for an entry that exists; the add, save and delete forms post to `/memory/add` and `/memory/e/<id>/save|delete` with fetch and show the `{error}` of a 400), Skills (`frontend/src/pages/skills.ts`, data from `GET /api/skills`), SSH, the Tasks pages and Briefs; `/task` stands for every `/task/<id>`, likewise `/job`, `/draft` and `/run` (for a job, draft or run that exists; see "Job pages") and `/research` (also at `/job/research`); the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
   build, these pages (and `/briefs/<id>`) answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
   paths fall back to their Python page.
 - The Briefs page (`frontend/src/pages/briefs.ts`) reads `GET /api/briefs` and `GET /api/briefs/<id>`. Approve & build, Build and
@@ -133,7 +133,7 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/job,/draft,/run,/research,/memory,/skills,/ssh,/taken,/task,/briefs`)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/job,/draft,/run,/research,/memory,/search,/skills,/ssh,/taken,/task,/briefs`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a

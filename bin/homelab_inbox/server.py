@@ -15,14 +15,33 @@ from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
-from .overview import activity_sentence, brief_data, briefs_data, jobs_data, live_items, overview_json, task_view, tasks_view
+from .overview import (activity_sentence, brief_data, briefs_data, draft_detail, job_detail, jobs_data, live_items, overview_json,
+                       research_data, run_detail, task_view, tasks_view)
 from . import forge, search
-from .pages import Access, WEB, admin_ask, csrf_token, draft_page, job_page, research_page, page, run_page, search_page, skills_data, ssh_state
+from .pages import Access, WEB, admin_ask, csrf_token, page, search_page, skills_data, ssh_state
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
 
 API_PREFIX = "/api/"
+
+
+NEEDS_ID = frozenset({"/task", "/job", "/draft", "/run", "/research"})  # PORTED_PAGES names these; bare, they are no page
+
+
+def job_route(path):
+    """The ported path of a job page: "/job" for a job that exists, "/draft" and "/run" for a draft or run that exists,
+    "/research" for the research page (also at /job/research, unless a real job has that name); else None."""
+    if path in ("/research", f"/job/{RESEARCH_JOB}") and RESEARCH_JOB not in JOBS:
+        return "/research"
+    if (m := re.fullmatch(r"/job/([a-z0-9-]+)", path)) and m.group(1) in JOBS:
+        return "/job"
+    if (m := re.fullmatch(r"/draft/(\d+)", path)) and get_draft(int(m.group(1))):
+        return "/draft"
+    if m := re.fullmatch(r"/run/(\d+)", path):
+        with db() as c:
+            return "/run" if c.execute("SELECT 1 FROM job_runs WHERE id=?", (int(m.group(1)),)).fetchone() else None
+    return None
 
 
 def ported_index(path):
@@ -37,7 +56,10 @@ def ported_index(path):
         if not mem_get(m.group(1)):
             return None
         path = "/memory"
-    if (re.fullmatch(r"/task/(\d+)", path) and "/task" or path) not in PORTED_PAGES:
+    key = (re.fullmatch(r"/task/(\d+)", path) and "/task") or job_route(path)
+    if key is None and path not in NEEDS_ID:
+        key = path
+    if key not in PORTED_PAGES:
         return None
     index = FRONTEND_DIST / "index.html"
     if not index.is_file():
@@ -330,6 +352,18 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/search/results":
             params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
             return self.send_upstream(*search.results(params.get("q", ""), params))
+        if url.path == "/api/research":
+            return self.send_upstream(200, research_data())
+        if (m := re.fullmatch(r"/api/job/([a-z0-9-]+)", url.path)) and m.group(1) in JOBS:
+            return self.send_upstream(200, job_detail(m.group(1)))
+        if (m := re.fullmatch(r"/api/draft/(\d+)", url.path)) and (d := get_draft(int(m.group(1)))):
+            return self.send_upstream(200, draft_detail(d))
+        if m := re.fullmatch(r"/api/run/(\d+)", url.path):
+            with db() as c:
+                r = c.execute("SELECT * FROM job_runs WHERE id=?", (int(m.group(1)),)).fetchone()
+            if r:
+                return self.send_upstream(200, run_detail(r))
+            return self.send_upstream(404, {"error": "Not found."})
         if url.path == "/api/tasks":
             return self.send_upstream(200, tasks_view())
         if m := re.fullmatch(r"/api/tasks/(\d+)", url.path):
@@ -343,21 +377,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/", "/jobs", "/skills", "/ssh") or url.path == "/memory" \
                 or ((m := re.fullmatch(r"/memory/e/(.+)", self.path)) and mem_get(m.group(1))) or (task_id and get(int(task_id.group(1)))):
             return self.no_build()
-        if self.path in ("/research", f"/job/{RESEARCH_JOB}") and RESEARCH_JOB not in JOBS:
-            return self.send(200, research_page())
+        if job_route(url.path):  # the job pages are TypeScript too; getting here means the build is missing
+            return self.no_build()
         if self.path == "/briefs" or ((m := re.fullmatch(r"/briefs/([A-Z]-\d{3,4})", self.path)) and brief_by_id(m.group(1))):
             # The Briefs pages are TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing.
             return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
                                "The frontend build is missing.")
-        if (m := re.fullmatch(r"/job/([a-z0-9-]+)", self.path)) and m.group(1) in JOBS:
-            return self.send(200, job_page(m.group(1)))
-        if (m := re.fullmatch(r"/draft/(\d+)", self.path)) and (d := get_draft(int(m.group(1)))):
-            return self.send(200, draft_page(d))
-        if m := re.fullmatch(r"/run/(\d+)", self.path):
-            with db() as c:
-                r = c.execute("SELECT * FROM job_runs WHERE id=?", (int(m.group(1)),)).fetchone()
-            if r:
-                return self.send(200, run_page(r))
         self.refuse(404, "<p>Niet gevonden.</p>", "Not found.")
 
     def number(self, url, key):
@@ -414,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/research/ask":
             code, res = ask_research(form.get("question", ""), form.get("mode", "quick"))
             if code != 200:
-                return self.send(code, research_page(error=res["error"], question=form.get("question", "")))
+                return self.send_upstream(code, {"error": res["error"]})
             return self.send(303, "", location="/research")
         if self.path.startswith(("/jobs/", "/job/", "/draft/")):
             return self.post_jobs(form)
@@ -480,7 +505,7 @@ class Handler(BaseHTTPRequestHandler):
                 parse_job(name, text)
                 save_job(name, text, f"jobs: {name} {'gewijzigd' if d['base'] else 'nieuw'} ({who})")
             except Exception as ex:
-                return self.send(400, draft_page(d, error=str(ex), text=text))
+                return self.send_upstream(400, {"error": str(ex)})
             update_draft(d["id"], status="confirmed", text=text)
             return self.send(303, "", location=f"/job/{name}")
         m = re.fullmatch(r"/job/([a-z0-9-]+)/(run|pause|resume|delete|save|change)", self.path)
@@ -502,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_job(name, None, f"jobs: {name} verwijderd ({who})")
                 return self.send(303, "", location="/jobs")
         except Exception as ex:
-            return self.send(400, job_page(name, error=str(ex), text=text or None))
+            return self.send_upstream(400, {"error": str(ex)})
         return self.send(303, "", location=f"/job/{name}")
 
 

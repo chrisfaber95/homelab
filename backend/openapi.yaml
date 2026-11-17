@@ -119,6 +119,81 @@ paths:
           content:
             application/json; charset=utf-8:
               schema: {$ref: "#/components/schemas/JobsPage"}
+  /api/job/{name}:
+    x-code: ["/api/job/([a-z0-9-]+)"]
+    get:
+      tags: [machine]
+      summary: What the job page (/job/<name>) renders, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        Added for the page port (H-022 F7). The job with its parsed facts (`facts` is null when the file is broken and
+        `error` says why), its file, and its 30 latest runs. `refresh` is true while a run is queued or running (the
+        page reloads itself every 20 seconds). The forms post to `/job/{name}/{action}`. Unknown job: 404.
+      parameters: [{$ref: "#/components/parameters/JobName"}]
+      responses:
+        "200":
+          description: The job page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/JobDetail"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
+  /api/draft/{id}:
+    x-code: ["/api/draft/(\\d+)"]
+    get:
+      tags: [machine]
+      summary: What the draft page (/draft/<id>) renders, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        A job draft. Only a `ready` draft has `facts` (the parsed file) or `text_error` (why the file is not valid yet).
+        `refresh` is true while the draft is `drafting`. Unknown draft: 404.
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses:
+        "200":
+          description: The draft page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/DraftDetail"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
+  /api/run/{id}:
+    x-code: ["/api/run/(\\d+)"]
+    get:
+      tags: [machine]
+      summary: What the run page (/run/<id>) renders, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        One run of a job: the fields of a list row plus the result `text`, the `note`, whether it can be cancelled on
+        the page (`cancellable`: a running run) and `log_key` for `GET /api/log/<key>` (a local run only). Unknown run: 404.
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses:
+        "200":
+          description: The run page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/RunDetail"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
+  /api/research:
+    x-code: ["/api/research"]
+    get:
+      tags: [machine]
+      summary: What the Research page (/research) renders, as JSON
+      x-access: page
+      x-machine: true
+      description: |
+        The Claude-run counter, the modes of the form and the 30 latest research questions (newest first). `refresh`
+        is true while one is queued or running. Asking goes through `POST /research/ask`. Not `/api/jobs`: that is kitt's door.
+      responses:
+        "200":
+          description: The Research page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/ResearchPage"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/memory:
     x-code: ["/api/memory"]
     get:
@@ -798,12 +873,13 @@ paths:
     x-code: ["/research", "/job/{RESEARCH_JOB}"]
     get:
       tags: [page]
-      summary: Research page (also served at /job/research when no job of that name exists)
+      summary: Research page (also served at /job/research when no job of that name exists; TypeScript on `/api/research`)
       x-access: page
       description: |
-        `self.path in ("/research", f"/job/{RESEARCH_JOB}")` and `RESEARCH_JOB not in JOBS`. When a real job named
-        like RESEARCH_JOB exists, `/job/<name>` shows that job instead and `/research` is a 404.
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+        `url.path in ("/research", f"/job/{RESEARCH_JOB}")` and `RESEARCH_JOB not in JOBS`. When a real job named
+        like RESEARCH_JOB exists, `/job/<name>` shows that job instead and `/research` is a 404. Served from
+        `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}, "503": {description: "The frontend build is missing", content: {text/html; charset=utf-8: {schema: {type: string}}}}}
   /research/ask:
     x-code: ["/research/ask"]
     post:
@@ -812,8 +888,7 @@ paths:
       x-access: page
       description: |
         Form `question`, `mode` (default `quick`; `quick` or `deep`). Success 303 to `/research`. Errors come from
-        `jobs.ask_research`: 400 (empty question or bad mode) and 429 (daily Claude cap), rendered as the research page
-        with the message.
+        `jobs.ask_research`: 400 (empty question or bad mode) and 429 (daily Claude cap), as `{"error": "..."}`.
       parameters: [{$ref: "#/components/parameters/Origin"}]
       requestBody:
         required: true
@@ -825,8 +900,8 @@ paths:
               properties: {csrf: {type: string}, question: {type: string}, mode: {type: string, default: quick}}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Research page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
-        "429": {description: "Research page with the daily-limit message", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "Empty question or bad mode", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "429": {description: "The daily Claude limit is reached", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
   /skills:
     x-code: ["/skills"]
@@ -885,11 +960,11 @@ paths:
     x-code: ["/job/([a-z0-9-]+)"]
     get:
       tags: [page]
-      summary: One job
+      summary: One job (TypeScript on `/api/job/{name}`)
       x-access: page
-      description: Matched on `self.path`; only when the job exists in `JOBS`, else 404 page.
+      description: Matched on `url.path`; only when the job exists in `JOBS`, else 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503.
       parameters: [{$ref: "#/components/parameters/JobName"}]
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}, "503": {description: "The frontend build is missing", content: {text/html; charset=utf-8: {schema: {type: string}}}}}
   /job/{name}/{action}:
     x-code: ["/job/([a-z0-9-]+)/(run|pause|resume|delete|save|change)"]
     post:
@@ -900,7 +975,7 @@ paths:
         Unknown job: 404 page. `change` with text starts a draft with the job as base (303 `/draft/<id>`); `run`
         dispatches it now; `pause`/`resume` commit to the `jobs` branch; `save` with text validates and commits;
         `delete` commits the removal and redirects to `/jobs`. Everything else (including `run` on a job with an error)
-        redirects to `/job/<name>`. An exception is 400 with the job page and the message.
+        redirects to `/job/<name>`. An exception is 400 `{"error": "..."}`.
       parameters:
         - {$ref: "#/components/parameters/JobName"}
         - {name: action, in: path, required: true, schema: {type: string, enum: [run, pause, resume, delete, save, change]}}
@@ -908,18 +983,18 @@ paths:
       requestBody: {$ref: "#/components/requestBodies/TextForm"}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Job page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "The reason", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
         "404": {$ref: "#/components/responses/PageNotFound"}
   /draft/{id}:
     x-code: ["/draft/(\\d+)"]
     get:
       tags: [page]
-      summary: A job draft
+      summary: A job draft (TypeScript on `/api/draft/{id}`)
       x-access: page
-      description: "Matched on `self.path`; unknown draft: 404 page."
+      description: "Matched on `url.path`; unknown draft: 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503."
       parameters: [{$ref: "#/components/parameters/NumericId"}]
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}, "503": {description: "The frontend build is missing", content: {text/html; charset=utf-8: {schema: {type: string}}}}}
   /draft/{id}/{action}:
     x-code: ["/draft/(\\d+)/(confirm|cancel)"]
     post:
@@ -928,7 +1003,7 @@ paths:
       x-access: page
       description: |
         Only for a draft with status `ready`; otherwise 404 page. `cancel` 303 to `/jobs`. `confirm` validates `text`,
-        commits the job and 303 to `/job/<name>`; a validation error is 400 with the draft page and the message.
+        commits the job and 303 to `/job/<name>`; a validation error is 400 `{"error": "..."}`.
       parameters:
         - {$ref: "#/components/parameters/NumericId"}
         - {name: action, in: path, required: true, schema: {type: string, enum: [confirm, cancel]}}
@@ -936,18 +1011,18 @@ paths:
       requestBody: {$ref: "#/components/requestBodies/TextForm"}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Draft page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "The reason", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
         "404": {$ref: "#/components/responses/PageNotFound"}
   /run/{id}:
     x-code: ["/run/(\\d+)"]
     get:
       tags: [page]
-      summary: A job run
+      summary: A job run (TypeScript on `/api/run/{id}`)
       x-access: page
-      description: "Matched on `self.path` (no query string). Unknown run: 404 page."
+      description: "Matched on `url.path`. Unknown run: 404 page. Served from `frontend/dist` (`PORTED_PAGES`); without a build the answer is 503."
       parameters: [{$ref: "#/components/parameters/NumericId"}]
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}, "503": {description: "The frontend build is missing", content: {text/html; charset=utf-8: {schema: {type: string}}}}}
   /run/{id}/cancel:
     x-code: ["/run/(\\d+)/cancel"]
     post:
@@ -1692,6 +1767,70 @@ components:
         runs:
           type: array
           items: {$ref: "#/components/schemas/JobRunSummary"}
+    JobFacts:
+      type: object
+      required: [when, schedule, timezone, paused, next_times, kind, model, mode, repo, script, sources, deliver, nothing, skills, minutes, instruction]
+      properties:
+        when: {type: string, description: "the job's own words, '' when none"}
+        schedule: {type: string, description: "cron expression"}
+        timezone: {type: string}
+        paused: {type: boolean}
+        next_times: {type: array, items: {type: string}, description: "the next runs as 'ma 17-11 07:00' (a few of them)"}
+        kind: {type: string, description: "Dutch kind label"}
+        model: {type: string, enum: [local, claude]}
+        mode: {type: string, nullable: true, enum: [quick, deep, null]}
+        repo: {type: string, nullable: true}
+        script: {type: string, nullable: true, description: "script with its arguments"}
+        sources: {type: array, items: {type: string}}
+        deliver: {type: string, enum: [page, ntfy, conversation]}
+        nothing: {type: string, nullable: true, description: "the lines that define 'nothing to report'; null when deliver is page"}
+        skills: {type: array, items: {type: string}}
+        minutes: {type: integer, nullable: true, description: "minutes saved per run"}
+        instruction: {type: string}
+    JobDetail:
+      type: object
+      required: [name, error, paused, text, facts, runs, refresh]
+      properties:
+        name: {type: string}
+        error: {type: string, nullable: true, description: "why the job file is broken"}
+        paused: {type: boolean}
+        text: {type: string, description: "the job file"}
+        facts: {allOf: [{$ref: "#/components/schemas/JobFacts"}], nullable: true}
+        runs: {type: array, items: {$ref: "#/components/schemas/JobRunSummary"}}
+        refresh: {type: boolean}
+    DraftDetail:
+      type: object
+      required: [id, base, request, status, error, text, facts, text_error, refresh]
+      properties:
+        id: {type: integer}
+        base: {type: string, nullable: true, description: "the job this draft changes; null for a new job"}
+        request: {type: string}
+        status: {type: string, description: "drafting, ready, failed, confirmed or cancelled"}
+        error: {type: string, nullable: true, description: "why drafting failed"}
+        text: {type: string, description: "the job file as drafted"}
+        facts: {allOf: [{$ref: "#/components/schemas/JobFacts"}], nullable: true}
+        text_error: {type: string, nullable: true}
+        refresh: {type: boolean}
+    RunDetail:
+      allOf:
+        - {$ref: "#/components/schemas/JobRunSummary"}
+        - type: object
+          required: [text, note, cancellable, log_key, refresh]
+          properties:
+            text: {type: string, description: "the result as stored on the run"}
+            note: {type: string, nullable: true}
+            cancellable: {type: boolean}
+            log_key: {type: string, nullable: true, description: "key for GET /api/log/{key}; null for a Claude run (its log is on the task)"}
+            refresh: {type: boolean}
+    ResearchPage:
+      type: object
+      required: [claude_runs_today, claude_cap, modes, runs, refresh]
+      properties:
+        claude_runs_today: {type: integer}
+        claude_cap: {type: integer}
+        modes: {type: array, items: {type: string}}
+        runs: {type: array, items: {$ref: "#/components/schemas/JobRunSummary"}}
+        refresh: {type: boolean}
     CatalogueAgent:
       type: object
       required: [name, error]

@@ -46,7 +46,7 @@ langzaam als het rustig is, snel zolang er iets draait, oker of rood als er iets
 De staafjes van Deze week zijn LED-staafjes. Alleen donker, zoals de KITT-skin (de brief vroeg licht en donker; de
 gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-dashboard, en raken alleen transform,
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
-wijzigingen. Stijl: `web/app.css`; het overzicht is TypeScript (`frontend/`), de overige pagina's gebruiken `web/app.js` (live logs, Search).
+wijzigingen. Stijl: `web/app.css`; de pagina's zijn TypeScript (`frontend/`); alleen Search gebruikt nog `web/app.js`.
 
 ## Frontend project (H-021)
 
@@ -76,7 +76,7 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
   same HTML forms as before (hidden `csrf` field, same actions).
-- `PORTED_PAGES` defaults to `/,/jobs,/memory,/skills,/ssh,/taken,/task,/briefs` (Overview, Jobs, Memory (`frontend/src/pages/memory.ts`, data from `GET /api/memory` and `GET /api/memory/e/<id>`; `/memory/e/<id>` is the Memory path for an entry that exists; the add, save and delete forms post to `/memory/add` and `/memory/e/<id>/save|delete` with fetch and show the `{error}` of a 400), Skills (`frontend/src/pages/skills.ts`, data from `GET /api/skills`), SSH, the Tasks pages and Briefs; `/task` stands for every `/task/<id>`; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
+- `PORTED_PAGES` defaults to `/,/jobs,/job,/draft,/run,/research,/memory,/skills,/ssh,/taken,/task,/briefs` (Overview, Jobs, Memory (`frontend/src/pages/memory.ts`, data from `GET /api/memory` and `GET /api/memory/e/<id>`; `/memory/e/<id>` is the Memory path for an entry that exists; the add, save and delete forms post to `/memory/add` and `/memory/e/<id>/save|delete` with fetch and show the `{error}` of a 400), Skills (`frontend/src/pages/skills.ts`, data from `GET /api/skills`), SSH, the Tasks pages and Briefs; `/task` stands for every `/task/<id>`, likewise `/job`, `/draft` and `/run` (for a job, draft or run that exists; see "Job pages") and `/research` (also at `/job/research`); the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
   build, these pages (and `/briefs/<id>`) answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
   paths fall back to their Python page.
 - The Briefs page (`frontend/src/pages/briefs.ts`) reads `GET /api/briefs` and `GET /api/briefs/<id>`. Approve & build, Build and
@@ -84,6 +84,17 @@ In short, how the frontend fits into the inbox (details in the sections below):
   shown above the list.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
+
+## Job pages (H-022 F7b)
+
+`/job/<name>`, `/draft/<id>`, `/run/<id>` and `/research` are TypeScript (`frontend/src/pages/job.ts`; the live log of a
+local run is `log.ts`). Data: `GET /api/job/<name>` (facts, file and history; `facts` is null for a broken file),
+`GET /api/draft/<id>`, `GET /api/run/<id>` (with `log_key`, `cancellable`) and `GET /api/research` (`overview.job_detail`,
+`draft_detail`, `run_detail`, `research_data`). A page for an unknown name or id is a 404 page, with or without a build;
+without a build the others answer 503. The forms post to the same URLs as before (`/job/<name>/run|pause|resume|save|change|delete`,
+`/draft/<id>/confirm|cancel`, `/run/<id>/cancel`, `/research/ask`) with fetch (`frontend/src/form.ts`): a 303 is followed, and a
+failure is a 400 (429 for the research cap) `{"error": "..."}` that the page shows above the form, so what you typed stays in the box.
+A job named `research` makes `/job/research` that job and `/research` a 404. Tests: `tests/test_inbox_job_pages_api.py`.
 
 ## Tasks pages (H-022 F10)
 
@@ -122,12 +133,12 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/memory,/skills,/ssh,/taken,/task,/briefs`)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/job,/draft,/run,/research,/memory,/skills,/ssh,/taken,/task,/briefs`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
 listed path has no `frontend/dist/index.html`, a warning goes to the journal and the Python page is served; for a page
-whose Python code is deleted (`/`, `/jobs`, `/ssh`, `/taken`, `/task/<id>`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
+whose Python code is deleted (`/`, `/jobs`, `/job/<name>`, `/draft/<id>`, `/run/<id>`, `/research`, `/ssh`, `/taken`, `/task/<id>`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
 Tests: `tests/test_inbox_ported_pages.py`.
 
 Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs

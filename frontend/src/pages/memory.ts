@@ -1,9 +1,10 @@
 // The Memory page ("/memory", Geheugen): what Claude knows, searchable, with the add form; and one entry
 // ("/memory/e/<id>") with the edit and delete forms. Data from GET /api/memory and GET /api/memory/e/<id>.
 // The forms post to the same URLs as before (/memory/add, /memory/e/<id>/save|delete) with the CSRF token as a field.
-import { csrfToken, getJson } from "../api/client";
+import { getJson } from "../api/client";
 import type { paths } from "../api/schema";
 import { el, meta } from "../dom";
+import { submitForm as submit } from "../form";
 
 type MemoryPage = paths["/api/memory"]["get"]["responses"][200]["content"]["application/json; charset=utf-8"];
 type Entry = MemoryPage["sections"][number]["entries"][number];
@@ -19,26 +20,6 @@ function row(m: Entry): HTMLElement {
       el("span", { class: "kind", text: m.about }), m.status ? el("span", { class: "st", text: m.status }) : null),
     m.kind === "geschiedenis" ? null : el("div", { text: m.summary }),
     meta(m.changed_local, m.source));
-}
-
-/** Post a form to the old URL. A 303 means it worked (the page then goes to `next`); a 400/404 carries `{error}`. */
-async function submit(path: string, fields: Record<string, string>, error: HTMLElement, next: string): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "POST", cache: "no-store", redirect: "manual",
-      body: new URLSearchParams({ csrf: await csrfToken(), ...fields }),
-    });
-  } catch (ex) {
-    error.replaceChildren(`mislukt: ${(ex as Error).message}`);
-    return;
-  }
-  if (res.type === "opaqueredirect" || res.status === 303) {
-    location.assign(next);
-    return;
-  }
-  const data = await res.json().catch(() => ({}));
-  error.replaceChildren((data as { error?: string }).error || `mislukt (HTTP ${res.status})`);
 }
 
 function addForm(abouts: string[], error: HTMLElement): HTMLElement {

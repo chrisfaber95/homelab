@@ -9,7 +9,8 @@ from . import conversation, forge
 from .briefs import WITHOUT_ME, build_left_nothing, builds, live_build, load_briefs, split_frontmatter
 from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, SERVICES, STATUS_NL, TZ, _round_started
 from .helpers import first_line, label, read_json, read_log, repo_list
-from .jobs import JOB_KINDS, LLM_URL, RESEARCH_JOB, RUN_NL, claude_runs_today, job_runs, load_agents, run_view
+from .jobs import (JOB_KINDS, LLM_URL, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, claude_runs_today, draft_name, job_runs, load_agents,
+                   nothing_statement, parse_job, run_view)
 from .router import blocked_by, blocked_followups, children
 from .storage import db, tasks
 
@@ -243,6 +244,73 @@ def local_time(iso):
         return iso  # a date edited by hand in the memory
 
 
+def run_summary(r):
+    """One run as the lists show it (Jobs, a job's history, Research): see JobRunSummary in backend/openapi.yaml."""
+    status, summary, link, pr = run_view(r)
+    return {"id": r["id"], "job": r["job"], "job_url": job_link(r["job"]),
+            "due": local_time(r["due"]), "status": status, "status_label": RUN_NL.get(status, status),
+            "url": link, "model": "lokaal" if r["model"] == "local" else "Claude", "manual": bool(r["manual"]), "pr": pr,
+            "summary": first_line(summary) if summary else ""}
+
+
+def job_link(name):
+    return "/research" if name == RESEARCH_JOB and name not in JOBS else f"/job/{name}"
+
+
+def when(dt):
+    dt = dt.astimezone(TZ)
+    return f'{DAYS_NL[dt.weekday()]} {dt:%d-%m %H:%M}'
+
+
+def job_facts(job):
+    """The facts of a parsed job, as shown on a job page and a draft page (JobFacts in backend/openapi.yaml)."""
+    return {"when": job["when"] or "", "schedule": job["schedule"], "timezone": TZ.key, "paused": bool(job["paused"]),
+            "next_times": [when(t) for t in job["cron"].next_times(datetime.now(timezone.utc))],
+            "kind": JOB_KINDS[job["kind"]], "model": job["model"], "mode": job["mode"] or None,
+            "repo": job["repo"] or None, "script": " ".join([job["script"], *job["args"]]) if job["script"] else None,
+            "sources": list(job["sources"] or []), "deliver": job["deliver"],
+            "nothing": nothing_statement(job) if job["deliver"] != "page" else None, "skills": list(job["skills"]),
+            "minutes": job["minutes"], "instruction": job["instruction"]}
+
+
+def job_detail(name):
+    """GET /api/job/<name>: one job with its history and its file, for a name in JOBS."""
+    job = JOBS[name]
+    runs = job_runs(name)
+    return {"name": name, "error": job.get("error"), "paused": bool(job.get("paused")), "text": job.get("text", ""),
+            "facts": None if "error" in job else job_facts(job), "runs": [run_summary(r) for r in runs],
+            "refresh": any(run_view(r)[0] in ("queued", "running") for r in runs)}
+
+
+def draft_detail(d):
+    """GET /api/draft/<id>: a draft; a `ready` one comes with the facts of its file, or why the file is not valid."""
+    facts = text_error = None
+    text = d["text"] or ""
+    name = d["base"] or draft_name(text)
+    if d["status"] == "ready":
+        try:
+            facts = job_facts(parse_job(name, text))
+        except ValueError as ex:
+            text_error = str(ex)
+    return {"id": d["id"], "base": d["base"], "request": d["request"], "status": d["status"], "error": d["error"] or None,
+            "text": text, "facts": facts, "text_error": text_error, "refresh": d["status"] == "drafting"}
+
+
+def run_detail(r):
+    """GET /api/run/<id>: one run of a job; `log_key` is set for a local run (its log is read from /api/log/<key>)."""
+    status, _, _, _ = run_view(r)
+    return {**run_summary(r), "text": r["summary"] or "", "note": r["note"] or None, "cancellable": r["status"] == "running",
+            "log_key": f"r{r['id']}" if r["model"] == "local" else None, "refresh": status == "queued"}
+
+
+def research_data():
+    """GET /api/research: what the Research page shows: the cap counter, the modes and the 30 latest questions."""
+    runs = job_runs(RESEARCH_JOB, 30)
+    return {"claude_runs_today": claude_runs_today(), "claude_cap": int(CONF.get("JOB_CLAUDE_CAP", 10)),
+            "modes": list(RESEARCH_MODES), "runs": [run_summary(r) for r in runs],
+            "refresh": any(run_view(r)[0] in ("queued", "running", "claude") for r in runs)}
+
+
 def jobs_data():
     """What the Jobs page renders, as data (GET /api/jobs-page): the counter, the open drafts, the catalogue, all jobs and
     the latest runs. The texts are the ones the page shows (Dutch); a broken job or catalogue file has `error`."""
@@ -272,14 +340,7 @@ def jobs_data():
     with db() as c:
         drafts = c.execute("SELECT * FROM drafts WHERE status IN ('drafting','ready','failed') ORDER BY id DESC "
                            "LIMIT 10").fetchall()
-    runs = []
-    for r in job_runs(limit=20):
-        status, summary, link, pr = run_view(r)
-        runs.append({"id": r["id"], "job": r["job"],
-                     "job_url": "/research" if r["job"] == RESEARCH_JOB and r["job"] not in JOBS else f"/job/{r['job']}",
-                     "due": local_time(r["due"]), "status": status, "status_label": RUN_NL.get(status, status),
-                     "url": link, "model": model(r["model"]), "manual": bool(r["manual"]), "pr": pr,
-                     "summary": first_line(summary) if summary else ""})
+    runs = [run_summary(r) for r in job_runs(limit=20)]
     return {"claude_runs_today": claude_runs_today(), "claude_cap": int(CONF.get("JOB_CLAUDE_CAP", 10)),
             "timezone": TZ.key, "refresh": any(d["status"] == "drafting" for d in drafts),
             "drafts": [{"id": d["id"], "status": d["status"], "request": first_line(d["request"])} for d in drafts],

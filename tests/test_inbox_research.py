@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.update(INBOX_RUNNER_HOME=tempfile.mkdtemp(), NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import chat, conversation, jobs, overview, pages, queue, rounds  # noqa: E402
+from homelab_inbox import chat, conversation, jobs, overview, queue, rounds  # noqa: E402
 from homelab_inbox.storage import db, get  # noqa: E402
 
 FILE = ('---\nwhen: weekly\nschedule: "0 9 * * 1"\nkind: research\nmodel: claude\n{extra}---\n'
@@ -263,19 +263,18 @@ if __name__ == "__main__":
 
 
 class Page(unittest.TestCase):
+    """The data of the Research page (GET /api/research); the HTML is TypeScript (tests/test_inbox_job_pages_api.py)."""
+
     def setUp(self):
         reset()
 
-    def test_form_asks_question_and_mode_and_posts_to_ask(self):
-        html = pages.research_page()
-        self.assertIn('action="/research/ask"', html)
-        self.assertIn('name="question"', html)
-        self.assertIn('<option value="quick">', html)
-        self.assertIn('<option value="deep">', html)
+    def test_form_offers_the_modes_and_the_counter(self):
+        d = overview.research_data()
+        self.assertEqual(d["modes"], ["quick", "deep"])
+        self.assertEqual((d["claude_runs_today"], d["runs"]), (0, []))
 
-    def test_asked_question_shows_in_the_history_and_an_error_keeps_the_question(self):
+    def test_asked_question_shows_in_the_history(self):
         self.assertEqual(jobs.ask_research("What is <X>?", "quick")[0], 200)
-        self.assertIn("quick", pages.research_page())
-        html = pages.research_page(error="daily limit reached", question="Keep <me>")
-        self.assertIn("daily limit reached", html)
-        self.assertIn("Keep &lt;me&gt;", html)
+        d = overview.research_data()
+        self.assertEqual([r["job"] for r in d["runs"]], ["research"])
+        self.assertEqual(d["claude_runs_today"], 1)

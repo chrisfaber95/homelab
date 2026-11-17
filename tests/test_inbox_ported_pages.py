@@ -48,7 +48,7 @@ class PortedPages(unittest.TestCase):
             return e.code, e.read(), e.headers
 
     def test_default_ports_the_overview_jobs_ssh_tasks_and_briefs(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/memory", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/job", "/draft", "/run", "/research", "/memory", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/search")
         self.assertEqual(status, 200)

@@ -11,9 +11,9 @@ type Run = components["schemas"]["JobRunSummary"];
 
 const REFRESH_MS = 20000; // the page reloads itself while a draft is being drafted
 
-const link = (href: string, text: string): HTMLElement => el("a", { href, text });
+export const link = (href: string, text: string): HTMLElement => el("a", { href, text });
 const failed = (text: string): HTMLElement => el("span", { class: "st failed", text });
-const empty = (text: string): HTMLElement => el("p", { class: "empty", text });
+export const empty = (text: string): HTMLElement => el("p", { class: "empty", text });
 
 function form(csrf: string, action: string, button: string, cls?: string, ...inner: Child[]): HTMLElement {
   return el("form", { method: "post", action },
@@ -38,7 +38,7 @@ function jobRow(j: Job): HTMLElement {
     meta(j.when, `volgende: ${j.next}`, j.last ? `laatste: ${j.last}` : ""));
 }
 
-function runRow(r: Run): HTMLElement {
+export function runRow(r: Run): HTMLElement {
   return el("div", { class: "row" },
     el("div", { class: "row-title" }, link(r.job_url, r.job), link(r.url, r.due),
       el("span", { class: `st run-${r.status}`, text: r.status_label })),

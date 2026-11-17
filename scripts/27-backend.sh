@@ -98,7 +98,8 @@ NEW_JAR="$BUILD_STATE/out/inbox-backend.jar"
 # Nothing runs it as root; the service runs it as $SERVICE_USER.
 [[ -f $NEW_JAR && ! -L $NEW_JAR ]] || { echo "the build left no jar at $NEW_JAR" >&2; exit 1; }
 unzip -tqq "$NEW_JAR" >/dev/null || { echo "$NEW_JAR is not a valid jar" >&2; exit 1; }
-unzip -l "$NEW_JAR" | grep -q 'BOOT-INF/classes/dev/homelab/inbox/' || { echo "$NEW_JAR is not the inbox backend" >&2; exit 1; }
+# No grep -q here: it stops at the first match, unzip then dies of SIGPIPE (141) and pipefail fails the whole check.
+unzip -Z1 "$NEW_JAR" | grep '^BOOT-INF/classes/dev/homelab/inbox/' >/dev/null || { echo "$NEW_JAR is not the inbox backend" >&2; exit 1; }
 
 echo "== Install the jar and the unit"
 changed=0

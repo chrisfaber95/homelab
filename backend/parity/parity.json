@@ -1,13 +1,27 @@
 {
   "_comment": "Routes come from ../openapi.yaml (GET operations, H-020 C1). This file only adds what the spec cannot say.",
   "examples": {
-    "/api/job/{name}": ["/api/job/example"],
-    "/api/draft/{id}": ["/api/draft/1"],
-    "/api/run/{id}": ["/api/run/1"],
-    "/api/memory/e/{id}": ["/api/memory/e/1"],
-    "/api/briefs/{id}": ["/api/briefs/H-023"],
-    "/api/log/{key}": ["/api/log/t1"],
-    "/api/tasks/{id}": ["/api/tasks/1"]
+    "/api/job/{name}": [
+      "/api/job/example"
+    ],
+    "/api/draft/{id}": [
+      "/api/draft/1"
+    ],
+    "/api/run/{id}": [
+      "/api/run/1"
+    ],
+    "/api/memory/e/{id}": [
+      "/api/memory/e/1"
+    ],
+    "/api/briefs/{id}": [
+      "/api/briefs/H-023"
+    ],
+    "/api/log/{key}": [
+      "/api/log/t1"
+    ],
+    "/api/tasks/{id}": [
+      "/api/tasks/1"
+    ]
   },
   "exclude": [
     "/static/{file}",
@@ -15,8 +29,15 @@
   ],
   "skip": [],
   "ignore": {
-    "*": ["now", "generated_at", "csrf_token", "request_id"],
-    "/api/live": ["activity"],
-    "/api/overview": ["updated", "health"]
+    "*": [
+      "now",
+      "generated_at",
+      "csrf_token",
+      "request_id"
+    ],
+    "/api/overview": [
+      "x",
+      "status.at"
+    ]
   }
 }

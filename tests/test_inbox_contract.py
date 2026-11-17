@@ -12,6 +12,10 @@ INBOX_CONTRACT_BASE_URL
     that mode: INBOX_CONTRACT_CHAT_TOKEN, the bearer token of a chat client with the `read` permission, enables the
     chat-door checks that need a valid token. Do not point it at a box whose conversation or tasks you care about:
     the POST checks write there.
+    INBOX_CONTRACT_FACADE_SECRET: the shared secret of the Java backend (H-023 B6), sent as X-Inbox-Facade on every
+    request. Set it, with INBOX_CONTRACT_BASE_URL at the Java backend (http://127.0.0.1:8130), to run class MovedReads:
+    the routes that moved to Java (H-024 M1: /api/overview, /api/live, /api/log/*) answer what the spec says. Those
+    tests read only and need no arranged state, so they run in both modes; the tests that arrange state skip.
 
 Run: python3 -m unittest discover -s tests   (or: INBOX_CONTRACT_BASE_URL=http://127.0.0.1:PORT python3 tests/test_inbox_contract.py)
 """
@@ -31,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 EXTERNAL = os.environ.get("INBOX_CONTRACT_BASE_URL", "").rstrip("/")
 EXTERNAL_TOKEN = os.environ.get("INBOX_CONTRACT_CHAT_TOKEN", "")
+FACADE_SECRET = os.environ.get("INBOX_CONTRACT_FACADE_SECRET", "")
 SPEC_FILE = ROOT / "backend/openapi.yaml"
 JSON_UTF8, JSON_PLAIN = "application/json; charset=utf-8", "application/json"
 OWNER = "chris@example.com"
@@ -46,6 +51,7 @@ if not EXTERNAL:
     HOME, TOKENS = tempfile.mkdtemp(), tempfile.mkdtemp()
     os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                       CHAT_TOKEN_DIR=TOKENS)
+    os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
     sys.path.insert(0, str(ROOT / "bin"))
     from homelab_inbox import access, briefs, chat, config, conversation, forge, helpers, kitt, search, server, storage  # noqa: E402
 
@@ -239,7 +245,8 @@ class Contract(unittest.TestCase):
     def call(self, method, path, body=None, headers=None, raw=None):
         c = http.client.HTTPConnection(self.host, self.port, timeout=15)
         data = raw if raw is not None else (json.dumps(body) if body is not None else None)
-        c.request(method, path, data, headers or {})
+        headers = {**(headers or {}), **({"X-Inbox-Facade": FACADE_SECRET} if EXTERNAL and FACADE_SECRET else {})}
+        c.request(method, path, data, headers)
         r = c.getresponse()
         reply = Reply(r.status, dict(r.getheaders()), r.read())
         c.close()
@@ -278,7 +285,8 @@ class Contract(unittest.TestCase):
         content = resolve(responses[str(reply.status)]).get("content") or {}
         if "json" in reply.ctype and content:
             wanted = ctype or next(iter(content))  # the spec lists one JSON entry; forge's log is utf-8 under plain JSON
-            self.assertEqual(reply.ctype, wanted, f"{method} {spec_path} {reply.status}: content type")
+            same = lambda c: c.replace(" ", "").lower()  # noqa: E731  `;charset=` and `; charset=` are one media type
+            self.assertEqual(same(reply.ctype), same(wanted), f"{method} {spec_path} {reply.status}: content type")
             schema = (content.get(wanted) or next(iter(content.values()))).get("schema", {})
             self.assertEqual(violations(schema, reply.body), [], f"{spec_path} {reply}")
         elif content:  # an HTML page where the spec says HTML
@@ -617,6 +625,58 @@ class KittDoor(Contract):
         r = self.conforms(self.kitt("GET", "/api/health"), "/api/health", "get", 200, JSON_UTF8)
         self.assertEqual(r.body, {"checks": [{"name": "disk", "status": "warn", "text": ""},
                                              {"name": "gpu", "status": "ok", "text": "fine"}]})
+
+
+# =====================================================================================================================
+class MovedReads(Contract):
+    """The read routes that moved from Python to Java (H-024 M1): `/api/overview`, `/api/live` and `/api/log/*`. They
+    only read, so the same tests run against the in-process Python server and, with INBOX_CONTRACT_BASE_URL and
+    INBOX_CONTRACT_FACADE_SECRET, against the Java backend. The answers are checked against the spec, not against data."""
+
+    def setUp(self):
+        super().setUp()
+        if not EXTERNAL:
+            self.allow_page()
+
+    def test_overview(self):
+        r = self.conforms(self.call("GET", "/api/overview"), "/api/overview", "get", 200, JSON_UTF8)
+        self.assertEqual(set(r.body), {"status", "live", "timeline", "changes", "services", "forge_link", "switches",
+                                       "usage", "health"})
+        self.assertIn(r.body["status"]["class"], ("ok", "attention", "bad"))
+        self.assertEqual(len(r.body["usage"]["days"]), 7)
+        self.assertEqual(r.body["timeline"]["now_x"], 70.0)
+        self.assertEqual(r.headers.get("Cache-Control"), "no-store")
+
+    def test_live(self):
+        r = self.conforms(self.call("GET", "/api/live"), "/api/live", "get", 200, JSON_PLAIN)
+        self.assertEqual(set(r.body), {"items", "queued", "activity"})
+        self.assertEqual(r.ctype, JSON_PLAIN)  # no charset, as before
+        for item in r.body["items"]:
+            self.assertEqual(violations({"$ref": "#/components/schemas/LiveItem"}, item) if SPEC else [], [])
+
+    def test_a_log_that_does_not_exist_is_empty_and_done(self):
+        for key in ("t424242", "r424242"):
+            r = self.conforms(self.call("GET", f"/api/log/{key}"), "/api/log/{key}", "get", 200, JSON_PLAIN)
+            self.assertEqual(r.body, {"lines": [], "next": 0, "done": True})
+        r = self.call("GET", "/api/log/t424242?from=-5")  # a negative offset is 0
+        self.assertEqual(r.body, {"lines": [], "next": 0, "done": True})
+        r = self.call("GET", "/api/log/t424242?from=")  # a blank one counts as missing
+        self.assertEqual(r.status, 200)
+
+    def test_other_keys_are_not_found(self):
+        for path in ("/api/log/t", "/api/log/x1", "/api/log/t1/extra", "/api/log/T1"):
+            r = self.conforms(self.call("GET", path), "/api/log/{key}", "get", 404)
+            self.assertEqual((r.ctype.replace(" ", ""), r.body), (JSON_UTF8.replace(" ", ""), {"error": "Not found."}), path)
+
+    def test_from_must_be_a_number(self):
+        for key in ("t1", "r1", "f1"):
+            r = self.conforms(self.call("GET", f"/api/log/{key}?from=abc"), "/api/log/{key}", "get", 400)
+            self.assertEqual((r.ctype.replace(" ", ""), r.body), (JSON_UTF8.replace(" ", ""), {"error": "from must be a number"}), key)
+
+    def test_the_log_of_forge_is_a_chunk_or_a_502(self):
+        r = self.call("GET", "/api/log/f1?from=3")
+        self.assertIn(r.status, (200, 502), r)
+        self.conforms(r, "/api/log/{key}", "get", r.status, JSON_UTF8)  # forge's chunk is utf-8 under plain JSON in the spec
 
 
 # =====================================================================================================================

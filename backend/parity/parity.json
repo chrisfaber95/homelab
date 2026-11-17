@@ -6,8 +6,11 @@
     "/api/run/{id}": ["/api/run/1"],
     "/api/memory/e/{id}": ["/api/memory/e/1"],
     "/api/briefs/{id}": ["/api/briefs/H-023"],
-    "/api/log/{key}": ["/api/log/t1"],
+    "/api/log/{key}": ["/api/log/t1", "/api/log/f1", "/api/log/f1?from=1"],
     "/api/tasks/{id}": ["/api/tasks/1"]
+  },
+  "queries": {
+    "/api/search/results": ["?q=ports&project=homelab&type=&junk=1", "?q=a%20b~*&source=x"]
   },
   "exclude": [
     "/static/{file}",

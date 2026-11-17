@@ -116,6 +116,12 @@ fi
 grep -qx "Environment=BACKEND_PORT=$PORT" "$UNIT" || { echo "BACKEND_PORT in config/inbox.conf ($PORT) differs from the unit" >&2; exit 1; }
 grep -qx "Environment=BACKEND_HOST=$HOST" "$UNIT" || { echo "the unit must set BACKEND_HOST=$HOST (loopback only)" >&2; exit 1; }
 grep -qx "Environment=BACKEND_SECRET_FILE=$SECRET_FILE" "$UNIT" || { echo "the unit must set BACKEND_SECRET_FILE=$SECRET_FILE" >&2; exit 1; }
+# The upstreams of the forge and search proxies (H-024 M3): the unit repeats the addresses of config/inbox.conf.
+for key in FORGE_URL SEARCH_URL ROUTER_URL; do
+  want="$(sed -n "s/^$key=//p" "$REPO/config/inbox.conf" | tr -d '"')"
+  [[ -n $want ]] || { echo "$key is not set in config/inbox.conf" >&2; exit 1; }
+  grep -qx "Environment=$key=$want" "$UNIT" || { echo "$key in config/inbox.conf ($want) differs from the unit" >&2; exit 1; }
+done
 # The facade secret (B6): made once, never in the repo, readable by $SERVICE_USER only (both the inbox and the backend run as it).
 if [[ ! -s $SECRET_FILE ]]; then
   (umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$SECRET_FILE")

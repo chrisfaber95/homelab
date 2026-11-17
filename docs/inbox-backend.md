@@ -1,7 +1,7 @@
 # Inbox backend on the box (H-023, task B3)
 
 The Spring Boot backend (`backend/`, task B1) runs on the box beside the old Python inbox, as the systemd service
-`homelab-inbox-backend`. Nothing is switched over to it yet: it answers `GET /api/backend/health` and that is all
+`homelab-inbox-backend`. Since H-024 M3 it serves the forge and search proxies (below); before that it answered only `GET /api/backend/health`
 (plan: [`docs/architecture/inbox-split.md`](architecture/inbox-split.md)). The database it will use is described in
 [`docs/inbox-db.md`](inbox-db.md).
 
@@ -49,6 +49,55 @@ configured, the answer is 502 `{"error": ...}`; there is no fallback to a Python
 The backend (`FacadeSecretFilter`) answers 403 to every request without the right `X-Inbox-Facade` (constant-time
 compare), except `GET /api/backend/health`. Without a configured secret it refuses everything but health.
 Doors with their own token (chat, kitt) do not pass the owner check, so they cannot be forwarded.
+
+## Moved routes: forge and search proxies (H-024, M3)
+
+Java serves these routes now; `BACKEND_ROUTES="/api/forge,/api/search,/api/log/f1"` in `config/inbox.conf` makes the
+Python server forward them (after its own access and CSRF checks). Code: `backend/src/main/java/dev/homelab/inbox/proxy/`
+(`ForgeController`, `SearchController`, `Upstream`, `ApiErrorHandler`); the Python originals (`forge.py`, `search.py`, the
+handlers in `server.py`) stay in place, unused for these paths, so the rollback is a plain revert.
+
+| Route | Upstream |
+| --- | --- |
+| `GET /api/forge`, `POST /api/forge/start`, `POST /api/forge/stop` | forge `FORGE_URL` (`/api/state`, `/api/start`, `/api/stop`) |
+| `GET /api/log/f1?from=N` | forge `GET /api/log?from=N` |
+| `GET /api/search/filters`, `GET /api/search/results` | `SEARCH_URL` `/v1/filters`, `/v1/search` |
+| `POST /api/search/ask` | `SEARCH_URL` `/v1/ask` (waits up to 330 s) |
+| `POST /api/search/feedback` | `ROUTER_URL` `/v1/feedback` |
+
+Same paths, request fields, response bodies and error texts as before (errors flattened to `{"error": "text"}`, 502
+`Forge is not reachable ...`, `The search service is unreachable: ...`, 404 `{"error": "Not found."}` for other paths under
+these prefixes). Known small differences: the Content-Type is written `application/json;charset=utf-8` (no space; Tomcat),
+the text after `unreachable:` is Java's exception text, and a Start/Stop no longer drops the Python 2-second cache of
+the "Nu bezig" row, so that row can lag by a few seconds after a press. Discord and kitt do not use these routes
+(they call the Python modules in process or their own doors).
+
+- **Upstreams.** `FORGE_URL`, `SEARCH_URL`, `ROUTER_URL` come from the unit (same values as `config/inbox.conf`;
+  `scripts/27-backend.sh` fails when they differ). Forge listens on the Tailscale address, so the unit has
+  `IPAddressAllow=100.85.70.34/32` next to loopback.
+- **No fallback.** When the backend is down these routes answer 502 (`the backend is not available`); check
+  `systemctl status homelab-inbox-backend` first.
+- **Order after the merge.** `27-backend.sh` (new jar and unit) and `21-inbox.sh` (new conf) both rerun; until both are
+  done the routes may answer 502 for a moment.
+
+### Tests and parity (results of this change)
+
+- `./mvnw verify` in `backend/`: `ProxyControllersTest` (fake upstream; 11 cases) and `DeadUpstreamTest`.
+- Contract tests against Java: start the backend with the three URLs set to `http://127.0.0.1:<P>` and run
+  `INBOX_CONTRACT_JAVA_URL=http://127.0.0.1:<port> INBOX_CONTRACT_JAVA_SECRET=<secret> INBOX_CONTRACT_UPSTREAM_PORT=<P>
+  python3 -m unittest tests.test_inbox_contract.PageMachineEndpoints`. The in-process Python server forwards the moved
+  routes to Java exactly as in production; all 13 cases pass (with a wrong secret they fail, so Java is really in the path).
+- Parity: `python3 backend/parity/m3_fixture.py --java-url http://127.0.0.1:<port> --java-secret <secret> --upstream-port <P>`
+  starts a fake upstream and the Python handler, then compares the GET routes (`/api/forge`, `/api/log/f1`, `/api/search/*`
+  including query variants from `parity.json` `queries`): 7 same, 0 different.
+- The whole Python suite passes (485 tests). The suites set `BACKEND_ROUTES=""` so the Python handlers stay tested.
+
+### Rollback
+
+No store is involved: these routes read and write nothing of their own. Revert this PR (it puts `BACKEND_ROUTES=""` back
+and removes the Java routes), let the merge rerun `21-inbox.sh` and `27-backend.sh`. For a quick stop without a revert:
+set `BACKEND_ROUTES=""` in `config/inbox.conf` and run `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`; the Python
+handlers answer again at once.
 
 ## Checks (the script fails loudly when one fails)
 

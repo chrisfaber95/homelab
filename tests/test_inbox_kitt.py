@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HOME = tempfile.mkdtemp()
-os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"))
+os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", BACKEND_ROUTES="", REPOS_CONF=str(ROOT / "config/repos.conf"))
 ALL = ["read", "write", "ask", "start_task", "run_job", "approve"]
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import access, briefs, chat, config, conversation, gate, kitt, overview, server, storage  # noqa: E402

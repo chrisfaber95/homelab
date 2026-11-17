@@ -48,6 +48,7 @@ def build_routes(paths, config):
             out.extend((e, "listed in skip" if p in skip else None) for e in examples)
         else:
             out.append((p, "listed in skip" if p in skip else None))
+            out.extend((p + q, "listed in skip" if p in skip else None) for q in config.get("queries", {}).get(p, []))
     return out
 
 
@@ -58,7 +59,7 @@ def spec_key(path, config):
     for template, examples in config.get("examples", {}).items():
         if path in examples:
             return template
-    return path
+    return path.split("?")[0]
 
 
 # --- normalization and comparison ------------------------------------------------------------------------------------

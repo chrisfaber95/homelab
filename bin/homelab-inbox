@@ -39,8 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from homelab_inbox.config import JOBS, STATUS_NL
 from homelab_inbox.helpers import first_line
 from homelab_inbox.jobs import RUN_NL, job_runs, load_jobs, run_view
-from homelab_inbox.memory import MEMORY, load_memory
-from homelab_inbox.pages import local, mem_matches, next_run
+from homelab_inbox.memory import MEMORY, load_memory, mem_matches
+from homelab_inbox.pages import local, next_run
 from homelab_inbox.server import serve
 from homelab_inbox.storage import tasks
 

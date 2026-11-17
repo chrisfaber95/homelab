@@ -1319,7 +1319,7 @@ export interface paths {
          * Edit (save) or erase (delete) a memory entry
          * @description One commit on the `memory` branch of DATA_REPO on behalf of the owner. `text` is required, max 4000 characters,
          *     and must not look like a secret (`SECRET_RE`). Success: 303 to `/memory/e/<id>` (save) or `/memory` (delete).
-         *     Unknown entry: 404 page. Validation error: 400 with the entry page and the message.
+         *     Unknown entry: 404 `{"error": ...}`. Validation error: 400 `{"error": ...}`. The Memory page posts these forms with fetch and shows the message.
          */
         post: {
             parameters: {
@@ -1337,17 +1337,25 @@ export interface paths {
             requestBody: components["requestBodies"]["TextForm"];
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Entry page with error (de tekst is leeg / hooguit 4000 tekens / lijkt een token ...) */
+                /** @description `{"error": ...}` (de tekst is leeg / hooguit 4000 tekens / lijkt een token ...) */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];
-                404: components["responses"]["PageNotFound"];
+                /** @description `{"error": "Niet gevonden."}` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -1368,8 +1376,8 @@ export interface paths {
         /**
          * Add a memory entry
          * @description Form: `kind` (`voorkeuren` or `feiten`), `about` (`algemeen`, `box` or a repo name), `name` (trimmed; the id
-         *     `kind/about/name` must match `MEM_ID_RE`), `text` (as above). 303 to `/memory/e/<id>`; 400 with the memory page
-         *     and a message (including "bestaat al" when the id exists).
+         *     `kind/about/name` must match `MEM_ID_RE`), `text` (as above). 303 to `/memory/e/<id>`; 400 `{"error": ...}`
+         *     with a message (including "bestaat al" when the id exists).
          */
         post: {
             parameters: {
@@ -1395,13 +1403,13 @@ export interface paths {
             };
             responses: {
                 303: components["responses"]["Redirect"];
-                /** @description Memory page with error */
+                /** @description `{"error": ...}` */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/html; charset=utf-8": string;
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
                     };
                 };
                 403: components["responses"]["PageForbiddenCsrf"];

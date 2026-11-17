@@ -670,7 +670,7 @@ paths:
       description: |
         One commit on the `memory` branch of DATA_REPO on behalf of the owner. `text` is required, max 4000 characters,
         and must not look like a secret (`SECRET_RE`). Success: 303 to `/memory/e/<id>` (save) or `/memory` (delete).
-        Unknown entry: 404 page. Validation error: 400 with the entry page and the message.
+        Unknown entry: 404 `{"error": ...}`. Validation error: 400 `{"error": ...}`. The Memory page posts these forms with fetch and shows the message.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}, allowReserved: true}
         - {name: action, in: path, required: true, schema: {type: string, enum: [save, delete]}}
@@ -678,9 +678,9 @@ paths:
       requestBody: {$ref: "#/components/requestBodies/TextForm"}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Entry page with error (de tekst is leeg / hooguit 4000 tekens / lijkt een token ...)", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "`{\"error\": ...}` (de tekst is leeg / hooguit 4000 tekens / lijkt een token ...)", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
-        "404": {$ref: "#/components/responses/PageNotFound"}
+        "404": {description: "`{\"error\": \"Niet gevonden.\"}`", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
   /memory/add:
     x-code: ["/memory/add"]
     post:
@@ -689,8 +689,8 @@ paths:
       x-access: page
       description: |
         Form: `kind` (`voorkeuren` or `feiten`), `about` (`algemeen`, `box` or a repo name), `name` (trimmed; the id
-        `kind/about/name` must match `MEM_ID_RE`), `text` (as above). 303 to `/memory/e/<id>`; 400 with the memory page
-        and a message (including "bestaat al" when the id exists).
+        `kind/about/name` must match `MEM_ID_RE`), `text` (as above). 303 to `/memory/e/<id>`; 400 `{"error": ...}`
+        with a message (including "bestaat al" when the id exists).
       parameters: [{$ref: "#/components/parameters/Origin"}]
       requestBody:
         required: true
@@ -707,7 +707,7 @@ paths:
                 text: {type: string, maxLength: 4000}
       responses:
         "303": {$ref: "#/components/responses/Redirect"}
-        "400": {description: "Memory page with error", content: {text/html; charset=utf-8: {schema: {type: string}}}}
+        "400": {description: "`{\"error\": ...}`", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
         "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
   /task/{id}:
     x-code: ["/task/(\\d+)"]

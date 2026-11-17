@@ -39,7 +39,9 @@ class JobsApi(unittest.TestCase):
         JOBS.clear()
         JOBS["a-job"] = jobs.parse_job("a-job", JOB, repos={}, skills={})
         JOBS["b-broken"] = {"error": "kapot <b>bestand</b>"}
-        with db() as c:
+        with db() as c:  # other test files share this database when discover runs them in one process
+            c.execute("DELETE FROM drafts")
+            c.execute("DELETE FROM job_runs")
             c.execute("INSERT INTO drafts (created, request, status) VALUES ('2026-11-16T07:00:00+00:00', "
                       "'Eerste regel <x>\nTweede regel', 'drafting')")
             c.execute("INSERT INTO drafts (created, request, status) VALUES ('2026-11-16T07:01:00+00:00', "
@@ -53,6 +55,9 @@ class JobsApi(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        with db() as c:
+            c.execute("DELETE FROM drafts")
+            c.execute("DELETE FROM job_runs")
         jobs.AGENTS_DIR = cls._old[0]
         JOBS.clear()
         JOBS.update(cls._old[1])

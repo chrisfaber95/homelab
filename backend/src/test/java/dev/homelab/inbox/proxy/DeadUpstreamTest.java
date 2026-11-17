@@ -10,11 +10,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /** Nothing listens on the upstream addresses (port 1): every proxy answers 502 with the Python inbox's messages. */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = {"backend.secret=test-secret",
-        "forge.url=http://127.0.0.1:1", "search.url=http://127.0.0.1:1", "router.url=http://127.0.0.1:1"})
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "backend.secret=test-secret")
 class DeadUpstreamTest {
+
+    @DynamicPropertySource
+    static void dead(DynamicPropertyRegistry registry) {
+        String dead = "http://127.0.0.1:1";
+        registry.add("inbox.config-dir", () -> ProxyControllersTest.configDir(dead, dead, dead));
+    }
 
     @Value("${local.server.port}")
     int port;
@@ -32,7 +39,6 @@ class DeadUpstreamTest {
         String unreachable = "{\"error\":\"Forge is not reachable (is homelab-app-forge running?).\"}";
         assertThat(send("GET", "/api/forge", null).body()).isEqualTo(unreachable);
         assertThat(send("GET", "/api/forge", null).statusCode()).isEqualTo(502);
-        assertThat(send("GET", "/api/log/f1", null).body()).isEqualTo(unreachable);
         HttpResponse<String> control = send("POST", "/api/forge/start", "");
         assertThat(control.statusCode()).isEqualTo(502);
         assertThat(control.body()).startsWith("{\"error\":\"Forge refused start (HTTP 502): The search service is unreachable: ");

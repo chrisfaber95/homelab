@@ -1,6 +1,6 @@
 # homelab: H-023 (B3), the Spring Boot backend of the inbox, beside the old Python inbox. Installed by
 # scripts/27-backend.sh; the jar is built there. Loopback only: it binds 127.0.0.1:8130 (BACKEND_HOST/BACKEND_PORT)
-# and IPAddressDeny=any lets nothing but loopback traffic (and the call to forge on the box's own Tailscale address) through; there is no ufw rule and no tailnet port.
+# and IPAddressDeny=any lets nothing but loopback traffic through; there is no ufw rule and no tailnet port.
 # Runs as inbox-runner, the account the PostgreSQL role inbox_app trusts (peer authentication over the unix socket,
 # scripts/28-inbox-db.sh): a DynamicUser would have another name and be refused. Docs: docs/inbox-backend.md.
 [Unit]
@@ -19,10 +19,9 @@ Environment="SPRING_DATASOURCE_URL=jdbc:postgresql://localhost/inbox?socketFacto
 Environment=SPRING_DATASOURCE_USERNAME=inbox_app
 # The secret the Python facade sends in X-Inbox-Facade (B6); the file is made by scripts/27-backend.sh (0600, inbox-runner).
 Environment=BACKEND_SECRET_FILE=/var/lib/homelab-inbox/backend-secret
-# The upstreams of the forge and search proxies (H-024 M3), the same addresses as in config/inbox.conf (27-backend.sh checks).
-Environment=FORGE_URL=http://100.85.70.34:8120
-Environment=SEARCH_URL=http://127.0.0.1:8019
-Environment=ROUTER_URL=http://127.0.0.1:8018
+# H-024 M1: the read routes read the Python inbox's files (inbox.db read-only, logs, job files, monitor state) and the
+# installed config directory, as inbox-runner like the old inbox. INBOX_CONFIG_DIR is where 21-inbox.sh installs config/.
+Environment=INBOX_CONFIG_DIR=/usr/local/lib/homelab/config
 # Explicit heap: 256 MiB at most, and an OOM ends the process so systemd restarts it. Measure it (docs/inbox-backend.md).
 ExecStart=/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:MaxDirectMemorySize=64m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar
 Restart=on-failure
@@ -52,10 +51,9 @@ AmbientCapabilities=
 # IPv4/IPv6 for the loopback listener, AF_UNIX for the PostgreSQL socket in /var/run/postgresql.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 IPAddressDeny=any
-IPAddressAllow=127.0.0.0/8 ::1/128
-# Forge (H-015) listens on the Tailscale address of the box, not on loopback: the one address outside loopback the
-# backend may call (outgoing, to itself; nothing listens on it here).
-IPAddressAllow=100.85.70.34/32
+# 100.85.70.34 is the box's own tailnet address: forge listens there (FORGE_URL), and the M1 read routes (H-024) ask it
+# for its state and log. Traffic to the box itself; nothing leaves it.
+IPAddressAllow=127.0.0.0/8 ::1/128 100.85.70.34/32
 
 [Install]
 WantedBy=multi-user.target

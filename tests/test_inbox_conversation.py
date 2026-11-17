@@ -23,6 +23,7 @@ os.environ["CLIENTS_JSON"] = json.dumps({"clients": {
     "discord": {"permissions": ["read", "write", "ask", "answer"]},
     "reader": {"permissions": ["read"]},
     "mute": {"permissions": []}}})
+os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import config, conversation, helpers, server  # noqa: E402
 

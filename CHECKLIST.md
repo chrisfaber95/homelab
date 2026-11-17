@@ -418,6 +418,22 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
       "inbox database ready" (round trip as `inbox-runner` → `inbox_app` over the socket). `ss -ltnp | grep -i postgres` prints nothing;
       `sudo -u postgres psql -c 'show listen_addresses'` is empty; forge and ashfall still work. Docs: `docs/inbox-db.md`.
 
+## H-024: overview, live and log reads in Java (M1)
+
+- [ ] After the merge `homelab-admin` runs `21-inbox.sh` and then `27-backend.sh` (a few minutes in between where the Overview shows an error;
+      see `docs/inbox-backend.md`). Then open the homelab page on the phone: the Overview, "Nu bezig" and a task's live log work as before;
+      `python3 backend/parity/parity.py --only /api/overview --only /api/live --only /api/log --java-secret-file /var/lib/homelab-inbox/backend-secret`
+      (from a tailnet device or with a tunnel, see "Parity runs") prints no `DIFF` (a `started` difference on a task in its second round is known).
+      Rollback: revert the PR, no re-import needed.
+
+## H-024: skills and memory reads in Java (M2)
+
+- [ ] After the merge `homelab-admin` runs `21-inbox.sh` and then `27-backend.sh` (a few minutes in between where the Skills and Memory pages show an
+      error; see `docs/inbox-backend.md`). Then on the phone: the Skills tab (skills, jobs per skill, proposals), the Geheugen tab (list, search, one
+      entry) look as before, and adding, editing and deleting an entry still works (writes stay in Python).
+      `python3 backend/parity/parity.py --only /api/skills --only /api/memory --java-secret-file /var/lib/homelab-inbox/backend-secret`
+      (from a tailnet device or with a tunnel, see "Parity runs") prints no `DIFF`. Rollback: revert the PR, no re-import needed.
+
 ## H-023: inbox backend (B3)
 
 - [ ] After the merge `homelab-admin` runs `27-backend.sh` (or: `sudo bash /var/lib/homelab/repo/scripts/27-backend.sh`; it needs

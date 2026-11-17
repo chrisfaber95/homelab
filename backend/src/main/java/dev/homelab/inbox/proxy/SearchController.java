@@ -2,12 +2,12 @@ package dev.homelab.inbox.proxy;
 
 import dev.homelab.inbox.proxy.Upstream.Answer;
 import dev.homelab.inbox.proxy.Upstream.Reply;
+import dev.homelab.inbox.read.Settings;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
-import org.springframework.beans.factory.annotation.Value;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.util.MultiValueMap;
@@ -29,12 +29,10 @@ public class SearchController {
     private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9_-]{6,64}");
     private static final int ASK_SECONDS = 330;  // a hard question goes to Claude, whose tier timeout is up to 300 s
 
-    private final String searchUrl;
-    private final String routerUrl;
+    private final Settings settings;
 
-    public SearchController(@Value("${search.url}") String searchUrl, @Value("${router.url}") String routerUrl) {
-        this.searchUrl = searchUrl.strip().replaceAll("/+$", "");
-        this.routerUrl = routerUrl.strip().replaceAll("/+$", "");
+    public SearchController(Settings settings) {
+        this.settings = settings;
     }
 
     @GetMapping("/api/search/filters")
@@ -43,7 +41,7 @@ public class SearchController {
     }
 
     private Answer filtersAnswer() {
-        Reply reply = Upstream.call(searchUrl + "/v1/filters", null, 30);
+        Reply reply = Upstream.call(settings.searchUrl() + "/v1/filters", null, 30);
         return Upstream.respond(reply.status(), reply.body());
     }
 
@@ -60,7 +58,7 @@ public class SearchController {
                 query.append('&').append(field).append('=').append(encode(value));
             }
         }
-        Reply reply = Upstream.call(searchUrl + "/v1/search?" + query, null, 30);
+        Reply reply = Upstream.call(settings.searchUrl() + "/v1/search?" + query, null, 30);
         return Upstream.respond(reply.status(), reply.body());
     }
 
@@ -84,7 +82,7 @@ public class SearchController {
         if (List.of("1", "true", "on").contains(form.getOrDefault("hard", ""))) {
             body.put("hard", true);
         }
-        Reply reply = Upstream.call(searchUrl + "/v1/ask", body, ASK_SECONDS);
+        Reply reply = Upstream.call(settings.searchUrl() + "/v1/ask", body, ASK_SECONDS);
         return Upstream.respond(reply.status(), reply.body());
     }
 
@@ -107,7 +105,7 @@ public class SearchController {
         } else {
             body.put("note", note);
         }
-        Reply reply = Upstream.call(routerUrl + "/v1/feedback", body, 30);
+        Reply reply = Upstream.call(settings.routerUrl() + "/v1/feedback", body, 30);
         return Upstream.respond(reply.status(), reply.body());
     }
 

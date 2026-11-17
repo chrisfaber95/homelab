@@ -55,12 +55,22 @@ class ProxyControllersTest {
         upstream.start();
     }
 
+    /** A config directory whose inbox.conf names the upstreams (the backend reads them like the Python inbox does). */
+    static String configDir(String forge, String search, String router) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("inbox-conf");
+            java.nio.file.Files.writeString(dir.resolve("inbox.conf"),
+                    "FORGE_URL=\"" + forge + "\"\nSEARCH_URL=\"" + search + "\"\nROUTER_URL=\"" + router + "\"\n");
+            return dir.toString();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @DynamicPropertySource
     static void upstreams(DynamicPropertyRegistry registry) {
         String base = "http://127.0.0.1:" + upstream.getAddress().getPort();
-        registry.add("forge.url", () -> base);
-        registry.add("search.url", () -> base);
-        registry.add("router.url", () -> base);
+        registry.add("inbox.config-dir", () -> configDir(base, base, base));
     }
 
     @AfterAll
@@ -135,43 +145,7 @@ class ProxyControllersTest {
     void unknownActionsAndWrongMethodsAre404() throws Exception {
         assertJson(send("POST", "/api/forge/restart", ""), 404, "{\"error\":\"Not found.\"}");
         assertJson(send("GET", "/api/forge/start", null), 404, "{\"error\":\"Not found.\"}");
-        assertJson(send("GET", "/api/log/f1/extra", null), 404, "{\"error\":\"Not found.\"}");
         assertThat(SEEN).isEmpty();
-    }
-
-    @Test
-    void forgeLog() throws Exception {
-        HttpResponse<String> r = send("GET", "/api/log/f1?from=3", null);
-        assertThat(r.statusCode()).isEqualTo(200);
-        assertThat(SEEN).contains("GET /api/log?from=3");
-        JsonNode body = Upstream.JSON.readTree(r.body());
-        assertThat(body.get("next").intValue()).isEqualTo(2);
-        assertThat(body.get("done").booleanValue()).isTrue();
-        assertThat(body.get("lines").get(0).toString()).isEqualTo(
-                "{\"at\":\"2026-11-16T10:00:01+00:00\",\"kind\":\"tool\",\"text\":\"Bash: ls\"}");
-        JsonNode plain = body.get("lines").get(1);
-        assertThat(plain.get("kind").stringValue()).isEqualTo("info");
-        assertThat(plain.get("text").stringValue()).isEqualTo("plain line");
-        assertThat(plain.get("at").stringValue()).matches("\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\+00:00");
-    }
-
-    @Test
-    void forgeLogOffsetsAndErrors() throws Exception {
-        send("GET", "/api/log/f1?from=-5", null);
-        send("GET", "/api/log/f1", null);
-        assertThat(SEEN).containsExactly("GET /api/log?from=0", "GET /api/log?from=0");
-        assertJson(send("GET", "/api/log/f1?from=abc", null), 400, "{\"error\":\"from must be a number\"}");
-        ANSWERS.put("/api/log", new Canned(500, "{}"));
-        assertJson(send("GET", "/api/log/f1", null), 502, "{\"error\":\"Forge is not reachable (is homelab-app-forge running?).\"}");
-    }
-
-    @Test
-    void logKindsFollowForgesWords() {
-        assertThat(ForgeController.kindOf("Refused to start")).isEqualTo("error");
-        assertThat(ForgeController.kindOf("step 3 failed")).isEqualTo("error");
-        assertThat(ForgeController.kindOf("Claude finished")).isEqualTo("claude");
-        assertThat(ForgeController.kindOf("Edit: src/app.py")).isEqualTo("tool");
-        assertThat(ForgeController.kindOf("just words")).isEqualTo("info");
     }
 
     @Test

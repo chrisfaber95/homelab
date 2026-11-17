@@ -1,7 +1,8 @@
 # backend
 
 Spring Boot backend of the homelab inbox (brief H-023, plan `docs/architecture/inbox-split.md`). It runs beside the
-Python inbox; nothing is switched over to it yet. For now it only has `GET /api/backend/health`.
+Python inbox. It has `GET /api/backend/health` and, since H-024 M1, the read routes `GET /api/overview`, `GET /api/live`
+and `GET /api/log/{key}` (package `dev.homelab.inbox.read`; see `docs/inbox-backend.md`). Nothing else is switched over.
 
 - Java 21, Spring Boot 4.1.2 (the parent POM pins all plugin and dependency versions), Maven 3.9.16 through the
   wrapper (`mvnw`, version and checksum in `.mvn/wrapper/maven-wrapper.properties`).
@@ -9,6 +10,13 @@ Python inbox; nothing is switched over to it yet. For now it only has `GET /api/
   database has no TCP listener), sqlite-jdbc (only for the one-off import) and the test starter. The datasource and Flyway auto-configuration are still switched
   off in `application.properties`: the running service has no database connection until the install and import tasks
   (B3) add it. The migrations below are exercised by the tests and by `import-sqlite`.
+
+## Read routes (H-024 M1)
+
+`GET /api/overview`, `/api/live` and `/api/log/{key}` live in `src/main/java/dev/homelab/inbox/read/`. They read the Python
+inbox's files read-only (`inbox.db` through sqlite-jdbc, logs, job files, monitor state), so the tests build the same
+state for both servers: `python3 -m unittest tests.test_inbox_m1_parity` from the repo root (needs `./mvnw package` first;
+CI runs it). Details and the rollback: `docs/inbox-backend.md`.
 
 ## Build and test
 

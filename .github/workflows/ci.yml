@@ -51,3 +51,7 @@ jobs:
           cache: maven
           cache-dependency-path: backend/pom.xml
       - run: ./mvnw --batch-mode verify
+      # H-024 M1: the Python inbox and the built jar answer the moved read routes the same (parity harness, contract tests).
+      - run: sudo apt-get install -y python3-yaml
+      - run: python3 -m unittest tests.test_inbox_m1_parity -v
+        working-directory: .

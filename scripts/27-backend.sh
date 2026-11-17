@@ -67,6 +67,8 @@ systemctl stop homelab-backend-build.service 2>/dev/null || true
 rm -rf "$BUILD_STATE/out"
 # The state directory belongs to the dynamic user: it is created (and chowned to the current dynamic uid) by systemd.
 # Tests run in CI (job `backend`), not here: the box has no throwaway PostgreSQL for them yet (Q5, task B4).
+# The inline script below must not use brace expansions (dollar-brace): systemd-run expands those itself before bash
+# runs it (unknown names become empty), which broke the jar check. Plain $var and $1 pass through unchanged.
 systemd-run --quiet --wait --pipe --collect --unit=homelab-backend-build \
   -p DynamicUser=yes -p StateDirectory=homelab-backend-build -p StateDirectoryMode=0700 \
   -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p PrivateDevices=yes \
@@ -84,9 +86,9 @@ systemd-run --quiet --wait --pipe --collect --unit=homelab-backend-build \
     cp -a "$SRC_COPY"/. "$work"/
     cd "$work"
     ./mvnw -B -ntp -Dmaven.repo.local="$state/m2" package -DskipTests
-    jars=(target/inbox-backend-*.jar)
-    [[ ${#jars[@]} -eq 1 && -f ${jars[0]} ]] || { echo "expected exactly one target/inbox-backend-*.jar" >&2; exit 1; }
-    cp "${jars[0]}" "$state/out/inbox-backend.jar"
+    set -- target/inbox-backend-*.jar
+    [[ $# -eq 1 && -f $1 ]] || { echo "expected exactly one target/inbox-backend-*.jar" >&2; exit 1; }
+    cp "$1" "$state/out/inbox-backend.jar"
     rm -rf "$work"
   ' || { echo "the Maven build failed (output above)" >&2; exit 1; }
 rm -rf "$SRC_COPY"
@@ -96,7 +98,8 @@ NEW_JAR="$BUILD_STATE/out/inbox-backend.jar"
 # Nothing runs it as root; the service runs it as $SERVICE_USER.
 [[ -f $NEW_JAR && ! -L $NEW_JAR ]] || { echo "the build left no jar at $NEW_JAR" >&2; exit 1; }
 unzip -tqq "$NEW_JAR" >/dev/null || { echo "$NEW_JAR is not a valid jar" >&2; exit 1; }
-unzip -l "$NEW_JAR" | grep -q 'BOOT-INF/classes/dev/homelab/inbox/' || { echo "$NEW_JAR is not the inbox backend" >&2; exit 1; }
+# No grep -q here: it stops at the first match, unzip then dies of SIGPIPE (141) and pipefail fails the whole check.
+unzip -Z1 "$NEW_JAR" | grep '^BOOT-INF/classes/dev/homelab/inbox/' >/dev/null || { echo "$NEW_JAR is not the inbox backend" >&2; exit 1; }
 
 echo "== Install the jar and the unit"
 changed=0
@@ -116,12 +119,6 @@ fi
 grep -qx "Environment=BACKEND_PORT=$PORT" "$UNIT" || { echo "BACKEND_PORT in config/inbox.conf ($PORT) differs from the unit" >&2; exit 1; }
 grep -qx "Environment=BACKEND_HOST=$HOST" "$UNIT" || { echo "the unit must set BACKEND_HOST=$HOST (loopback only)" >&2; exit 1; }
 grep -qx "Environment=BACKEND_SECRET_FILE=$SECRET_FILE" "$UNIT" || { echo "the unit must set BACKEND_SECRET_FILE=$SECRET_FILE" >&2; exit 1; }
-# The upstreams of the forge and search proxies (H-024 M3): the unit repeats the addresses of config/inbox.conf.
-for key in FORGE_URL SEARCH_URL ROUTER_URL; do
-  want="$(sed -n "s/^$key=//p" "$REPO/config/inbox.conf" | tr -d '"')"
-  [[ -n $want ]] || { echo "$key is not set in config/inbox.conf" >&2; exit 1; }
-  grep -qx "Environment=$key=$want" "$UNIT" || { echo "$key in config/inbox.conf ($want) differs from the unit" >&2; exit 1; }
-done
 # The facade secret (B6): made once, never in the repo, readable by $SERVICE_USER only (both the inbox and the backend run as it).
 if [[ ! -s $SECRET_FILE ]]; then
   (umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$SECRET_FILE")

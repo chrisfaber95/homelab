@@ -127,12 +127,16 @@ def mem_json(m):
             "changed_local": mem_local(m["changed"])}
 
 
+def mem_matches(m, words):
+    hay = " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
+    return all(w in hay for w in words)
+
+
 def memory_view(q=""):
-    """What memory_page renders: the three sections (history newest first, cut to 30 unless there is a query), the
+    """What the Memory page (frontend/src/pages/memory.ts) renders: the three sections (history newest first, cut to 30 unless there is a query), the
     entries per section and the `about` choices of the add form."""
     words = q.lower().split()
-    hits = [m for m in MEMORY if all(w in " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
-                                     for w in words)]
+    hits = [m for m in MEMORY if mem_matches(m, words)]
     sections = []
     for kind in ("voorkeuren", "feiten", "geschiedenis"):
         items = [m for m in hits if m["kind"] == kind]
@@ -145,7 +149,7 @@ def memory_view(q=""):
 
 
 def entry_view(m):
-    """What entry_page renders: the entry and where it lives."""
+    """What the memory entry page renders: the entry and where it lives."""
     return {**mem_json(m), "branch": CONF.get("MEMORY_BRANCH", "memory"), "data_repo": CONF["DATA_REPO"]}
 
 

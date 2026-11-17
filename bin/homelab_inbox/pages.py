@@ -11,9 +11,8 @@ import time
 from datetime import datetime, timezone
 
 from .config import CONF, JOBS, ROOT, SECRET_FILE, STATUS_NL, TZ
-from .helpers import first_line, label, read_log, repo_list
+from .helpers import first_line, label, read_log
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
-from .memory import MEMORY, MEM_KINDS
 from .overview import CHANGES_LOG, DAYS_NL, day_time
 from .storage import db, log
 
@@ -331,81 +330,6 @@ def ssh_state():
             "confirm_minutes": int(CONF.get("CONFIRM_SECONDS", 300)) // 60,
             "history": [{"status": status(c), "summary": c.get("summary", ""), "result": c.get("result", ""),
                          "at": c["at"], "by": c.get("user", "")} for c in entries[::-1][:15]]}
-
-
-def mem_matches(m, words):
-    hay = " ".join((m["id"], m["about"], m["source"], m["status"], m["body"])).lower()
-    return all(w in hay for w in words)
-
-
-def mem_row(m):
-    e = html.escape
-    title = first_line(m["body"]).lstrip("# ") if m["kind"] == "geschiedenis" else m["name"]
-    status = f'<span class="st">{e(m["status"])}</span>' if m["status"] else ""
-    body = f'<div>{e(first_line(m["body"]))}</div>' if m["kind"] != "geschiedenis" else ""
-    return (f'<div class="row"><div class="row-title"><a href="/memory/e/{e(m["id"])}">{e(title)}</a>'
-            f'<span class="kind">{e(m["about"])}</span>{status}</div>{body}'
-            + meta(local(m["changed"]), e(m["source"] or "")) + '</div>')
-
-
-def memory_page(q="", error=None):
-    e = html.escape
-    words = q.lower().split()
-    hits = [m for m in MEMORY if mem_matches(m, words)]
-    abouts = ["algemeen", "box", *sorted(repo_list())]
-    parts = [f'<h1>Geheugen</h1><p class="muted">Wat Claude in de inbox over jou, de box en eerdere taken weet. '
-             f'Elke taak en Claude-job begint met de voorkeuren en de feiten; de geschiedenis kan hij doorzoeken. Wat je '
-             f'hier wist of verandert, geldt vanaf de volgende taak.</p>'
-             f'<form method="get" action="/memory" class="searchbar" role="search"><input type="search" name="q" '
-             f'value="{e(q)}" aria-label="Zoeken in het geheugen" placeholder="Zoeken, bijvoorbeeld: deploy mislukt">'
-             f'<button>Zoeken</button></form>']
-    if error:
-        parts.append(f'<p class="st failed">{e(error)}</p>')
-    for kind, title in (("voorkeuren", "Voorkeuren"), ("feiten", "Feiten"), ("geschiedenis", "Geschiedenis")):
-        items = [m for m in hits if m["kind"] == kind]
-        parts.append(f'<h2>{title} <span class="muted">({len(items)})</span></h2>')
-        if kind == "geschiedenis":
-            items.sort(key=lambda m: m["added"], reverse=True)
-            shown = items if q else items[:30]
-            parts.append("".join(mem_row(m) for m in shown) or '<p class="empty">Niets.</p>')
-            if len(shown) < len(items):
-                parts.append(f'<p class="muted">De nieuwste 30; zoek om de rest te vinden.</p>')
-            continue
-        for about in sorted({m["about"] for m in items}, key=lambda a: (a not in ("algemeen", "box"), a)):
-            parts.append(f'<h3>{e(about)}</h3>' + "".join(mem_row(m) for m in items if m["about"] == about))
-        if not items:
-            parts.append('<p class="empty">Niets.</p>')
-    opts = "".join(f'<option value="{e(a)}">{e(a)}</option>' for a in abouts)
-    parts.append('<h2>Zelf toevoegen</h2>' + form(
-        "/memory/add", '<label for="mkind">Soort</label><select name="kind" id="mkind"><option value="voorkeuren">'
-        'voorkeur</option><option value="feiten">feit</option></select><label for="mabout">Over</label>'
-        f'<select name="about" id="mabout">{opts}</select><label for="mname">Naam</label><input name="name" '
-        'id="mname" required placeholder="naam-met-streepjes" pattern="[a-z0-9][a-z0-9-]{0,40}"><label for="mtext">'
-        'Tekst</label><textarea name="text" id="mtext" required placeholder="Bijvoorbeeld: houd PR\'s klein, één '
-        'onderwerp per PR"></textarea>', "Toevoegen"))
-    return page("geheugen", "".join(parts))
-
-
-def entry_page(m, error=None, text=None):
-    e = html.escape
-    src = e(m["source"] or "-")
-    if m["link"]:
-        src = f'<a href="{e(m["link"])}">{src}</a>'
-    rows = [("Soort", MEM_KINDS[m["kind"]]), ("Over", e(m["about"])), ("Toegevoegd", local(m["added"])),
-            ("Gewijzigd", local(m["changed"])), ("Bron", src)]
-    if m["status"]:
-        rows.append(("Status", e(m["status"])))
-    if m["pr"]:
-        rows.append(("PR", f'<a href="{e(m["pr"])}">{e(m["pr"])}</a>'))
-    parts = [f'<h1>{e(m["name"])}</h1>', f'<p class="muted"><code>{e(m["id"])}.md</code> op de branch '
-             f'{e(CONF.get("MEMORY_BRANCH", "memory"))} van {e(CONF["DATA_REPO"])}</p>']
-    if error:
-        parts.append(f'<p class="st failed">{e(error)}</p>')
-    parts.append('<dl>' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows) + '</dl>')
-    parts.append(form(f"/memory/e/{e(m['id'])}/save", f'<textarea name="text" rows="10">{e(text or m["body"])}'
-                      '</textarea>', "Opslaan"))
-    parts.append(form(f"/memory/e/{e(m['id'])}/delete", "", "Wissen", ghost=True))
-    return page(f"geheugen {m['name']}", "".join(parts))
 
 
 def search_page():

@@ -48,12 +48,12 @@ class PortedPages(unittest.TestCase):
             return e.code, e.read(), e.headers
 
     def test_default_ports_the_overview_jobs_ssh_tasks_and_briefs(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/jobs", "/memory", "/skills", "/ssh", "/taken", "/task", "/briefs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/search")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
-        for path in ("/", "/jobs", "/skills", "/ssh", "/taken", "/briefs"):  # TypeScript pages
+        for path in ("/", "/jobs", "/memory", "/skills", "/ssh", "/taken", "/briefs"):  # TypeScript pages
             self.assertEqual(self.get(path)[:2], (200, INDEX), path)
 
     def test_task_page_is_the_ported_path_for_a_known_task(self):
@@ -98,6 +98,7 @@ class PortedPages(unittest.TestCase):
             self.assertEqual(self.get("/jobs")[0], 503)
             self.assertEqual(self.get("/ssh")[0], 503)
             self.assertEqual(self.get("/skills")[0], 503)
+            self.assertEqual(self.get("/memory")[0], 503)
         self.assertEqual(status, 503)
         self.assertIn(b"frontend", body)
 

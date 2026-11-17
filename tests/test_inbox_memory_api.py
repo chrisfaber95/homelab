@@ -90,6 +90,28 @@ class MemoryApi(unittest.TestCase):
         code, ctype, body = self.get("/api/memory/e/feiten/box/nothing")
         self.assertEqual((code, ctype, set(body)), (404, JSON_UTF8, {"error"}))
 
+    def post(self, path, **fields):
+        import urllib.parse
+        token = self.get("/api/session")[2]["csrf_token"]
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        c.request("POST", path, urllib.parse.urlencode({"csrf": token, **fields}),
+                  {"Content-Type": "application/x-www-form-urlencoded", "Origin": f"http://127.0.0.1:{self.port}"})
+        r = c.getresponse()
+        raw = r.read().decode()
+        c.close()
+        return r.status, r.getheader("Content-Type"), json.loads(raw)
+
+    def test_failed_posts_answer_json_errors_for_the_page(self):
+        code, ctype, body = self.post("/memory/add", kind="nope", about="algemeen", name="x", text="t")
+        self.assertEqual((code, ctype, set(body)), (400, JSON_UTF8, {"error"}))
+        code, ctype, body = self.post("/memory/add", kind="feiten", about="box", name="deploy", text="t")
+        self.assertEqual((code, ctype), (400, JSON_UTF8))
+        self.assertIn("bestaat al", body["error"])
+        code, ctype, body = self.post("/memory/e/feiten/box/nothing/save", text="t")
+        self.assertEqual((code, ctype, set(body)), (404, JSON_UTF8, {"error"}))
+        code, ctype, body = self.post("/memory/e/feiten/box/deploy/save", text="  ")
+        self.assertEqual((code, ctype, set(body)), (400, JSON_UTF8, {"error"}))
+
 
 if __name__ == "__main__":
     unittest.main()

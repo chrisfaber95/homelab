@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import chat, conversation, gate, kitt
+from . import chat, conversation, facade, gate, kitt
 from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, ROOT, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
 from .github import poll_github
@@ -273,15 +273,47 @@ class Handler(BaseHTTPRequestHandler):
             return 500, {"error": "the action failed; see the inbox journal"}
 
     def do_GET(self):
-        self.guarded(self.handle_get)
+        self.guarded(lambda: self.forwarded() or self.handle_get())
 
     def do_POST(self):
-        self.guarded(self.handle_post)
+        self.guarded(lambda: self.forwarded() or self.handle_post())
 
     def do_PUT(self):
-        self.guarded(self.handle_mutating)
+        self.guarded(lambda: self.forwarded() or self.handle_mutating())
 
     do_PATCH = do_DELETE = do_PUT
+
+    def forwarded(self):
+        """A path under BACKEND_ROUTES goes to the Java backend (facade.py), after the same access check and, for a
+        mutating method, the same Origin and token check as every /api/* request; it never falls back to a Python
+        handler. Returns True when it answered (also with a refusal), False when the path is not forwarded."""
+        url = urllib.parse.urlsplit(self.path)
+        if not facade.matches(url.path):
+            return False
+        if not self.guard():
+            return True
+        if self.command != "GET" and not self.csrf_ok({}):
+            return True
+        if not facade.clean_path(url.path):
+            return self.send_upstream(400, {"error": "bad path"}) or True
+        if self.headers.get("Transfer-Encoding"):
+            return self.send_upstream(411, {"error": "send a Content-Length, not a chunked body"}) or True
+        length = self.headers.get("Content-Length", "0")
+        if not length.isdigit() or int(length) > facade.MAX_BODY:
+            return self.send_upstream(413 if length.isdigit() else 400, {"error": "bad or too large request body"}) or True
+        body = self.rfile.read(int(length))
+        try:
+            status, headers, data = facade.forward(self.command, self.path, self.headers, body, self.who)
+        except RuntimeError as e:
+            log(f"backend {self.command} {url.path}: {e}")
+            return self.send_upstream(502, {"error": f"the backend is not available: {e}"}) or True
+        self.send_response(status)
+        for k, v in headers:
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        return True
 
     def handle_mutating(self):
         """PUT, PATCH and DELETE are not implemented anywhere. On /api/* they still need the token first (so the check

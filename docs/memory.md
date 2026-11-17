@@ -75,3 +75,7 @@ haalt de branch elke minuut op, en vlak voor elke taak. Op de box: `homelab-inbo
 
 In `config/inbox.conf`: `DATA_REPO` (privé; `21-inbox.sh` weigert een public repo), `MEMORY_BRANCH` (standaard `memory`) en `MEMORY_RECENT` (standaard 10). Na een wijziging (PR):
 `scripts/21-inbox.sh`.
+
+## Wie schrijft (H-024 M5)
+
+Sinds M5 schrijft alleen de Java-backend op de branch `memory` (clone `memory-repo`); de Python-inbox leest de bestanden en vraagt de backend te schrijven. Paden, formulieren en berichten zijn gelijk gebleven. Zie `docs/inbox-backend.md`, "Memory writes (M5)", ook voor de terugdraai-stappen.

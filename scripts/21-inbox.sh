@@ -8,7 +8,7 @@
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab_inbox/ (de modules), bin/homelab-admin, bin/homelab-health, web/, frontend/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
-# homelab-rerun: root scripts/conversation-import.sh bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web frontend config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
+# homelab-rerun: root scripts/conversation-import.sh scripts/memory-import.sh bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web frontend config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -278,6 +278,8 @@ systemctl daemon-reload
 systemctl enable homelab-inbox
 # H-024 M4: the conversation store moves to Java once the new code and the new jar are both installed (it stops and starts the inbox itself).
 bash "$REPO/scripts/conversation-import.sh"
+# H-024 M5: the same for the memory store (the clone of the memory branch).
+bash "$REPO/scripts/memory-import.sh"
 systemctl restart homelab-inbox
 # Run by homelab-admin itself (HOMELAB_RERUN): it restarts on its own once the script is done and recorded.
 [[ -n ${HOMELAB_RERUN:-} ]] || systemctl restart homelab-admin

@@ -94,6 +94,16 @@ public class Settings {
         return Path.of(env.getOrDefault("INBOX_RUNNER_HOME", conf("RUNNER_HOME", "/var/lib/homelab-inbox")));
     }
 
+    /** The token file the Python inbox pushes with (also read by the memory writer's git); GH_TOKEN_FILE overrides it. */
+    public Path ghTokenFile() {
+        return Path.of(env.getOrDefault("GH_TOKEN_FILE", "/etc/homelab/inbox-github-token"));
+    }
+
+    /** An environment variable of the process (the tests point {@code REMOTE_HOMELAB_DATA} at a local repository). */
+    public String env(String key) {
+        return env.get(key);
+    }
+
     public Path inboxDb() {
         return runnerHome().resolve("inbox.db");
     }

@@ -12,11 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import chat, conversation, facade, gate, kitt
 from .briefs import brief_by_id, set_brief_status, start_build
-from .config import ACTIVE, ROOT, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, SECRET_RE, _cancel_runs, _lock
+from .config import ACTIVE, ROOT, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
-from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
+from .memory import entry_view, load_memory, mem_get, memory_view, page_write
 from .overview import (activity_sentence, brief_data, briefs_data, draft_detail, job_detail, jobs_data, live_items, overview_json,
                        research_data, run_detail, admin_ask, skills_data, ssh_state, task_view, tasks_view)
 from . import forge, search
@@ -570,43 +570,20 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(303, "", location=f"/run/{run_id}")
 
     def post_memory(self, form):
-        """Geheugen (F-023): toevoegen, bewerken, wissen; elke wijziging een commit op naam van de gebruiker."""
-        text = form.get("text", "").replace("\r\n", "\n").strip()
+        """Geheugen (F-023): toevoegen, bewerken, wissen. Since H-024 M5 the Java backend checks the form and commits (as
+        the owner of the page, on the memory branch); this only passes the form on, after the owner and CSRF checks."""
         who = f"door jou op de pagina vanaf {self.who}"
         author = (f"{CONF['OWNER_GITHUB']} (via de pagina)", "homelab-inbox@homelab")
-        if self.path == "/memory/add":
-            kind, about, name = form.get("kind", ""), form.get("about", ""), form.get("name", "").strip()
-            mid = f"{kind}/{about}/{name}"
-            try:
-                if kind not in ("voorkeuren", "feiten") or about not in {"algemeen", "box", *repo_list()} \
-                        or not MEM_ID_RE.match(mid):
-                    raise ValueError("kies voorkeur of feit, een onderwerp uit de lijst en een naam met kleine "
-                                     "letters, cijfers en streepjes")
-                if mem_get(mid):
-                    raise ValueError(f"{mid} bestaat al; bewerk dat item")
-                check_mem_text(text)
-                save_memory({mid: entry_text(about, "door jou toegevoegd", "", text, now())},
-                            f"geheugen: {mid} nieuw ({who})", author)
-            except Exception as ex:
-                return self.send_upstream(400, {"error": str(ex)})
-            return self.send(303, "", location=f"/memory/e/{mid}")
         m = re.fullmatch(r"/memory/e/(.+)/(save|delete)", self.path)
-        entry = mem_get(m.group(1)) if m else None
-        if not entry:
+        if self.path != "/memory/add" and not m:
             return self.send_upstream(404, {"error": "Niet gevonden."})
         try:
-            if m.group(2) == "delete":
-                save_memory({entry["id"]: None}, f"geheugen: {entry['id']} gewist ({who})", author)
-                return self.send(303, "", location="/memory")
-            check_mem_text(text)
-            source = entry["source"] if entry["source"].endswith("bewerkt door jou") or \
-                entry["source"] == "door jou toegevoegd" else f"{entry['source'] or '-'}, bewerkt door jou"
-            extra = {k: entry[k] for k in ("status", "pr")}
-            save_memory({entry["id"]: entry_text(entry["about"], source, entry["link"], text, entry["added"] or now(),
-                                                 **extra)}, f"geheugen: {entry['id']} bewerkt ({who})", author)
-        except Exception as ex:
-            return self.send_upstream(400, {"error": str(ex)})
-        return self.send(303, "", location=f"/memory/e/{entry['id']}")
+            status, data = page_write(m.group(2) if m else "add", form, who, author, m.group(1) if m else None)
+        except Exception as ex:  # the backend does not answer: nothing was written
+            return self.send_upstream(502, {"error": str(ex)})
+        if status != 200:
+            return self.send_upstream(status, {"error": data.get("error", f"HTTP {status}")})
+        return self.send(303, "", location=data["location"])
 
 
 def flat_error(status, obj):
@@ -617,15 +594,6 @@ def flat_error(status, obj):
         return {**{k: v for k, v in obj.items() if k != "error"}, **{k: v for k, v in inner.items() if k != "message"},
                 "error": str(inner.get("message") or f"HTTP {status}")}
     return obj
-
-
-def check_mem_text(text):
-    if not text:
-        raise ValueError("de tekst is leeg")
-    if len(text) > 4000:
-        raise ValueError("hooguit 4000 tekens")
-    if SECRET_RE.search(text):
-        raise ValueError("dit lijkt een token, wachtwoord of sleutel te bevatten; dat komt nooit in het geheugen")
 
 
 class Server(ThreadingHTTPServer):

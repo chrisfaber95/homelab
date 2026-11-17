@@ -20,7 +20,7 @@ Installer: `scripts/27-backend.sh` (root, idempotent,
 | Jar | root checks the build output (plain file, valid zip, contains the backend's classes) and copies it to `/usr/local/lib/homelab/inbox-backend/inbox-backend.jar` (root-owned, 644); root never runs it |
 | Unit | `systemd/homelab-inbox-backend.service` → `/etc/systemd/system/`, enabled and started; restarted when the jar or the unit changed |
 | Account | `inbox-runner` (the account of the old inbox): the PostgreSQL role `inbox_app` trusts that name through peer authentication, a `DynamicUser` would be refused |
-| Network | binds `127.0.0.1:8130` (`BACKEND_HOST`, `BACKEND_PORT`; the port is also in `config/inbox.conf`). `IPAddressDeny=any` with only loopback allowed. No ufw rule, nothing on the tailnet |
+| Network | binds `127.0.0.1:8130` (`BACKEND_HOST`, `BACKEND_PORT`; the port is also in `config/inbox.conf`). Listens on loopback only; since M5 outgoing traffic is not limited (git push to GitHub, see "Memory writes (M5)"). No ufw rule, nothing on the tailnet |
 | Database | `SPRING_DATASOURCE_URL=jdbc:postgresql://localhost/inbox?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg&socketFactoryArg=/var/run/postgresql/.s.PGSQL.5432`, user `inbox_app`, no password. pgjdbc reaches the socket through junixsocket (`junixsocket-core` 2.11.1, pinned in `backend/pom.xml`). The datasource and Flyway stay switched off in `application.properties` until B4 adds the schema, so for now the service does not open a connection |
 | Heap | `-Xms64m -Xmx256m`, `-XX:MaxMetaspaceSize=128m`, `-XX:MaxDirectMemorySize=64m`, serial GC (one small service, few threads), `-XX:+ExitOnOutOfMemoryError`; the unit has `MemoryMax=640M` as a ceiling for everything else (metaspace, code cache, thread stacks, junixsocket's native library) |
 | Hardening | `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernel*`, `ProtectControlGroups`, `ProtectClock`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, empty capability set. No `MemoryDenyWriteExecute`: the JVM's JIT needs it |
@@ -109,7 +109,7 @@ handlers answer again at once.
 6. The facade secret file exists (0600, `inbox-runner`); a request without it gets 403, with it not 403.
 
 `bin/homelab-exposure` checks the same from the repo side (the unit sets `BACKEND_HOST=127.0.0.1`, the port agrees with
-`config/inbox.conf`, `IPAddressDeny=any`, `server.address` defaults to loopback, the script touches no ufw) and, on the
+`config/inbox.conf`, `ReadWritePaths` is only the memory clone, `server.address` defaults to loopback, the script touches no ufw) and, on the
 box, that port 8130 listens on `127.0.0.1` only. The `exposure-checker` agent knows about it through that script.
 
 ## Measuring the heap on the box
@@ -223,8 +223,7 @@ the Python inbox, read-only**, not the PostgreSQL copy (that one is a one-off im
 `new-repos.json`, the monitor and deploy state, `changes.jsonl` and `backup.json` are read from the same paths as Python,
 and forge (`FORGE_URL`) and the LLM helper (`LLM_URL`) are asked over HTTP with the same timeouts. Settings come from the installed
 `*.conf` files (`INBOX_CONFIG_DIR`, set in the unit, default `/usr/local/lib/homelab/config`) with the same environment overrides.
-The unit therefore also allows the box's own tailnet address (`IPAddressAllow=... 100.85.70.34/32`) so Java can reach forge; nothing
-else outside loopback is allowed. Job files are read on each request (Python keeps them in memory between syncs).
+Java reaches forge on the box's own tailnet address (since M5 the unit no longer limits outgoing traffic). Job files are read on each request (Python keeps them in memory between syncs).
 
 **One known difference.** Python remembers in memory when the *running round* of a task started (`_round_started`) and shows that
 as `started` of a running task; that is not in the database. Java shows the task's own `started`. For a task in its first round
@@ -383,3 +382,79 @@ the inbox in front of Java get the same scripted requests with the tokens and pe
 then the same checks run against the Java base URL with the facade secret and `X-Inbox-Client` (per client of `clients.json`, plus the
 no-secret cases). Known difference: the wording of a JSON parse error (`bad request: ...`). Java: `ConversationStoreTest`,
 `ConversationImporterTest` (throwaway PostgreSQL). The other Python tests use `tests/conversation_fake.py`, an in-process stand-in for the store.
+
+## Memory writes (M5, H-024)
+
+The memory store is the clone `memory-repo` of the `memory` branch of DATA_REPO (Markdown files, not a table). **From the merge on the Java
+backend is its only writer**: it syncs the clone to GitHub, writes the files, makes one commit per change and pushes to the `memory`
+branch with the token of the inbox. Code: `backend/src/main/java/dev/homelab/inbox/memory/` (`MemoryRepo` git and ownership, `MemoryWriter`
+the rules and the file format, `MemoryController` the routes) and `.../db/MemoryCommand.java` (import and export). The Python side
+(`bin/homelab_inbox/memory.py`) only reads the files (the `MEMORY` cache, the prompt of a task) and asks the backend to write.
+
+### Routes
+
+The public routes keep their paths, forms, CSRF/owner check, status codes, `{"error": ...}` bodies and the 303 redirects: they are still
+answered by `server.py`, which passes the form on. Java answers the routes below (facade secret required, loopback only):
+
+| Public route (unchanged) | Internal route (Java) | Answer |
+| --- | --- | --- |
+| `POST /memory/add` | `POST /internal/memory/add` | `{"location"}` (Python sends 303), 400 `{"error"}` with the old Dutch messages |
+| `POST /memory/e/<id>/save` | `POST /internal/memory/save` | same; 404 `Niet gevonden.` for an unknown entry |
+| `POST /memory/e/<id>/delete` | `POST /internal/memory/delete` | `{"location": "/memory"}` |
+| `GEHEUGEN:` blocks of Claude (queue) | `POST /internal/memory/learned` | `{"notes": [...]}` |
+| history of a finished task (`remember_task`) | `POST /internal/memory/history` | `{"saved": bool}` |
+| start of the inbox, before each round, every minute (`load_memory`) | `POST /internal/memory/sync` | `{"ok", "owned"}` |
+
+If the backend does not answer, the page gets 502 `{"error"}` and nothing is written (no fallback writer in Python). `GET /api/memory*`
+(M2) still reads the same clone. The commit author and message of each change are the ones Python used.
+
+### The import (the switch)
+
+`scripts/memory-import.sh`, called by `21-inbox.sh` and `27-backend.sh` (whichever runs last), skips unless the installed Python code is the M5
+code and the installed jar has `MemoryCommand`. It stops `homelab-inbox`, and runs as `inbox-runner`:
+
+```sh
+sudo -u inbox-runner env INBOX_CONFIG_DIR=/usr/local/lib/homelab/config INBOX_RUNNER_HOME=/var/lib/homelab-inbox \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar import-memory --if-not-imported
+```
+
+`import-memory` brings the clone exactly to GitHub (the fresh import: what the Python store held is on the branch, because Python pushed
+every change), counts the entries, and writes the marker `memory-repo/.git/inbox-memory-owner`. **Java refuses every write until that
+marker exists**, and the Python code never writes, so there is exactly one writer at any moment: the old code before the import, Java after.
+`--if-not-imported` makes a re-run a no-op; without it a second import refuses (`--replace` redoes it, only before the switch).
+
+The unit got `ReadWritePaths=/var/lib/homelab-inbox/memory-repo` (the only place it may write) and **lost `IPAddressDeny=any`**, because it
+now pushes to GitHub and the addresses of GitHub change; it still listens only on `127.0.0.1`. `bin/homelab-exposure` checks the
+`ReadWritePaths` instead.
+
+### Rollback (revert the PR, then re-import into the Python store)
+
+Hand the store back **with the jar of this PR, before the revert is installed** (the revert removes the command):
+
+```sh
+sudo systemctl stop homelab-inbox
+sudo -u inbox-runner env INBOX_CONFIG_DIR=/usr/local/lib/homelab/config INBOX_RUNNER_HOME=/var/lib/homelab-inbox \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar export-memory
+# prints: export ok: memory entries=N (equal to GitHub), the marker is removed; refuses (exit 1) while the clone holds
+# a commit or file that GitHub does not have
+# then merge the revert PR; homelab-admin reruns 21-inbox.sh and 27-backend.sh (old Python code, old jar)
+sudo systemctl start homelab-inbox     # if the rerun did not already start it
+```
+
+The old Python code re-imports by itself at its start: `load_memory()` runs `sync_branch`, which resets `memory-repo` to the branch that Java
+pushed. To do it by hand: `sudo -u inbox-runner git -C /var/lib/homelab-inbox/memory-repo fetch origin memory && sudo -u inbox-runner git -C
+/var/lib/homelab-inbox/memory-repo checkout --force -B memory FETCH_HEAD` (needs the token helper; the restart is easier). Check afterwards that
+`homelab-inbox memory | wc -l` equals the export line. If the revert was already installed, build this PR's jar from its merge commit.
+
+### After the merge: what to check
+
+1. `ls /var/lib/homelab-inbox/memory-repo/.git/inbox-memory-owner` exists; `systemctl is-active homelab-inbox homelab-inbox-backend`.
+2. On the Memory page add an entry, edit it and delete it; `git log` of the `memory` branch on GitHub shows three commits in your name.
+3. Finish a task: its history entry appears; a `GEHEUGEN:` block of Claude is stored.
+
+### Tests
+
+`mvn test` (`MemoryWriterTest`: local bare repository as DATA_REPO, rules, commits, import and export); `python3 -m unittest tests.test_inbox_m5_parity`
+(reference inbox with the old write code against the inbox in front of Java: every page post, then the same files and commits on the branch;
+the direct `/internal/memory/*` contract against the Java base URL); `tests.test_inbox_memory_writes` (Python side); the M1/M2 parity run
+(`tests.test_inbox_m1_parity`, harness `backend/parity/parity.py` and contract tests) covers the memory reads after the switch.

@@ -2,6 +2,7 @@ package dev.homelab.inbox;
 
 import dev.homelab.inbox.db.ConversationCommand;
 import dev.homelab.inbox.db.ImportSqliteCommand;
+import dev.homelab.inbox.db.MemoryCommand;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -16,6 +17,10 @@ public class InboxBackendApplication {
         }
         if (args.length > 0 && (ConversationCommand.IMPORT.equals(args[0]) || ConversationCommand.EXPORT.equals(args[0]))) {
             System.exit(ConversationCommand.run(args[0], java.util.Arrays.copyOfRange(args, 1, args.length), System.out,
+                    System.err));
+        }
+        if (args.length > 0 && (MemoryCommand.IMPORT.equals(args[0]) || MemoryCommand.EXPORT.equals(args[0]))) {
+            System.exit(MemoryCommand.run(args[0], java.util.Arrays.copyOfRange(args, 1, args.length), System.out,
                     System.err));
         }
         SpringApplication.run(InboxBackendApplication.class, args);

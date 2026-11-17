@@ -17,7 +17,7 @@ from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, j
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
 from .overview import activity_sentence, jobs_data, live_items, overview_json
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, ssh_state, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, ssh_state, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -319,7 +319,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, entry_page(entry))
         m = re.fullmatch(r"/task/(\d+)", self.path)
         if self.path == "/":
-            return self.send(200, overview_page())
+            # The Overview is TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing.
+            return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
+                               "The frontend build is missing.")
         if m and (t := get(int(m.group(1)))):
             return self.send(200, task_page(t))
         if self.path == "/jobs":

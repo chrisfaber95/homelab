@@ -155,7 +155,7 @@ class Session(unittest.TestCase):
         self.assertEqual((code, "text/html" in ctype, "Verlopen formulier" in raw), (403, True, True))
 
     def test_pages_stay_html(self):
-        for path in ("/", "/taken", "/search"):
+        for path in ("/taken", "/search"):
             code, ctype, raw = self.call("GET", path)
             self.assertEqual((code, ctype), (200, "text/html; charset=utf-8"), path)
         code, ctype, _ = self.call("GET", "/nope")
@@ -164,12 +164,13 @@ class Session(unittest.TestCase):
     def test_the_page_script_sends_the_header_and_reads_the_flat_error(self):
         js = (ROOT / "web/app.js").read_text()
         self.assertIn('fetch("/api/session"', js)
-        self.assertEqual(len(re.findall(r'"X-CSRF-Token": await csrfToken\(\)', js)), 2)  # search and forge
+        self.assertEqual(len(re.findall(r'"X-CSRF-Token": await csrfToken\(\)', js)), 1)  # search
+        ts = (ROOT / "frontend/src/api/client.ts").read_text()  # the Overview's forge buttons
+        self.assertIn('"X-CSRF-Token": await csrfToken()', ts)
         self.assertNotIn("error?.message", js)
-        html = pages.search_page() + pages.overview_page()
-        for fragment in ('id="forge"', 'id="search-form"'):
-            self.assertIn(fragment, html)
-        self.assertNotRegex(html, r'(id="forge"|id="search-form")[^>]*data-csrf')
+        html = pages.search_page()
+        self.assertIn('id="search-form"', html)
+        self.assertNotRegex(html, r'id="search-form"[^>]*data-csrf')
 
 
 if __name__ == "__main__":

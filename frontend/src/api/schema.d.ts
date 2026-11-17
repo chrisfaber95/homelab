@@ -379,7 +379,7 @@ export interface paths {
         };
         /**
          * Everything the Overview page ("/") shows, as data
-         * @description The data behind `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
+         * @description The data behind the former `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
          *     five changes, services, the Discord and kitt switches, a week of usage and the health block. Texts are the
          *     same Dutch sentences the HTML page shows; times are ISO strings. Not cached.
          */
@@ -3176,6 +3176,8 @@ export interface components {
                 class: "ok" | "attention" | "bad";
                 /** @description ISO time of this answer, in the inbox time zone */
                 at: string;
+                /** @description the inbox time zone (JOB_TIMEZONE), e.g. Europe/Amsterdam; 'vandaag' and 'morgen' are days in it */
+                timezone: string;
                 /** @description same sentence as GET /api/live */
                 activity: string;
             };

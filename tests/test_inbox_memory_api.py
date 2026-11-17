@@ -15,7 +15,9 @@ os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 os.environ.setdefault("BACKEND_ROUTES", "")  # config/inbox.conf forwards the M1 routes to Java (H-024); these tests run the Python handlers
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import memory, server  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+from homelab_inbox import helpers, memory, server  # noqa: E402
+import memory_fake  # noqa: E402
 
 JSON_UTF8 = "application/json; charset=utf-8"
 
@@ -38,6 +40,8 @@ class MemoryApi(unittest.TestCase):
         cls.inbox.server_close()
 
     def setUp(self):
+        self._transport = memory.transport
+        memory_fake.install(memory, helpers.repo_list)  # the writes of the Java backend (H-024 M5), here in-process
         self._old = list(memory.MEMORY)
         memory.MEMORY[:] = [
             entry("voorkeuren/algemeen/klein", "Keep PRs small\nmore"),
@@ -46,6 +50,7 @@ class MemoryApi(unittest.TestCase):
                     status="merged") for n in range(1, 36)]]
 
     def tearDown(self):
+        memory.transport = self._transport
         memory.MEMORY[:] = self._old
 
     def get(self, path):

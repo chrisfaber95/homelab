@@ -1,4 +1,9 @@
-"""Memory (F-023): preferences, facts and history on the memory branch of DATA_REPO."""
+"""Memory (F-023): preferences, facts and history on the memory branch of DATA_REPO.
+
+Since H-024 M5 the Java backend owns the store: it is the only writer of the clone `memory-repo` (commits, pushes, the
+checks of the page and of Claude's GEHEUGEN: blocks, the file format). This module only reads the files of the clone
+(the cache MEMORY, the prompt of a task) and asks the backend to write, through /internal/memory/* on loopback with the
+facade secret. When the backend cannot be reached nothing is written here: the caller gets the error."""
 import json
 import re
 import shutil
@@ -7,9 +12,10 @@ from datetime import datetime
 
 import yaml
 
-from .config import CONF, HOME, JOBS, SECRET_RE, STATUS_NL, TZ
-from .helpers import first_line, git, label, page_url, repo_list, sync_branch, title_of
-from .storage import get, log, now, update
+from . import facade
+from .config import CONF, HOME, JOBS, STATUS_NL, TZ
+from .helpers import first_line, label, page_url, repo_list, title_of
+from .storage import get, log, update
 
 
 LEARN_HINT = ("Is iets hiervan een correctie die ook voor latere taken geldt, bewaar het dan als voorkeur "
@@ -30,13 +36,7 @@ MEM_BLOCK_RE = re.compile(r"^GEHEUGEN:[ \t]*(voorkeur|feit)[ \t]+([a-z0-9][a-z0-
                           r"[ \t]*\n(.*?)(?=^GEHEUGEN:|^SKILL-VOORSTEL:|\Z)", re.S | re.M)
 
 
-MEM_MAX = 1500        # tekens per voorkeur of feit van Claude
-
-
 MEM_FINAL = ("answered", "pr_open", "capped", "cancelled", "failed", "refused", "merged", "closed", "routed")
-
-
-CLAUDE_AUTHOR = ("Claude (homelab-inbox)", "noreply@anthropic.com")
 
 
 _mem_lock = threading.RLock()
@@ -68,8 +68,43 @@ van de taak die je vond. Recent voor {repo}:
   Nooit tokens, wachtwoorden, sleutels of andere geheimen, en niets over andere mensen dan de gebruiker."""
 
 
-def memory_sync():
-    return sync_branch(MEMORY_DIR, CONF.get("MEMORY_BRANCH", "memory"))
+class Unavailable(RuntimeError):
+    """The Java backend did not answer (down, not imported yet, or no secret): nothing was written."""
+
+
+def _http(path, body):
+    """The transport: one POST to the backend, (status, body bytes). Tests replace `transport` with an in-process fake
+    (tests/memory_fake.py); production always goes through facade.forward."""
+    try:
+        status, _, raw = facade.forward("POST", path, {"Content-Type": "application/json"}, json.dumps(body).encode(),
+                                        "inbox", timeout=120)
+        return status, raw
+    except RuntimeError as e:
+        raise Unavailable(f"memory store: {e}") from e
+
+
+transport = _http
+
+
+def backend(path, body):
+    """(status, parsed JSON) of one call to /internal/memory/<path>; Unavailable when the backend does not answer."""
+    status, raw = transport(f"/internal/memory/{path}", body)
+    try:
+        return status, json.loads(raw or b"{}")
+    except ValueError as e:
+        raise Unavailable(f"memory store: not JSON (HTTP {status})") from e
+
+
+def page_write(action, form, who, author, mid=None):
+    """The Geheugen page's add, save and delete (`/memory/add`, `/memory/e/<id>/save|delete`): the backend checks the
+    form and commits. Returns (status, body): 200 with {"location"}, or the error status with {"error"}."""
+    body = {"form": form, "who": who, "author": list(author)}
+    if mid is not None:
+        body["id"] = mid
+    status, data = backend(action, body)
+    if status == 200:
+        load_memory(fetch=False)
+    return status, data
 
 
 def parse_entry(mid, text):
@@ -93,10 +128,14 @@ def parse_entry(mid, text):
 
 
 def load_memory(fetch=True):
+    """The entries of the clone into MEMORY. `fetch`: first ask the backend to bring the clone to GitHub (what the user
+    changed there or on the page); when it does not answer, the clone as it is."""
     with _mem_lock:
         if fetch:
             try:
-                memory_sync()
+                status, data = backend("sync", {})
+                if status != 200:
+                    raise Unavailable(f"HTTP {status}: {data.get('error', '')}")
             except Exception as e:
                 log(f"geheugen ophalen: {e}")  # dan het laatst opgehaalde
         found = []
@@ -153,39 +192,6 @@ def entry_view(m):
     return {**mem_json(m), "branch": CONF.get("MEMORY_BRANCH", "memory"), "data_repo": CONF["DATA_REPO"]}
 
 
-def entry_text(about, source, link, body, added, **extra):
-    head = {"over": about, "toegevoegd": added, "gewijzigd": now(), "bron": source}
-    head.update({k: v for k, v in {"link": link, **extra}.items() if v})
-    return ("---\n" + "".join(f"{k}: {json.dumps(v, ensure_ascii=False)}\n" for k, v in head.items())
-            + f"---\n{body.strip()}\n")
-
-
-def save_memory(changes, message, author=("homelab-inbox", "homelab-inbox@homelab")):
-    """Eén commit op de geheugen-branch: {id: tekst, of None om te wissen}, gepusht met het token van de dienst."""
-    branch = CONF.get("MEMORY_BRANCH", "memory")
-    with _mem_lock:
-        d = memory_sync()
-        for mid, text in changes.items():
-            f = d / f"{mid}.md"
-            if text is None:
-                f.unlink(missing_ok=True)
-            else:
-                f.parent.mkdir(parents=True, exist_ok=True)
-                f.write_text(text)
-        readme = d / "README.md"
-        if not readme.exists():
-            readme.write_text("# memory\n\nHet geheugen van Claude in de homelab-inbox (F-023): `voorkeuren/`, `feiten/` en "
-                              "`geschiedenis/`, één bestand per item. Uitleg: `docs/memory.md` op `main`.\nDeze branch "
-                              "wordt nooit gemerged; alleen de homelab-inbox schrijft erop (voor Claude en voor jou).\n")
-        git(d, "add", "-A")
-        if not git(d, "status", "--porcelain").strip():
-            return
-        git(d, "-c", f"user.name={author[0]}", "-c", f"user.email={author[1]}", "commit", "--quiet", "-m", message)
-        # Alleen naar de geheugen-branch: de bestemming staat hier vast.
-        git(d, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
-        load_memory(fetch=False)
-
-
 def split_memory(text):
     """Het antwoord van Claude zonder GEHEUGEN:-blokken, en die blokken als (soort, over, naam, tekst)."""
     blocks = [(k, a, n, b.strip()) for k, a, n, b in MEM_BLOCK_RE.findall(text)]
@@ -214,26 +220,16 @@ def memory_for(t):
 
 
 def save_learned(t, blocks):
-    """Wat Claude onder zijn laatste bericht bewaarde (GEHEUGEN:): voorkeuren en feiten, nooit geheimen."""
-    repos, changes, notes = repo_list(), {}, []
+    """Wat Claude onder zijn laatste bericht bewaarde (GEHEUGEN:): voorkeuren en feiten, nooit geheimen. The backend
+    checks every block, writes the valid ones in one commit and answers the notes for the task."""
     source = t["mem_source"] or label(t)
     link = t["mem_link"] or page_url(t["id"])
-    for kind, about, name, body in blocks:
-        folder = "voorkeuren" if kind == "voorkeur" else "feiten"
-        if about not in repos and about != ("algemeen" if kind == "voorkeur" else "box"):
-            notes.append(f"{name}: onbekend onderwerp {about}")
-        elif not body or len(body) > MEM_MAX:
-            notes.append(f"{name}: leeg of langer dan {MEM_MAX} tekens")
-        elif SECRET_RE.search(body):
-            notes.append(f"{name}: niet bewaard, het lijkt een geheim te bevatten")
-        else:
-            old = mem_get(f"{folder}/{about}/{name}")
-            changes[f"{folder}/{about}/{name}"] = entry_text(about, source, link, body, old["added"] if old else now())
-    if changes:
-        save_memory(changes, f"geheugen: {', '.join(changes)} (Claude, {label(t).lower()}; bron: {source})",
-                    CLAUDE_AUTHOR)
-        notes.insert(0, f"{len(changes)} item(s) in het geheugen bewaard")
-    return notes
+    status, data = backend("learned", {"blocks": [list(b) for b in blocks], "source": source, "link": link,
+                                       "label_lower": label(t).lower()})
+    if status != 200:
+        raise RuntimeError(data.get("error", f"HTTP {status}"))
+    load_memory(fetch=False)
+    return data["notes"]
 
 
 def remember_task(task_id):
@@ -241,18 +237,17 @@ def remember_task(task_id):
     t = get(task_id)
     if not t or t["status"] not in MEM_FINAL:
         return
-    mid = f"geschiedenis/{t['created'][:7]}/taak-{t['id']}"
-    old = mem_get(mid)
-    if t["remembered"] and not old:
-        return
     asked = (JOBS.get(t["job"], {}).get("instruction") or f"job {t['job']}") if t["job"] else t["text"]
     result = t["answer"] or t["summary"] or t["question"] or t["note"] or ""
-    body = f"# {title_of(t)}\n\nGevraagd:\n{asked[:1000]}\n\nResultaat:\n{result[:2000]}"
-    text = entry_text(t["repo"], label(t), page_url(t["id"]), SECRET_RE.sub("[verborgen]", body),
-                      old["added"] if old else t["created"], status=STATUS_NL[t["status"]], pr=t["pr_url"],
-                      job=t["job"])
-    save_memory({mid: text}, f"geheugen: geschiedenis {label(t).lower()} ({STATUS_NL[t['status']]})")
-    update(task_id, remembered=1)
+    status, data = backend("history", {
+        "id": t["id"], "created": t["created"], "repo": t["repo"], "label": label(t), "label_lower": label(t).lower(),
+        "link": page_url(t["id"]), "status_nl": STATUS_NL[t["status"]], "pr_url": t["pr_url"] or "", "job": t["job"] or "",
+        "title": title_of(t), "asked": asked[:1000], "result": result[:2000], "remembered": bool(t["remembered"])})
+    if status != 200:
+        raise RuntimeError(data.get("error", f"HTTP {status}"))
+    if data.get("saved"):
+        load_memory(fetch=False)
+        update(task_id, remembered=1)
 
 
 def after_round(task_id, blocks):

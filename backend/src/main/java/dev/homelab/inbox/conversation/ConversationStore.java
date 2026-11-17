@@ -39,7 +39,7 @@ public class ConversationStore {
     public static final String REDACTED = "[removed: looks like a secret]";
 
     /** {@code config.SECRET_RE} of the Python inbox (the memory's secret filter); Unicode classes like Python's. */
-    static final Pattern SECRET = Pattern.compile(
+    public static final Pattern SECRET = Pattern.compile(
             "gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\\w{20,}|sk-ant-[\\w-]{10,}|sk-[A-Za-z0-9]{20,}|xox[abprs]-[\\w-]{10,}"
                     + "|AKIA[0-9A-Z]{16}|tskey-[\\w-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----"
                     + "|eyJ[\\w-]{10,}\\.[\\w-]{10,}\\.[\\w-]{5,}"

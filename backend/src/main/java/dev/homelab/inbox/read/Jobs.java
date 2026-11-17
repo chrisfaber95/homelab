@@ -108,7 +108,7 @@ public class Jobs {
     }
 
     /** helpers.repo_list: homelab, the lines of repos.conf and new-repos.json. */
-    Set<String> repoNames() {
+    public Set<String> repoNames() {
         Set<String> names = new TreeSet<>();
         names.add("homelab");
         try {

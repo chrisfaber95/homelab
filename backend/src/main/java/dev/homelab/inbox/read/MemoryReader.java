@@ -36,7 +36,8 @@ public class MemoryReader {
     private static final List<String> KINDS = List.of("voorkeuren", "feiten", "geschiedenis");
     private static final Map<String, String> KIND_LABELS =
             Map.of("voorkeuren", "voorkeur", "feiten", "feit", "geschiedenis", "geschiedenis");
-    private static final Pattern ID = Pattern.compile("(?:(?:voorkeuren|feiten)/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]{0,40}"
+    /** {@code memory.MEM_ID_RE}: the ids an entry may have. */
+    public static final Pattern ID = Pattern.compile("(?:(?:voorkeuren|feiten)/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]{0,40}"
             + "|geschiedenis/[0-9]{4}-[0-9]{2}/[a-z0-9][a-z0-9-]{0,40})");
     private static final int HISTORY_SHOWN = 30;
 
@@ -151,6 +152,11 @@ public class MemoryReader {
         return found;
     }
 
+    /** How many entries the clone holds (the import and export commands print it). */
+    public int countEntries() {
+        return load().size();
+    }
+
     private static String[] pathParts(String id) {
         String[] parts = id.split("/");
         parts[parts.length - 1] += ".md";
@@ -165,6 +171,11 @@ public class MemoryReader {
             }
         }
         return Integer.compare(a.length, b.length);
+    }
+
+    /** One parsed entry (the fields of {@code memory.parse_entry}), or empty; used by the writer for the add/exists checks. */
+    public Optional<Map<String, Object>> find(String id) {
+        return read(id);
     }
 
     private Optional<Map<String, Object>> read(String id) {

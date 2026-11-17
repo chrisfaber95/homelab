@@ -69,7 +69,7 @@ for key in SEARCH_URL ROUTER_URL; do
     report FAIL "exposure:inbox:$key" "'$url' is not a loopback address; the Search tab must not call out to another host"
   fi
 done
-if grep -qE 'Access\.allowed|def allowed' "$REPO/bin/homelab_inbox/server.py" "$REPO/bin/homelab_inbox/pages.py" \
+if grep -qE 'Access\.allowed|def allowed' "$REPO/bin/homelab_inbox/server.py" "$REPO/bin/homelab_inbox/access.py" \
    && grep -q 'self.guard()' "$REPO/bin/homelab_inbox/server.py"; then
   report OK "exposure:inbox:guard" "every page and /api/search route sits behind the tailnet owner check"
 else

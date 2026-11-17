@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import pages, server  # noqa: E402
+from homelab_inbox import overview, server  # noqa: E402
 from homelab_inbox.storage import db  # noqa: E402
 
 
@@ -46,8 +46,8 @@ class SkillsApi(unittest.TestCase):
 
     def test_returns_what_the_page_renders(self):
         jobs = {"a-job": {"name": "a-job", "skills": ["s-one"]}}
-        with mock.patch.object(pages, "JOBS", jobs), \
-                mock.patch.object(pages, "skill_list", return_value={"s-one": "First", "s-two": "Second"}):
+        with mock.patch.object(overview, "JOBS", jobs), \
+                mock.patch.object(overview, "skill_list", return_value={"s-one": "First", "s-two": "Second"}):
             self.set_proposals(("s-three", 7, "https://example.test/pr/1", "2026-11-16T10:00:00+00:00"))
             self.addCleanup(self.set_proposals)
             code, ctype, raw = self.get("/api/skills")
@@ -62,7 +62,7 @@ class SkillsApi(unittest.TestCase):
         self.assertIn("Gemergde skills", body["intro"])
 
     def test_empty_texts(self):
-        with mock.patch.object(pages, "skill_list", return_value={}):
+        with mock.patch.object(overview, "skill_list", return_value={}):
             self.set_proposals()
             body = json.loads(self.get("/api/skills")[2])
         self.assertEqual((body["skills"], body["proposals"]), ([], []))

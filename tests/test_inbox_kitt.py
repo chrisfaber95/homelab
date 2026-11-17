@@ -17,7 +17,7 @@ HOME = tempfile.mkdtemp()
 os.environ.update(INBOX_RUNNER_HOME=HOME, NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"))
 ALL = ["read", "write", "ask", "start_task", "run_job", "approve"]
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import briefs, chat, config, conversation, gate, kitt, overview, pages, server, storage  # noqa: E402
+from homelab_inbox import access, briefs, chat, config, conversation, gate, kitt, overview, server, storage  # noqa: E402
 
 OWNER = "chris@example.com"
 BID = "H-018"
@@ -51,10 +51,10 @@ class Base(unittest.TestCase):
                 c.execute(f"DELETE FROM {t}")
             c.execute("DROP TABLE IF EXISTS approvals")
         self.set_clients(ALL)
-        self.saved = (kitt.account_uid, kitt.peer_uid, pages.Access.owner, briefs.brief_by_id, chat.brief_by_id,
+        self.saved = (kitt.account_uid, kitt.peer_uid, access.Access.owner, briefs.brief_by_id, chat.brief_by_id,
                       briefs.set_brief_status, briefs.add_new_repo, chat.notify, kitt.load_briefs)
         kitt.account_uid, kitt.peer_uid = lambda: 4242, lambda addr, port: 4242
-        pages.Access.owner = OWNER
+        access.Access.owner = OWNER
         self.brief = {"id": BID, "title": "Kitt", "status": "draft", "repos": ["homelab"], "build": {}}
         self.commits, self.pushed = [], []
         briefs.brief_by_id = chat.brief_by_id = lambda bid, max_age=60: self.brief if bid == BID else None
@@ -64,7 +64,7 @@ class Base(unittest.TestCase):
         kitt.load_briefs = lambda: [self.brief]
 
     def tearDown(self):
-        (kitt.account_uid, kitt.peer_uid, pages.Access.owner, briefs.brief_by_id, chat.brief_by_id,
+        (kitt.account_uid, kitt.peer_uid, access.Access.owner, briefs.brief_by_id, chat.brief_by_id,
          briefs.set_brief_status, briefs.add_new_repo, chat.notify, kitt.load_briefs) = self.saved
         conversation.set_switch("kitt", True)
         if self._clients_json is None:
@@ -265,14 +265,14 @@ class Gate(unittest.TestCase):
 
     def setUp(self):
         self._allow_all = os.environ.pop("INBOX_ALLOW_ALL", None)  # other test files set it for the whole run
-        self.saved = (pages.Access.owner, pages.Access.own, pages.Access.cache)
-        pages.Access.owner, pages.Access.own, pages.Access.cache = OWNER, {"100.85.70.34"}, {}
+        self.saved = (access.Access.owner, access.Access.own, access.Access.cache)
+        access.Access.owner, access.Access.own, access.Access.cache = OWNER, {"100.85.70.34"}, {}
         FakeKitt.seen.clear()
         self.logins = {}
-        pages.Access.cache["127.0.0.1"] = ((self.logins.get("127.0.0.1", OWNER), "phone"), 10 ** 12)
+        access.Access.cache["127.0.0.1"] = ((self.logins.get("127.0.0.1", OWNER), "phone"), 10 ** 12)
 
     def tearDown(self):
-        pages.Access.owner, pages.Access.own, pages.Access.cache = self.saved
+        access.Access.owner, access.Access.own, access.Access.cache = self.saved
         if self._allow_all is not None:
             os.environ["INBOX_ALLOW_ALL"] = self._allow_all
 
@@ -290,19 +290,19 @@ class Gate(unittest.TestCase):
         self.assertNotIn("x-homelab-client", seen)
 
     def test_another_tailnet_user_is_refused(self):
-        pages.Access.cache["127.0.0.1"] = (("someone@else.com", "laptop"), 10 ** 12)
+        access.Access.cache["127.0.0.1"] = (("someone@else.com", "laptop"), 10 ** 12)
         self.assertEqual(self.get()[0], 403)
         self.assertEqual(FakeKitt.seen, [])
 
     def test_the_box_itself_is_refused(self):
-        pages.Access.own = {"127.0.0.1"}
+        access.Access.own = {"127.0.0.1"}
         self.assertEqual(self.get()[0], 403)
         self.assertEqual(FakeKitt.seen, [])
 
     def test_unknown_peer_is_refused_and_kitt_down_is_a_502(self):
-        pages.Access.cache["127.0.0.1"] = ((None, None), 10 ** 12)
+        access.Access.cache["127.0.0.1"] = ((None, None), 10 ** 12)
         self.assertEqual(self.get()[0], 403)
-        pages.Access.cache["127.0.0.1"] = ((OWNER, "phone"), 10 ** 12)
+        access.Access.cache["127.0.0.1"] = ((OWNER, "phone"), 10 ** 12)
         config.CONF["KITT_UPSTREAM"] = "http://127.0.0.1:1"
         try:
             self.assertEqual(self.get()[0], 502)

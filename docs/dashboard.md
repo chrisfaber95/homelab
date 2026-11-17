@@ -46,13 +46,13 @@ langzaam als het rustig is, snel zolang er iets draait, oker of rood als er iets
 De staafjes van Deze week zijn LED-staafjes. Alleen donker, zoals de KITT-skin (de brief vroeg licht en donker; de
 gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-dashboard, en raken alleen transform,
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
-wijzigingen. Stijl: `web/app.css`; de pagina's zijn TypeScript (`frontend/`); `web/app.js` is leeg (inbox 197 verwijdert hem).
+wijzigingen. Stijl: `web/app.css`; de pagina's zijn TypeScript (`frontend/`); `web/app.js` en `pages.py` bestaan niet meer.
 
 ## Frontend project (H-021)
 
 `frontend/` is the TypeScript frontend: Vite and plain TypeScript, no UI framework, all dependencies pinned in
 `package.json` and `package-lock.json`. Its types come from `backend/openapi.yaml` (`src/api/schema.d.ts`, generated).
-Ported so far: the Overview (`/`, `src/pages/overview.ts`, data from `GET /api/overview`, "Nu bezig" from `GET /api/live`).
+Every page is ported (H-022): `src/pages/` has one file per page (overview, jobs, job, tasks, task, briefs, memory, skills, search, ssh), each reading its JSON endpoint from `backend/openapi.yaml`.
 `src/main.ts` picks the page by path, `src/shell.ts` draws the header with the tabs, `src/format.ts` has the Dutch time
 texts (tests in `format.test.ts`). The stylesheet and fonts are still `web/app.css` and `web/fonts`, loaded from `/static/`.
 Vite builds with `base: "/app/"` (the inbox serves the build under `/app/`).
@@ -114,31 +114,30 @@ The page's JavaScript talks to `/api/*` (contract: `backend/openapi.yaml`). Two 
 the page (the chat and kitt doors have their own checks):
 
 - `GET /api/session` returns `{"csrf_token": "..."}`. Every mutating request (POST, PUT, PATCH, DELETE) must send it as
-  the header `X-CSRF-Token`, next to the `Origin` of the page. A missing or wrong token is 403. `web/app.js` fetches
-  the token once (`csrfToken()`) before its POSTs (search ask and feedback, forge start and stop). The HTML forms keep
+  the header `X-CSRF-Token`, next to the `Origin` of the page. A missing or wrong token is 403. `frontend/src/api/client.ts` fetches
+  the token once (`csrfToken()`) before its POSTs. The HTML forms keep
   their hidden `csrf` field; `/api/*` does not accept the field.
 - Every error under `/api/*` is `{"error": "text"}`: a refused caller (403), an unknown route (404), a bad parameter
   (400), a failure of an upstream (502) and an unexpected exception (500, details in the journal). The `{"error":
   {"message": ...}}` of forge and the search API is unwrapped by the inbox. PUT, PATCH and DELETE are not implemented
   and answer 405 after the token check.
 
-Tests: `tests/test_inbox_session.py`. Pages that are not under `/api/` still answer with HTML.
+Tests: `tests/test_inbox_session.py`. Outside `/api/`, errors and refused forms answer with a small HTML page (`page()` in `server.py`).
 
 ## Beheer
 
 Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`, `bin/homelab_inbox/`, `web/` of de config:
 `sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh`. Logs van taken en runs staan in
 `/var/lib/homelab-inbox/logs/` (één bestand per taak of run). Testen zonder root: zie de docstring van
-`bin/homelab-inbox` (de HTML van de nog niet geporte pagina's staat in `bin/homelab_inbox/pages.py`, de gegevens in `overview.py`, de HTTP-handler in `server.py`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
+`bin/homelab-inbox` (de gegevens van de pagina's staan in `overview.py`, de toegangscontrole en het CSRF-token in `access.py`, de HTTP-handler in `server.py`; de pagina's zelf zijn TypeScript in `frontend/`), plus `MONITOR_DIR`, `DEPLOY_STATE` en `BACKUP_STATUS` voor de gezondheid.
 
 ## Ported pages (H-021)
 
 `PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/job,/draft,/run,/research,/memory,/search,/skills,/ssh,/taken,/task,/briefs`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
-`FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
-listed path has no `frontend/dist/index.html`, a warning goes to the journal and the Python page is served; for a page
-whose Python code is deleted (`/`, `/jobs`, `/job/<name>`, `/draft/<id>`, `/run/<id>`, `/research`, `/ssh`, `/taken`, `/task/<id>`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
+`FRONTEND_DIST`). URLs and notification links stay valid. If a listed path has no `frontend/dist/index.html`, a warning goes to the
+journal and the answer is a 503 (`/`, `/jobs`, `/job/<name>`, `/draft/<id>`, `/run/<id>`, `/research`, `/ssh`, `/taken`, `/task/<id>`), so run `scripts/21-inbox.sh` to build the frontend.
 Tests: `tests/test_inbox_ported_pages.py`.
 
 Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs
@@ -147,3 +146,17 @@ Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `fr
 then copies `dist` to `/usr/local/lib/homelab/frontend/dist` (root-owned, 755/644, readable by `inbox-runner`) and checks
 that `index.html` exists, is non-empty and is readable by the service; the script fails otherwise and installs nothing
 from a failed build. The build needs network access to the npm registry.
+
+## Structure and deploy (H-022 F12)
+
+- **Backend:** the Python server `bin/homelab-inbox` with the modules in `bin/homelab_inbox/`; the JSON API is described in
+  `backend/openapi.yaml`. `access.py` has the CSRF token and the Tailscale owner check, `overview.py` the data of every
+  page, `server.py` the routes. There is no HTML rendering left except the small error page.
+- **Frontend:** TypeScript in `frontend/`, built once (`npm run build`) into `frontend/dist`; the server serves
+  `index.html` for every page path and the assets under `/app/`. The stylesheet and fonts are `web/app.css` and
+  `web/fonts`, under `/static/`.
+- **Deploy:** the inbox is part of this repo, so `scripts/21-inbox.sh` is the deploy: one build (frontend, as a throwaway
+  user), the unit `homelab-inbox` serving the built UI. Host and port come from the environment: `INBOX_HOST` (default
+  `::`, all interfaces; ufw and Tailscale limit who gets in) and `INBOX_PORT` (default `8105` from `config/inbox.conf`);
+  `FRONTEND_DIST` overrides the build folder. No new `repos.conf` line, unit, `services.conf` link or port is needed:
+  the homelab page already links itself.

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import pages, search, server  # noqa: E402
+from homelab_inbox import access, search, server  # noqa: E402
 
 ASK = {"question": "q", "answer": "Because [1].", "found": True, "request_id": "abc123def456",
        "citations": [{"n": 1, "path": "a.md", "location": "H", "link": "https://x/a", "cited": True}]}
@@ -84,7 +84,7 @@ class SearchTab(unittest.TestCase):
             body = urllib.parse.urlencode(form)
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
             if csrf:
-                headers["X-CSRF-Token"] = pages.csrf_token()
+                headers["X-CSRF-Token"] = access.csrf_token()
             if origin:
                 headers["Origin"] = f"http://127.0.0.1:{self.port}"
         c.request(method, path, body, headers)

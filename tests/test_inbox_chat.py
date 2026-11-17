@@ -23,7 +23,7 @@ CLIENTS = {"clients": {
 os.environ["CLIENTS_JSON"] = json.dumps(CLIENTS)
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import briefs, chat, config, conversation  # noqa: E402
-from homelab_inbox import helpers, overview, pages, server, storage  # noqa: E402
+from homelab_inbox import helpers, overview, server, storage  # noqa: E402
 
 BID = "H-016"
 FAKE_BRIEF = {"id": BID, "title": "Chat", "status": "draft", "repos": ["homelab"], "build": {},
@@ -76,7 +76,6 @@ class StartTask(Base):
         t = storage.get(r["task"])
         self.assertEqual((t["repo"], t["status"], t["source"], t["unattended"]), ("homelab", "queued", "discord", 0))
         self.assertEqual(overview.task_view(t)["source"], "discord")  # its page says where it came from
-        self.assertIn("via Discord", pages.task_row(t))
         page_id = storage.new_task("homelab", "from the page")
         self.assertIsNone(storage.get(page_id)["source"])
         self.assertEqual(kinds := [e["client"] for e in self.kinds("message")], ["discord"], kinds)

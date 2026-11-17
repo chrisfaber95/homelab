@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import forge, pages, search, server  # noqa: E402
+from homelab_inbox import access, forge, search, server  # noqa: E402
 
 JSON_UTF8 = "application/json; charset=utf-8"
 MUTATING = (("POST", "/api/forge/start"), ("POST", "/api/search/ask"), ("POST", "/api/search/feedback"),
@@ -68,7 +68,7 @@ class Session(unittest.TestCase):
 
     # -- GET /api/session --
     def test_session_returns_the_token_of_the_pages(self):
-        self.assertEqual(json.loads(self.call("GET", "/api/session")[2]), {"csrf_token": pages.csrf_token()})
+        self.assertEqual(json.loads(self.call("GET", "/api/session")[2]), {"csrf_token": access.csrf_token()})
         self.assertRegex(self.token(), r"^[0-9a-f]{64}$")
 
     def test_session_is_not_cached_and_is_for_get_only(self):
@@ -83,7 +83,7 @@ class Session(unittest.TestCase):
             body = self.error(self.call("GET", "/api/session"), 403)
         finally:
             os.environ["INBOX_ALLOW_ALL"] = "1"
-        self.assertNotIn(pages.csrf_token(), body)
+        self.assertNotIn(access.csrf_token(), body)
 
     # -- the token check --
     def test_a_missing_token_is_403_on_every_mutating_method(self):
@@ -147,7 +147,7 @@ class Session(unittest.TestCase):
 
     # -- the pages keep working --
     def test_a_page_form_still_uses_its_csrf_field(self):
-        form = urllib.parse.urlencode({"csrf": pages.csrf_token(), "repo": "nope", "text": ""})
+        form = urllib.parse.urlencode({"csrf": access.csrf_token(), "repo": "nope", "text": ""})
         code, ctype, raw = self.call("POST", "/tasks", {"Content-Type": "application/x-www-form-urlencoded"}, form)
         self.assertEqual(code, 400)
         self.assertIn("text/html", ctype)
@@ -158,9 +158,8 @@ class Session(unittest.TestCase):
         code, ctype, _ = self.call("GET", "/nope")
         self.assertEqual((code, ctype), (404, "text/html; charset=utf-8"))
 
-    def test_the_page_script_sends_the_header_and_reads_the_flat_error(self):
-        js = (ROOT / "web/app.js").read_text()
-        self.assertNotIn("error?.message", js)
+    def test_the_client_sends_the_header(self):
+        self.assertFalse((ROOT / "web/app.js").exists())
         ts = (ROOT / "frontend/src/api/client.ts").read_text()  # the Overview's forge buttons, the Search page
         self.assertIn('fetch(path', ts)
         self.assertIn('"X-CSRF-Token": await csrfToken()', ts)

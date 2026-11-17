@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import config, jobs, pages, server  # noqa: E402
+from homelab_inbox import access, config, jobs, server  # noqa: E402
 from homelab_inbox.config import JOBS  # noqa: E402
 from homelab_inbox.storage import db  # noqa: E402
 
@@ -73,7 +73,7 @@ class JobPages(unittest.TestCase):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
         headers, body = {}, None
         if method == "POST":
-            body = urllib.parse.urlencode({"csrf": pages.csrf_token(), **(fields or {})})
+            body = urllib.parse.urlencode({"csrf": access.csrf_token(), **(fields or {})})
             headers = {"Content-Type": "application/x-www-form-urlencoded", "Origin": f"http://127.0.0.1:{self.port}"}
         c.request(method, path, body, headers)
         r = c.getresponse()

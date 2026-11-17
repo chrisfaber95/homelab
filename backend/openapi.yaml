@@ -336,6 +336,48 @@ paths:
                   queued: {type: integer, description: "queued tasks among the 100 newest"}
                   activity: {type: string, description: "e.g. 'Niets bezig. Volgende job: x, ...'"}
         "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/briefs:
+    x-code: ["/api/briefs"]
+    get:
+      tags: [machine]
+      summary: What the Briefs page shows (H-022 F11a)
+      x-access: page
+      x-machine: true
+      description: |
+        The data `briefs_page` renders: drafts, approved briefs and briefs that need design (from main of the product
+        repo), the builds so far (newest first) and the number of briefs per status. A brief with a live build has
+        `build` set and no `actions`; otherwise `actions` lists the buttons (`build`, `build-without-me`, and `park`
+        on a draft; they POST to `/briefs/<id>/build` and `/briefs/<id>/park`). When the product repo can't be read
+        the lists are empty and `error` says why. `refresh` is true while a build is active (the page reloads itself).
+      responses:
+        "200":
+          description: The page data.
+          content:
+            application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/BriefsPage"}}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/briefs/{id}:
+    x-code: ["/api/briefs/([A-Z]-\\d{3,4})"]
+    get:
+      tags: [machine]
+      summary: What the page of one brief shows (H-022 F11a)
+      x-access: page
+      x-machine: true
+      description: "The data `brief_page` renders, the brief and its text without the front matter."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: "^[A-Z]-\\d{3,4}$"}, description: "e.g. H-022"}
+      responses:
+        "200":
+          description: The brief.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [error, brief]
+                properties:
+                  error: {type: string, nullable: true}
+                  brief: {$ref: "#/components/schemas/BriefView"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
   /api/log/{key}:
     x-code: ["/api/log/{forge.LIVE_KEY}", "/api/log/([tr])(\\d+)"]
     get:
@@ -524,6 +566,44 @@ paths:
         "502": {$ref: "#/components/responses/UpstreamUnreachable"}
         "403": {$ref: "#/components/responses/ApiForbiddenCsrf"}
   # ------------------------------------------------------------------------------------------------ pages (GET)
+  /api/tasks:
+    x-code: ["/api/tasks"]
+    get:
+      tags: [machine]
+      summary: What the Tasks page (/taken) renders, as JSON
+      x-access: page
+      description: |
+        Added for the page port (H-022 F10). Matched on `url.path`. `repos` fills the new-task form (`auto` is the extra
+        option "auto (homelab beslist)"); `queue` holds queued, running and waiting tasks, oldest first; `history` the
+        rest of the 200 newest, newest first. Times are the stored ISO 8601 UTC strings. `refresh` is true while the
+        queue is not empty (the HTML page reloads itself then).
+      responses:
+        "200":
+          description: The lists of the Tasks page.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/TaskList"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+  /api/tasks/{id}:
+    x-code: ["/api/tasks/(\\d+)"]
+    get:
+      tags: [machine]
+      summary: What the task page (/task/<id>) renders, as JSON, with the log so far
+      x-access: page
+      description: |
+        Added for the page port (H-022 F10). Matched on `url.path`. Unknown id: 404 `{"error": "Not found."}`.
+        `actions` says which forms the page shows (answer, cancel, retry, accept, attended); the POSTs stay the form
+        routes of `/task/{id}/{action}`. `log` holds the first 2000 lines and `next`; the page keeps polling
+        `GET /api/log/t<id>?from=<next>` until `done` (no server-sent events).
+      parameters: [{$ref: "#/components/parameters/NumericId"}]
+      responses:
+        "200":
+          description: The task page data.
+          content:
+            application/json; charset=utf-8:
+              schema: {$ref: "#/components/schemas/TaskDetail"}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
+        "404": {$ref: "#/components/responses/ApiNotFound"}
   /:
     x-code: ["/"]
     get:
@@ -693,10 +773,10 @@ paths:
     x-code: ["/jobs"]
     get:
       tags: [page]
-      summary: Jobs tab
+      summary: Jobs tab (frontend/dist/index.html; the page is TypeScript on `/api/jobs-page`)
       x-access: page
-      description: Matched on `self.path`.
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+      description: Matched on `url.path`. Always served from the frontend build (`config.FRONTEND_ONLY`); 503 when `frontend/dist/index.html` is missing.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "503": {description: "The frontend is not built.", content: {"text/html; charset=utf-8": {schema: {type: string}}}}}
   /jobs/draft:
     x-code: ["/jobs/draft"]
     post:
@@ -1846,6 +1926,59 @@ components:
                 at: {type: string, nullable: true}
                 free_bytes: {type: integer}
                 free_pct: {nullable: true}
+    BriefView:
+      type: object
+      required: [id, title, status, priority, repos, project, path, build, actions]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        status: {type: string, description: "draft, approved, needs-design, ... (empty: no status)"}
+        priority: {type: string}
+        repos: {type: array, items: {type: string}}
+        project: {type: string}
+        path: {type: string, description: "in the product repo"}
+        build:
+          type: object
+          nullable: true
+          required: [id, url]
+          properties: {id: {type: integer}, url: {type: string}}
+        actions:
+          type: array
+          items: {type: string, enum: [build, build-without-me, park]}
+        text: {type: string, description: "Only on /api/briefs/{id}: the brief without front matter"}
+    BuildView:
+      type: object
+      required: [id, label, url, status, status_label, what, repo, source, created, ended, pr_number, pr_url]
+      properties:
+        id: {type: integer}
+        label: {type: string}
+        url: {type: string}
+        status: {type: string}
+        status_label: {type: string, description: "Dutch, as the page shows it"}
+        what: {type: string}
+        repo: {type: string}
+        source: {type: string, nullable: true}
+        created: {type: string}
+        ended: {type: string, nullable: true}
+        pr_number: {type: integer, nullable: true}
+        pr_url: {type: string, nullable: true}
+    BriefsPage:
+      type: object
+      required: [error, without_me, drafts, approved, needs_design, builds, counts, refresh]
+      properties:
+        error: {type: string, nullable: true}
+        without_me: {type: string, description: "The note under the heading about Build without me"}
+        drafts: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        approved: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        needs_design: {type: array, items: {$ref: "#/components/schemas/BriefView"}}
+        builds: {type: array, items: {$ref: "#/components/schemas/BuildView"}}
+        counts:
+          type: array
+          items:
+            type: object
+            required: [status, count]
+            properties: {status: {type: string}, count: {type: integer}}
+        refresh: {type: boolean}
     LiveItem:
       type: object
       required: [key, title, what, repo, model, url, cancel, started]
@@ -1865,6 +1998,80 @@ components:
         at: {type: string}
         kind: {type: string, description: "info, claude, tool, result, error, out (forge: info, claude, tool, error)"}
         text: {type: string, maxLength: 600}
+    TaskRow:
+      type: object
+      required: [id, label, status, status_text, what, repo, source, created, ended, pr_url, pr_number]
+      properties:
+        id: {type: integer}
+        label: {type: string, description: "'Inbox <id>' or 'Job <name>'"}
+        status: {type: string, description: "queued, running, waiting, pr_open, ... (config.STATUS_NL)"}
+        status_text: {type: string, description: "Dutch status text of the page"}
+        what: {type: string, description: "first line of the task text (max 70), or the kind of the job"}
+        repo: {type: string}
+        source: {type: string, nullable: true, description: "the client it came from; null = the page"}
+        created: {type: string}
+        ended: {type: string, nullable: true}
+        pr_url: {type: string, nullable: true}
+        pr_number: {type: integer, nullable: true}
+    TaskList:
+      type: object
+      required: [repos, auto, queue, history, refresh]
+      properties:
+        repos: {type: array, items: {type: string}, description: "sorted"}
+        auto: {type: string, description: "the repo value that lets homelab decide"}
+        queue: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+        history: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+        refresh: {type: boolean}
+    TaskDetail:
+      description: A TaskRow plus everything the task page shows.
+      allOf:
+        - {$ref: "#/components/schemas/TaskRow"}
+        - type: object
+          required: [text, question, answer, parent, reason, after_task, brief, handoff, criteria, review, reviews,
+                     unattended, without_me, is_build, build_left_nothing, children, summary, summary_title, note,
+                     turns, rounds, model, max_turns, max_minutes, accepted, blocked_by, retry_label, retry_hint,
+                     accept_pr_unmerged, actions, refresh, log]
+          properties:
+            text: {type: string}
+            question: {type: string, nullable: true}
+            answer: {type: string, nullable: true}
+            parent: {type: integer, nullable: true}
+            reason: {type: string, nullable: true}
+            after_task: {type: integer, nullable: true}
+            brief: {type: string, nullable: true}
+            handoff: {type: string, nullable: true}
+            criteria: {type: array, items: {type: string}}
+            review: {type: string, nullable: true}
+            reviews: {type: integer, nullable: true, description: "automatic rework rounds used"}
+            unattended: {type: boolean}
+            without_me: {type: string, description: "the 'Build without me' explanation"}
+            is_build: {type: boolean, description: "a brief build (repo `brief`)"}
+            build_left_nothing: {type: boolean}
+            children: {type: array, items: {$ref: "#/components/schemas/TaskRow"}}
+            summary: {type: string, nullable: true}
+            summary_title: {type: string, description: "'Reden' for a refused task, else 'Samenvatting'"}
+            note: {type: string, nullable: true}
+            turns: {type: integer, nullable: true}
+            rounds: {type: integer, nullable: true}
+            model: {type: string, description: "e.g. 'Claude (opus-5-5)'"}
+            max_turns: {description: "limit per round, as configured"}
+            max_minutes: {description: "limit per round, as configured"}
+            accepted: {type: boolean}
+            blocked_by: {type: integer, nullable: true, description: "the predecessor that stops a retry"}
+            retry_label: {type: string, enum: [Continue, Retry]}
+            retry_hint: {type: string}
+            accept_pr_unmerged: {type: boolean, description: "show 'PR #n is not merged as far as the inbox knows'"}
+            actions:
+              type: object
+              required: [answer, cancel, retry, accept, attended]
+              properties:
+                answer: {type: boolean}
+                cancel: {type: boolean}
+                retry: {type: boolean}
+                accept: {type: boolean}
+                attended: {type: boolean}
+            refresh: {type: boolean, description: "true while queued (the HTML page reloads itself)"}
+            log: {$ref: "#/components/schemas/LogChunk"}
     LogChunk:
       type: object
       required: [lines, next, done]

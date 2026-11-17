@@ -1,15 +1,17 @@
+import { renderJobs } from "./pages/jobs";
 import { renderOverview } from "./pages/overview";
 import { renderSsh } from "./pages/ssh";
 import { renderShell } from "./shell";
 
 const app = document.getElementById("app");
-const pages: Record<string, { current: string; title: string; render: (main: HTMLElement) => Promise<void> }> = {
-  "/": { current: "overzicht", title: "homelab", render: renderOverview },
-  "/ssh": { current: "ssh", title: "ssh", render: renderSsh },
+const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLElement) => Promise<void> }> = {
+  "/": { tab: "overzicht", title: "homelab", render: renderOverview },
+  "/jobs": { tab: "jobs", title: "jobs", render: renderJobs },
+  "/ssh": { tab: "ssh", title: "ssh", render: renderSsh },
 };
-const page = pages[location.pathname];
+const page = PAGES[location.pathname];
 if (app && page) {
-  page.render(renderShell(app, page.current, page.title)).catch((e) => {
+  page.render(renderShell(app, page.tab, page.title)).catch((e) => {
     app.append(`Could not load the page: ${e instanceof Error ? e.message : String(e)}`);
   });
 }

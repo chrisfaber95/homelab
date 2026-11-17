@@ -1,5 +1,17 @@
 /** The SSH page (/ssh): ask for a public key to be added, confirm on the phone. Data: GET /api/ssh, POST /api/ssh. */
-import { el, localTime, meta, mountShell } from "../shell";
+import { el, meta } from "../dom";
+import { localParts } from "../format";
+
+const pad = (n: number): string => String(n).padStart(2, "0");
+
+/** "dd-mm HH:MM" in the box's timezone, like pages.local; "-" for an empty value. */
+export function localTime(iso: string): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const l = localParts(d, "Europe/Amsterdam");
+  return `${pad(l.d)}-${pad(l.m)} ${pad(l.h)}:${pad(l.min)}`;
+}
 
 export interface SshState {
   user: string;
@@ -31,8 +43,7 @@ async function csrfToken(): Promise<string> {
   return (await r.json()).csrf_token;
 }
 
-export async function mountSsh(root: HTMLElement): Promise<void> {
-  const main = mountShell(root, "/ssh", "ssh");
+export async function renderSsh(main: HTMLElement): Promise<void> {
   let state: SshState;
   try {
     const r = await fetch("/api/ssh");
@@ -47,8 +58,8 @@ export async function mountSsh(root: HTMLElement): Promise<void> {
   const history = el("div", {}, ...renderHistory(state.history));
   const name = el("input", {
     name: "name", id: "name", required: "", maxlength: "40", pattern: "[A-Za-z0-9._@-]+", placeholder: "windows-pc",
-  });
-  const key = el("textarea", { name: "key", id: "key", required: "", spellcheck: "false", placeholder: "ssh-ed25519 AAAA..." });
+  }) as HTMLInputElement;
+  const key = el("textarea", { name: "key", id: "key", required: "", spellcheck: "false", placeholder: "ssh-ed25519 AAAA..." }) as HTMLTextAreaElement;
   const form = el("form", {},
     el("label", { for: "name" }, "Naam (bijvoorbeeld het apparaat)"), name,
     el("label", { for: "key" }, "Publieke sleutel (de inhoud van het .pub-bestand)"), key,

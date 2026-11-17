@@ -47,12 +47,22 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_ports_only_ssh(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset({"/ssh"}))
+    def test_default_ports_the_overview_and_ssh(self):
+        self.assertEqual(config.PORTED_PAGES, frozenset({"/", "/ssh"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/taken")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
+        status, body, _ = self.get("/")  # the Overview is the TypeScript page
+        self.assertEqual((status, body), (200, INDEX))
+
+    def test_overview_without_a_build_says_so_instead_of_a_python_page(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        (self.dist / "index.html").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            status, body, _ = self.get("/")
+        self.assertEqual(status, 503)
+        self.assertIn(b"frontend", body)
 
     def test_setting_is_parsed_from_the_environment(self):
         import importlib

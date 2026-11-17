@@ -46,13 +46,16 @@ langzaam als het rustig is, snel zolang er iets draait, oker of rood als er iets
 De staafjes van Deze week zijn LED-staafjes. Alleen donker, zoals de KITT-skin (de brief vroeg licht en donker; de
 gebruiker koos voor alleen donker). Animaties lopen altijd, zoals in de claude-dashboard, en raken alleen transform,
 opacity en background-position. Op de telefoon staan de panelen onder elkaar: nu bezig, jobs, deze week, gezondheid,
-wijzigingen. Stijl en script: `web/app.css` en `web/app.js`.
+wijzigingen. Stijl: `web/app.css`; het overzicht is TypeScript (`frontend/`), de overige pagina's gebruiken `web/app.js` (live logs, Search).
 
 ## Frontend project (H-021)
 
 `frontend/` is the TypeScript frontend: Vite and plain TypeScript, no UI framework, all dependencies pinned in
 `package.json` and `package-lock.json`. Its types come from `backend/openapi.yaml` (`src/api/schema.d.ts`, generated).
-No page is ported yet, so it only contains a placeholder entry (`src/main.ts`) and a first test.
+Ported so far: the Overview (`/`, `src/pages/overview.ts`, data from `GET /api/overview`, "Nu bezig" from `GET /api/live`).
+`src/main.ts` picks the page by path, `src/shell.ts` draws the header with the tabs, `src/format.ts` has the Dutch time
+texts (tests in `format.test.ts`). The stylesheet and fonts are still `web/app.css` and `web/fonts`, loaded from `/static/`.
+Vite builds with `base: "/app/"` (the inbox serves the build under `/app/`).
 
 npm scripts (run in `frontend/`, install with `npm ci --ignore-scripts`):
 
@@ -72,8 +75,9 @@ In short, how the frontend fits into the inbox (details in the sections below):
   are `{"error": "..."}`.
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). The HTML page is unchanged until the page is ported; `/api/jobs` is kitt's door, hence the name.
-- `PORTED_PAGES` is `/ssh` by default (H-022 F9b: the SSH page is TypeScript, `frontend/src/pages/ssh.ts`, with the
-  data from `GET /api/ssh` and the form posting to `POST /api/ssh`). A path listed there gets `frontend/dist/index.html`.
+- `PORTED_PAGES` defaults to `/,/ssh` (the Overview and the SSH page, `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed
+  there gets `frontend/dist/index.html`. Without a build, `/` answers 503 ("The frontend build is missing"), because
+  the Python Overview is gone; `/ssh` is the same (its Python page is gone); other listed paths fall back to their Python page.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
   root), installs it to `/usr/local/lib/homelab/frontend/dist` and checks the result itself.
 

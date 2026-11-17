@@ -430,7 +430,7 @@ export interface paths {
         };
         /**
          * Everything the Overview page ("/") shows, as data
-         * @description The data behind `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
+         * @description The data behind the former `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
          *     five changes, services, the Discord and kitt switches, a week of usage and the health block. Texts are the
          *     same Dutch sentences the HTML page shows; times are ISO strings. Not cached.
          */
@@ -937,6 +937,48 @@ export interface paths {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
                 404: components["responses"]["PageNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SSH tab (TypeScript page from frontend/dist, form to add a public key)
+         * @description Served from `frontend/dist` (`PORTED_PAGES`); the page reads `GET /api/ssh` and posts to `POST /api/ssh`.
+         *     Without a build the answer is 503.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["Html"];
+                403: components["responses"]["PageForbidden"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;
@@ -3157,6 +3199,8 @@ export interface components {
                 class: "ok" | "attention" | "bad";
                 /** @description ISO time of this answer, in the inbox time zone */
                 at: string;
+                /** @description the inbox time zone (JOB_TIMEZONE), e.g. Europe/Amsterdam; 'vandaag' and 'morgen' are days in it */
+                timezone: string;
                 /** @description same sentence as GET /api/live */
                 activity: string;
             };

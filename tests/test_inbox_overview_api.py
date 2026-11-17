@@ -1,5 +1,4 @@
-"""GET /api/overview (H-022 F6a): the data behind the Overview page, with the same sentence and the same rows as
-pages.overview_page(). Run: python3 -m unittest discover -s tests"""
+"""GET /api/overview (H-022 F6a): the data behind the Overview page (frontend/src/pages/overview.ts). Run: python3 -m unittest discover -s tests"""
 import http.client
 import json
 import os
@@ -14,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import overview, pages, server  # noqa: E402
+from homelab_inbox import config, overview, server  # noqa: E402
 
 
 class OverviewApi(unittest.TestCase):
@@ -65,15 +64,10 @@ class OverviewApi(unittest.TestCase):
         self.assertEqual(len(d["usage"]["days"]), 7)
         self.assertEqual(len(d["usage"]["inbox"]), 7)
 
-    def test_says_what_the_html_page_says(self):
+    def test_status_carries_the_time_zone_the_page_names_days_in(self):
         d = json.loads(self.get("/api/overview")[2])
-        html = pages.overview_page()
-        self.assertIn(d["status"]["sentence"], html)
-        self.assertIn(d["status"]["activity"], html)
-        for s in d["services"]:
-            self.assertIn(s["name"], html)
-        for lane in d["timeline"]["lanes"]:
-            self.assertIn(lane["name"], html)
+        self.assertEqual(d["status"]["timezone"], config.TZ.key)
+        self.assertTrue(d["status"]["at"].endswith(("+01:00", "+02:00", "+00:00")))
 
     def test_nothing_in_the_answer_is_html_or_a_python_object(self):
         d = json.loads(self.get("/api/overview")[2])

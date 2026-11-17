@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localTime } from "./shell";
+import { localTime } from "./ssh";
 
 describe("localTime", () => {
   it("formats in the box timezone like pages.local", () => {

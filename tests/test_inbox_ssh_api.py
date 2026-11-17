@@ -89,7 +89,7 @@ class SshApi(unittest.TestCase):
 
     def test_ssh_page_is_the_built_frontend(self):
         code, _, html = self.get("/ssh")
-        self.assertIn(code, (200, 404))  # 404 only when frontend/dist is not built
+        self.assertIn(code, (200, 503))  # 503 only when frontend/dist is not built
         if code == 200:
             self.assertNotIn("Sleutel aanvragen", html)  # the form comes from TypeScript, not from the server
 

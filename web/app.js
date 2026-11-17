@@ -1,7 +1,6 @@
-// homelab (F-024): "Nu bezig" en de live logs. De pagina werkt ook zonder dit script; dit houdt hem bij zonder herladen.
+// homelab (F-024): de live logs en de Search-tab. De pagina werkt ook zonder dit script. (Het overzicht staat in frontend/.)
 "use strict";
 
-const POLL_LIVE = 2500;  // ms; een afgeronde run verdwijnt dus binnen een paar seconden
 const POLL_LOG = 2000;   // ms; het log loopt hooguit ~2 s achter
 
 // Mutating /api/* calls need the CSRF token as X-CSRF-Token; it comes from GET /api/session (fetched once).
@@ -21,13 +20,6 @@ function el(tag, attrs = {}, ...kids) {
   }
   for (const k of kids) n.append(k);
   return n;
-}
-
-function elapsed(iso) {
-  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
-  if (s < 60) return `${s} s`;
-  const m = Math.floor(s / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} u ${m % 60} min`;
 }
 
 function clock(iso) {
@@ -81,92 +73,6 @@ class LogView {
 for (const box of document.querySelectorAll(".log[data-key]")) {
   box.textContent = "";
   new LogView(box.dataset.key, box).start();
-}
-
-// "Nu bezig" op het overzicht.
-const live = document.getElementById("live");
-if (live) {
-  const csrf = live.dataset.csrf;
-  const open = new Map();  // key -> LogView
-  const list = live.querySelector(".live-list");
-  const activity = document.getElementById("activity");
-
-  function cancelForm(url) {
-    // Niet alles is te annuleren vanaf deze pagina: forge heeft zijn eigen Start/Stop.
-    if (!url) return el("span", { class: "note", text: "eigen dienst: zie Forge hieronder" });
-    return el("form", { method: "post", action: url },
-      el("input", { type: "hidden", name: "csrf", value: csrf }),
-      el("button", { class: "linkbtn danger", text: "Annuleren" }));
-  }
-
-  function render(items) {
-    const keep = new Set(items.map((i) => i.key));
-    for (const [key, view] of open) if (!keep.has(key)) { view.stop(); open.delete(key); }
-    const nodes = items.map((it) => {
-      const existing = list.querySelector(`[data-key="${it.key}"]`);
-      if (existing) {
-        existing.querySelector(".elapsed").textContent = elapsed(it.started);
-        // Wat een agent doet verandert terwijl hij bezig is (forge: zijn laatste logregel).
-        existing.querySelector(".row-title span").textContent = it.what;
-        return existing;
-      }
-      const meta = el("div", { class: "row-meta" },
-        el("span", { text: it.repo }), el("span", { text: it.model }),
-        el("span", {}, "bezig sinds ", el("span", { class: "elapsed", text: elapsed(it.started) })));
-      const toggle = el("button", { class: "linkbtn", type: "button", "aria-expanded": "false",
-                                    text: "Log tonen" });
-      const node = el("div", { class: "live-item", "data-key": it.key, "data-started": it.started },
-        el("span", { class: "pulse", "aria-hidden": "true" }),
-        el("div", {},
-          el("div", { class: "row-title" }, el("a", { href: it.url, text: it.title }), el("span", { text: it.what })),
-          meta,
-          el("div", { class: "live-actions" }, toggle, cancelForm(it.cancel))));
-      toggle.addEventListener("click", () => {
-        const shown = open.get(it.key);
-        if (shown) {
-          shown.stop(); open.delete(it.key);
-          node.querySelector(".log").remove();
-          toggle.textContent = "Log tonen"; toggle.setAttribute("aria-expanded", "false");
-        } else {
-          const box = el("div", { class: "log", role: "log", "aria-live": "polite" });
-          node.append(box);
-          const view = new LogView(it.key, box);
-          open.set(it.key, view); view.start();
-          toggle.textContent = "Log verbergen"; toggle.setAttribute("aria-expanded", "true");
-        }
-      });
-      return node;
-    });
-    // Only move what changed: a node taken out and put back (replaceChildren) loses the scroll position of its log.
-    for (const n of [...list.children]) if (!nodes.includes(n)) n.remove();
-    nodes.forEach((n, i) => { if (list.children[i] !== n) list.insertBefore(n, list.children[i] || null); });
-    if (!items.length) list.append(el("p", { class: "empty", text: "Niets bezig. Taken en jobs verschijnen hier zodra ze starten." }));
-  }
-
-  async function poll() {
-    if (!document.hidden) {
-      try {
-        const r = await fetch("/api/live", { cache: "no-store" });
-        if (r.ok) {
-          const data = await r.json();
-          render(data.items);
-          if (activity) activity.textContent = data.activity;
-          // De scanner onder de statuszin loopt sneller zolang er iets draait.
-          document.querySelector(".hero")?.classList.toggle("busy", data.items.length > 0);
-          const q = live.querySelector(".queued");
-          if (q) q.textContent = data.queued ? `${data.queued} in de rij` : "";
-        }
-      } catch (e) { /* even geen verbinding */ }
-    }
-    setTimeout(poll, POLL_LIVE);
-  }
-  // De server zette de eerste lijst al neer (zonder knoppen); de eerste poll vervangt hem.
-  poll();
-  setInterval(() => {
-    for (const node of list.querySelectorAll(".live-item")) {
-      node.querySelector(".elapsed").textContent = elapsed(node.dataset.started);
-    }
-  }, 1000);
 }
 
 // Search tab (H-012): ask, list sources, thumbs-down. Talks to the inbox only (/api/search/*).
@@ -290,41 +196,4 @@ if (searchForm) {
   document.getElementById("ssearch").addEventListener("click", () => {
     if (searchForm.reportValidity()) run(false);
   });
-}
-
-// Forge (H-015): state, Start and Stop. Talks to the inbox only (/api/forge*), which calls forge.
-const forgeBox = document.getElementById("forge");
-if (forgeBox) {
-  const status = document.getElementById("forge-status");
-  const buttons = forgeBox.querySelectorAll("button[data-forge]");
-  const show = (d) => {
-    status.classList.remove("error");
-    status.textContent = d.running
-      ? `Running${d.step ? `: ${d.step}` : ""}${d.project ? ` (${d.project})` : ""}` : "Stopped";
-  };
-  const fail = (text) => { status.classList.add("error"); status.textContent = text; };
-  const refresh = async () => {
-    try {
-      const r = await fetch("/api/forge", { cache: "no-store" });
-      const d = await r.json();
-      if (r.ok) show(d); else fail(d.error || `HTTP ${r.status}`);
-    } catch (e) { fail("Forge is not reachable."); }
-  };
-  for (const b of buttons) {
-    b.addEventListener("click", async () => {
-      buttons.forEach((x) => { x.disabled = true; });
-      try {
-        const r = await fetch(`/api/forge/${b.dataset.forge}`, {
-          method: "POST", cache: "no-store",
-          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": await csrfToken() },
-          body: new URLSearchParams(),
-        });
-        const d = await r.json();
-        if (r.ok) show(d); else fail(d.error || `HTTP ${r.status}`);
-      } catch (e) { fail("Forge is not reachable."); }
-      buttons.forEach((x) => { x.disabled = false; });
-    });
-  }
-  refresh();
-  setInterval(refresh, 10000);
 }

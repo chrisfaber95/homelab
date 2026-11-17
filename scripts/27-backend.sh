@@ -20,6 +20,7 @@ DEST=/usr/local/lib/homelab/inbox-backend
 JAR=$DEST/inbox-backend.jar
 SRC_COPY=/var/lib/homelab-backend-src       # root-owned copy of backend/, read by the build account
 BUILD_STATE=/var/lib/private/homelab-backend-build   # StateDirectory of the DynamicUser build (Maven cache, output)
+SECRET_FILE=/var/lib/homelab-inbox/backend-secret   # the facade secret (B6): the Python inbox sends it, the backend checks it
 HEAP_LOG=/var/lib/homelab-inbox/backend-heap.log   # one line per install: the measured heap
 JAVA_HOME_DIR=/usr/lib/jvm/java-21-openjdk-amd64      # the unit's ExecStart uses the same path
 HOST=127.0.0.1
@@ -114,6 +115,13 @@ fi
 # The port in inbox.conf and the unit must be the same one (the exposure check reads both).
 grep -qx "Environment=BACKEND_PORT=$PORT" "$UNIT" || { echo "BACKEND_PORT in config/inbox.conf ($PORT) differs from the unit" >&2; exit 1; }
 grep -qx "Environment=BACKEND_HOST=$HOST" "$UNIT" || { echo "the unit must set BACKEND_HOST=$HOST (loopback only)" >&2; exit 1; }
+grep -qx "Environment=BACKEND_SECRET_FILE=$SECRET_FILE" "$UNIT" || { echo "the unit must set BACKEND_SECRET_FILE=$SECRET_FILE" >&2; exit 1; }
+# The facade secret (B6): made once, never in the repo, readable by $SERVICE_USER only (both the inbox and the backend run as it).
+if [[ ! -s $SECRET_FILE ]]; then
+  (umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$SECRET_FILE")
+fi
+chown "$SERVICE_USER:$SERVICE_USER" "$SECRET_FILE"
+chmod 600 "$SECRET_FILE"
 systemctl enable -q "$SERVICE"
 if [[ $changed -eq 1 ]] || ! systemctl is-active --quiet "$SERVICE"; then
   systemctl restart "$SERVICE"
@@ -127,6 +135,11 @@ for _ in $(seq 1 45); do
   sleep 2
 done
 [[ $body == *'"status":"ok"'* ]] || { echo "GET http://$HOST:$PORT/api/backend/health did not answer ok (systemctl status $SERVICE; its journal is not readable for claude)" >&2; exit 1; }
+# The facade secret (B6): without the header a non-health route is refused, with it the request gets past the filter.
+code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$HOST:$PORT/api/backend/none")"
+[[ $code == 403 ]] || { echo "a request without the facade secret got $code (expected 403)" >&2; exit 1; }
+code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H "X-Inbox-Facade: $(cat "$SECRET_FILE")" "http://$HOST:$PORT/api/backend/none")"
+[[ $code != 403 ]] || { echo "the facade secret in $SECRET_FILE is not accepted" >&2; exit 1; }
 pid="$(systemctl show -p MainPID --value "$SERVICE")"
 [[ $pid =~ ^[1-9][0-9]*$ ]] || { echo "$SERVICE has no main process" >&2; exit 1; }
 [[ $(ps -o user= -p "$pid") == "$SERVICE_USER" ]] || { echo "$SERVICE does not run as $SERVICE_USER" >&2; exit 1; }

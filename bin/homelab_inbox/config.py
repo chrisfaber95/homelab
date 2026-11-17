@@ -49,7 +49,9 @@ DB = HOME / "inbox.db"
 
 # Pages already ported to the TypeScript frontend (H-021): URL paths, comma-separated, empty by default. For these
 # the server sends frontend/dist/index.html; every other path is rendered by pages.py as before.
-PORTED_PAGES = frozenset(p.strip() for p in os.environ.get("PORTED_PAGES", "").split(",") if p.strip().startswith("/"))
+# Paths whose Python page is deleted (H-022): always served from the frontend, there is nothing to fall back on.
+FRONTEND_ONLY = frozenset({"/jobs"})
+PORTED_PAGES = FRONTEND_ONLY | frozenset(p.strip() for p in os.environ.get("PORTED_PAGES", "").split(",") if p.strip().startswith("/"))
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", ROOT / "frontend" / "dist"))
 STATIC_PREFIX = "/app/"  # built assets: /app/<file under frontend/dist>
 

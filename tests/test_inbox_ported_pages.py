@@ -47,18 +47,26 @@ class PortedPages(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
-    def test_default_is_empty_and_nothing_is_ported(self):
-        self.assertEqual(config.PORTED_PAGES, frozenset())
+    def test_default_is_only_the_pages_without_a_python_page(self):
+        self.assertEqual(config.PORTED_PAGES, config.FRONTEND_ONLY)
+        self.assertEqual(config.FRONTEND_ONLY, frozenset({"/jobs"}))
         server.PORTED_PAGES = config.PORTED_PAGES
         status, body, _ = self.get("/taken")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
+        self.assertEqual(self.get("/jobs")[1], INDEX)
+
+    def test_jobs_without_a_build_is_503_not_a_python_page(self):
+        server.PORTED_PAGES = config.PORTED_PAGES
+        (self.dist / "index.html").unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.get("/jobs")[0], 503)
 
     def test_setting_is_parsed_from_the_environment(self):
         import importlib
         os.environ["PORTED_PAGES"] = " /taken, /jobs ,,nonsense"
         try:
-            self.assertEqual(importlib.reload(config).PORTED_PAGES, frozenset({"/taken", "/jobs"}))
+            self.assertEqual(importlib.reload(config).PORTED_PAGES, frozenset({"/taken", "/jobs"}))  # /jobs is always on
         finally:
             del os.environ["PORTED_PAGES"]
             importlib.reload(config)
@@ -73,7 +81,7 @@ class PortedPages(unittest.TestCase):
 
     def test_unported_path_is_rendered_by_python(self):
         server.PORTED_PAGES = frozenset({"/taken"})
-        status, body, _ = self.get("/jobs")
+        status, body, _ = self.get("/ssh")
         self.assertEqual(status, 200)
         self.assertNotEqual(body, INDEX)
 

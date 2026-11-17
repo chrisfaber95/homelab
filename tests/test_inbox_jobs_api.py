@@ -1,6 +1,4 @@
-"""GET /api/jobs-page (H-022 F7a): the data behind the Jobs page and its catalogue, with the same rows and texts as
-pages.jobs_page(). Run: python3 -m unittest discover -s tests"""
-import html
+"""GET /api/jobs-page (H-022 F7a): the data behind the Jobs page and its catalogue, (the page itself is frontend/src/jobs.ts). Run: python3 -m unittest discover -s tests"""
 import http.client
 import json
 import os
@@ -15,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
 os.environ.update(NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"), INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import jobs, pages, server  # noqa: E402
+from homelab_inbox import jobs, server  # noqa: E402
 from homelab_inbox.config import JOBS  # noqa: E402
 from homelab_inbox.storage import db  # noqa: E402
 
@@ -119,20 +117,6 @@ class JobsApi(unittest.TestCase):
                          ("research", "/research", "queued", "in de rij", f"/run/{research['id']}", "Claude", False, ""))
         self.assertEqual((ok["job_url"], ok["due"], ok["manual"], ok["summary"], ok["pr"]),
                          ("/job/a-job", "16-11 07:00", True, "Alles goed", None))
-
-    def test_says_what_the_html_page_says(self):
-        d, page = self.data(), pages.jobs_page()
-        self.assertIn(f"vandaag: {d['claude_runs_today']} van {d['claude_cap']}", page)
-        for j in d["jobs"]:
-            self.assertIn(f'/job/{j["name"]}', page)
-        self.assertIn(html.escape(d["jobs"][1]["error"]), page)
-        self.assertIn(html.escape(d["jobs"][0]["next"]), page)
-        for a in d["catalogue"]:
-            self.assertIn(html.escape(a.get("what") or a["error"]), page)
-        for r in d["runs"]:
-            self.assertIn(r["due"], page)
-            self.assertIn(html.escape(r["status_label"]), page)
-        self.assertIn("Eerste regel &lt;x&gt;", page)
 
     def test_query_string_is_ignored_and_other_paths_are_not_taken(self):
         self.assertEqual(self.get("/api/jobs-page?x=1")[0], 200)

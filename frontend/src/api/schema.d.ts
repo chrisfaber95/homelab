@@ -1299,8 +1299,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Jobs tab
-         * @description Matched on `self.path`.
+         * Jobs tab (frontend/dist/index.html; the page is TypeScript on `/api/jobs-page`)
+         * @description Matched on `url.path`. Always served from the frontend build (`config.FRONTEND_ONLY`); 503 when `frontend/dist/index.html` is missing.
          */
         get: {
             parameters: {
@@ -1313,7 +1313,15 @@ export interface paths {
             responses: {
                 200: components["responses"]["Html"];
                 403: components["responses"]["PageForbidden"];
-                404: components["responses"]["PageNotFound"];
+                /** @description The frontend is not built. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
             };
         };
         put?: never;

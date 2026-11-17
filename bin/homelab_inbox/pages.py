@@ -91,7 +91,7 @@ def asset(name):
 def tab_of(title):
     if title.startswith(("job", "concept", "run")):
         return "jobs"
-    if title.startswith(("geheugen", "search", "skills", "ssh")):
+    if title.startswith(("geheugen", "search", "skills")):
         return title.split()[0]
     return "overzicht" if title == "homelab" else "taken"
 
@@ -420,7 +420,7 @@ def admin_ask(req):
 
 def ssh_state():
     """What the SSH page shows besides the form: the account, the confirm window and the last 15 key requests (newest
-    first). `status` is waiting, ok or fail. Shared by ssh_page and GET /api/ssh."""
+    first). `status` is waiting, ok or fail. Served by GET /api/ssh."""
     try:
         entries = [c for l in CHANGES_LOG.read_text().splitlines() if '"sshkey"' in l
                    and (c := json.loads(l)).get("kind") == "sshkey"]
@@ -435,39 +435,6 @@ def ssh_state():
             "confirm_minutes": int(CONF.get("CONFIRM_SECONDS", 300)) // 60,
             "history": [{"status": status(c), "summary": c.get("summary", ""), "result": c.get("result", ""),
                          "at": c["at"], "by": c.get("user", "")} for c in entries[::-1][:15]]}
-
-
-def ssh_page(done=None, error=None, key="", name=""):
-    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
-    e = html.escape
-    state = ssh_state()
-    user, minutes = state["user"], state["confirm_minutes"]
-    if done:
-        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
-               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
-               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
-    else:
-        top = f'<p class="error">{e(error)}</p>' if error else ""
-    label = {"waiting": "aanvraag", "ok": "ok", "fail": "fout"}
-    rows = "".join(
-        f'<div class="row"><div class="row-title"><span class="st {h["status"]}">{label[h["status"]]}</span>'
-        f'<span>{e(h["summary"])}</span></div><div class="muted wrap">{e(h["result"])}</div>'
-        + meta(e(local(h["at"])), e(h["by"])) + '</div>'
-        for h in state["history"])
-    body = (f'<h1>SSH</h1><p class="muted">Een publieke sleutel om als <code>{e(user)}</code> in te loggen. Hij komt pas '
-            f'in <code>authorized_keys</code> als je binnen {minutes} minuten op <b>Bevestig</b> drukt in de melding op je '
-            f'telefoon. Vergelijk daar de vingerafdruk met <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code>.</p>{top}'
-            f'<form method="post" action="/ssh"><input type="hidden" name="csrf" value="{csrf_token()}">'
-            f'<label for="name">Naam (bijvoorbeeld het apparaat)</label>'
-            f'<input name="name" id="name" required maxlength="40" pattern="[A-Za-z0-9._@-]+" value="{e(name)}" '
-            f'placeholder="windows-pc">'
-            f'<label for="key">Publieke sleutel (de inhoud van het .pub-bestand)</label>'
-            f'<textarea name="key" id="key" required spellcheck="false" placeholder="ssh-ed25519 AAAA...">{e(key)}'
-            f'</textarea><button>Sleutel aanvragen</button></form>'
-            f'<p class="note">Nooit de privésleutel (het bestand zonder .pub). Weghalen doe je zelf: '
-            f'<code>~{e(user)}/.ssh/authorized_keys</code>; sleutels van deze pagina hebben "homelab-pagina" in hun '
-            f'commentaar.</p><h2>Geschiedenis</h2>{rows or "<p class=empty>Nog geen sleutels via deze pagina.</p>"}')
-    return page("ssh", body)
 
 
 def mem_matches(m, words):

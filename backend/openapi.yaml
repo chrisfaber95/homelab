@@ -212,7 +212,7 @@ paths:
         the owner has to confirm on the phone (`CONFIRM_SECONDS` / 60) and the last 15 `sshkey` entries of the
         changes log, newest first (empty when the log is missing or unreadable). `status` is `waiting` for a request
         that still awaits confirmation, otherwise `ok` or `fail`. `at` is the ISO timestamp from the log; the page
-        shows it in local time. The request form (`POST /ssh`) is unchanged.
+        shows it in local time. The page itself (`/ssh`) is served from `frontend/dist` (`PORTED_PAGES`).
       responses:
         "200":
           description: The state.
@@ -236,6 +236,39 @@ paths:
                         result: {type: string}
                         at: {type: string}
                         by: {type: string}
+    post:
+      tags: [machine]
+      summary: Ask homelab-admin to add an SSH key (the SSH page form)
+      x-access: page
+      x-machine: true
+      description: |
+        Calls the homelab-admin socket with `{"cmd": "sshkey", "label": name, "key": key, "by": <device>}`. On success
+        the fingerprint, the confirm deadline and the request id come back; the key is only added after the owner
+        confirms on the phone. A refusal is a 400 with the message of the admin answer (or 'mislukt').
+      parameters: [{$ref: "#/components/parameters/Origin"}, {$ref: "#/components/parameters/CsrfHeader"}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                key: {type: string}
+      responses:
+        "200":
+          description: The request is waiting for confirmation.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: object
+                required: [fingerprint, deadline, id]
+                properties:
+                  fingerprint: {type: string}
+                  deadline: {type: string}
+                  id: {type: string}
+        "400": {description: "`{\"error\": ...}`", content: {application/json; charset=utf-8: {schema: {$ref: "#/components/schemas/Error"}}}}
+        "403": {$ref: "#/components/responses/ApiForbidden"}
   /api/memory/e/{id}:
     x-code: ["/api/memory/e/(.+)"]
     get:
@@ -580,6 +613,16 @@ paths:
       x-access: page
       description: Matched on `self.path` (a query string gives 404).
       responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "404": {$ref: "#/components/responses/PageNotFound"}}
+  /ssh:
+    x-code: ["/ssh"]
+    get:
+      tags: [page]
+      summary: SSH tab (TypeScript page from frontend/dist, form to add a public key)
+      x-access: page
+      description: |
+        Served from `frontend/dist` (`PORTED_PAGES`); the page reads `GET /api/ssh` and posts to `POST /api/ssh`.
+        Without a build the answer is 503.
+      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}, "503": {description: "The frontend build is missing", content: {text/html; charset=utf-8: {schema: {type: string}}}}}
   /taken:
     x-code: ["/taken"]
     get:
@@ -596,38 +639,6 @@ paths:
       x-access: page
       description: Matched on `url.path`.
       responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
-  /ssh:
-    x-code: ["/ssh"]
-    get:
-      tags: [page]
-      summary: SSH tab (form to add a public key)
-      x-access: page
-      description: Matched on `url.path`.
-      responses: {"200": {$ref: "#/components/responses/Html"}, "403": {$ref: "#/components/responses/PageForbidden"}}
-    post:
-      tags: [page]
-      summary: Ask homelab-admin to add an SSH key
-      x-access: page
-      description: |
-        Calls the homelab-admin socket with `{"cmd": "sshkey", "label": name, "key": key, "by": <device>}`. On success
-        the same page is returned with 200 and the result; on a refusal 400 with the message. A pasted private key is
-        never echoed back (the key field is blanked).
-      parameters: [{$ref: "#/components/parameters/Origin"}]
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              required: [csrf]
-              properties:
-                csrf: {type: string}
-                name: {type: string}
-                key: {type: string}
-      responses:
-        "200": {$ref: "#/components/responses/Html"}
-        "400": {description: "HTML page with the error (`text` of the admin answer, or 'mislukt')", content: {text/html; charset=utf-8: {schema: {type: string}}}}
-        "403": {$ref: "#/components/responses/PageForbiddenCsrf"}
   /memory:
     x-code: ["/memory"]
     get:

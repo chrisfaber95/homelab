@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -86,12 +87,38 @@ class SshApi(unittest.TestCase):
         self.assertEqual(history[0]["summary"], "key 19")
         self.assertEqual(history[-1]["summary"], "key 5")
 
-    def test_page_shows_the_same_history(self):
-        self.log.write_text(entry(7))
+    def test_ssh_page_is_the_built_frontend(self):
         code, _, html = self.get("/ssh")
+        self.assertIn(code, (200, 503))  # 503 only when frontend/dist is not built
+        if code == 200:
+            self.assertNotIn("Sleutel aanvragen", html)  # the form comes from TypeScript, not from the server
+
+    def post(self, form, answer):
+        old = server.admin_ask
+        calls = []
+        server.admin_ask = lambda req: calls.append(req) or answer
+        self.addCleanup(lambda: setattr(server, "admin_ask", old))
+        token = json.loads(self.get("/api/session")[2])["csrf_token"]
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        c.request("POST", "/api/ssh", urllib.parse.urlencode(form),
+                  {"Origin": f"http://127.0.0.1:{self.port}", "X-CSRF-Token": token,
+                   "Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        raw = r.read().decode()
+        c.close()
+        return r.status, json.loads(raw), calls
+
+    def test_post_requests_a_key(self):
+        code, body, calls = self.post({"name": " pc ", "key": " ssh-ed25519 AAAA "},
+                                      {"ok": True, "fingerprint": "SHA256:x", "deadline": "2026-11-16T10:05:00+00:00",
+                                       "id": "abc", "extra": 1})
         self.assertEqual(code, 200)
-        self.assertIn("key 7", html)
-        self.assertIn('<span class="st ok">ok</span>', html)
+        self.assertEqual(body, {"fingerprint": "SHA256:x", "deadline": "2026-11-16T10:05:00+00:00", "id": "abc"})
+        self.assertEqual((calls[0]["cmd"], calls[0]["label"], calls[0]["key"]), ("sshkey", "pc", "ssh-ed25519 AAAA"))
+
+    def test_post_refusal_is_a_400_with_the_message(self):
+        code, body, _ = self.post({"name": "pc", "key": "x"}, {"ok": False, "text": "geen geldige sleutel"})
+        self.assertEqual((code, body), (400, {"error": "geen geldige sleutel"}))
 
     def test_config_values(self):
         old = dict(pages.CONF)

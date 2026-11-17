@@ -270,7 +270,7 @@ export interface paths {
          *     the owner has to confirm on the phone (`CONFIRM_SECONDS` / 60) and the last 15 `sshkey` entries of the
          *     changes log, newest first (empty when the log is missing or unreadable). `status` is `waiting` for a request
          *     that still awaits confirmation, otherwise `ok` or `fail`. `at` is the ISO timestamp from the log; the page
-         *     shows it in local time. The request form (`POST /ssh`) is unchanged.
+         *     shows it in local time. The page itself (`/ssh`) is served from `frontend/dist` (`PORTED_PAGES`).
          */
         get: {
             parameters: {
@@ -306,7 +306,58 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Ask homelab-admin to add an SSH key (the SSH page form)
+         * @description Calls the homelab-admin socket with `{"cmd": "sshkey", "label": name, "key": key, "by": <device>}`. On success
+         *     the fingerprint, the confirm deadline and the request id come back; the key is only added after the owner
+         *     confirms on the phone. A refusal is a 400 with the message of the admin answer (or 'mislukt').
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
+                    Origin: components["parameters"]["Origin"];
+                    /** @description Mutating /api/* only: the value of `GET /api/session`; missing or wrong gives 403 `{"error": ...}`. */
+                    "X-CSRF-Token": components["parameters"]["CsrfHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/x-www-form-urlencoded": {
+                        name?: string;
+                        key?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The request is waiting for confirmation. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            fingerprint: string;
+                            deadline: string;
+                            id: string;
+                        };
+                    };
+                };
+                /** @description `{"error": ...}` */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Error"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -1078,6 +1129,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SSH tab (TypeScript page from frontend/dist, form to add a public key)
+         * @description Served from `frontend/dist` (`PORTED_PAGES`); the page reads `GET /api/ssh` and posts to `POST /api/ssh`.
+         *     Without a build the answer is 503.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["Html"];
+                403: components["responses"]["PageForbidden"];
+                /** @description The frontend build is missing */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/taken": {
         parameters: {
             query?: never;
@@ -1136,76 +1229,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ssh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * SSH tab (form to add a public key)
-         * @description Matched on `url.path`.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                200: components["responses"]["Html"];
-                403: components["responses"]["PageForbidden"];
-            };
-        };
-        put?: never;
-        /**
-         * Ask homelab-admin to add an SSH key
-         * @description Calls the homelab-admin socket with `{"cmd": "sshkey", "label": name, "key": key, "by": <device>}`. On success
-         *     the same page is returned with 200 and the result; on a refusal 400 with the message. A pasted private key is
-         *     never echoed back (the key field is blanked).
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    /** @description Page POST only: the netloc of this header must equal the `Host` header, else 403 'Verkeerde herkomst.' (a missing Origin fails too). */
-                    Origin: components["parameters"]["Origin"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/x-www-form-urlencoded": {
-                        csrf: string;
-                        name?: string;
-                        key?: string;
-                    };
-                };
-            };
-            responses: {
-                200: components["responses"]["Html"];
-                /** @description HTML page with the error (`text` of the admin answer, or 'mislukt') */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "text/html; charset=utf-8": string;
-                    };
-                };
-                403: components["responses"]["PageForbiddenCsrf"];
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;

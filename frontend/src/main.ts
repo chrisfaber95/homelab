@@ -1,6 +1,7 @@
 import { renderBrief, renderBriefs } from "./pages/briefs";
 import { renderJobs } from "./pages/jobs";
 import { renderOverview } from "./pages/overview";
+import { renderSsh } from "./pages/ssh";
 import { renderShell } from "./shell";
 
 const app = document.getElementById("app");
@@ -8,6 +9,7 @@ const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLEle
   "/": { tab: "overzicht", title: "homelab", render: renderOverview },
   "/jobs": { tab: "jobs", title: "jobs", render: renderJobs },
   "/briefs": { tab: "briefs", title: "briefs", render: renderBriefs },
+  "/ssh": { tab: "ssh", title: "ssh", render: renderSsh },
 };
 const brief = /^\/briefs\/([A-Z]-\d{3,4})$/.exec(location.pathname);
 const page = PAGES[location.pathname] ?? (brief?.[1]

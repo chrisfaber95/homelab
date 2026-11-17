@@ -415,3 +415,12 @@ Root-stappen schrijft Claude als script in de repo; jij voert ze uit met je eige
 - [ ] After the merge `homelab-admin` runs `28-inbox-db.sh` (or: `sudo bash /var/lib/homelab/repo/scripts/28-inbox-db.sh`). It ends with
       "inbox database ready" (round trip as `inbox-runner` → `inbox_app` over the socket). `ss -ltnp | grep -i postgres` prints nothing;
       `sudo -u postgres psql -c 'show listen_addresses'` is empty; forge and ashfall still work. Docs: `docs/inbox-db.md`.
+
+## H-023: inbox backend (B3)
+
+- [ ] After the merge `homelab-admin` runs `27-backend.sh` (or: `sudo bash /var/lib/homelab/repo/scripts/27-backend.sh`; it needs
+      `28-inbox-db.sh` first). It installs OpenJDK 21, builds `backend/` as a throwaway user and ends with "inbox backend ready" and a heap
+      snapshot. `curl http://127.0.0.1:8130/api/backend/health` answers `{"status":"ok",...}`; `ss -ltnp | grep 8130` shows
+      `127.0.0.1` only; `systemctl is-active homelab-inbox-backend` is `active`; `bin/homelab-exposure` passes (backend lines OK);
+      the old inbox on 8105 still works. Then measure the heap (`docs/inbox-backend.md`, "Measuring the heap on the box") and fill in the
+      **Measured values** table there (a PR, or tell Claude the numbers).

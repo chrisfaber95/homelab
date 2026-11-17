@@ -41,7 +41,7 @@ a new push: a repo with no release on disk does not count as deployed.
   8106-8108 visualshopping, 8109 f1-dashboard, 8110 Home Assistant, 8111 sdlc-studio (via `tailscale serve`;
   the app itself on 127.0.0.1:8112), 8113 pixel-quest (via `tailscale serve`; the app itself on 127.0.0.1:8114), 8120 forge (Tailscale address),
   8121 kitt (the gate in the inbox, Tailscale address; the adapter itself on 127.0.0.1:8122, `docs/kitt.md`),
-  8123 ashfall-world (Tailscale address).
+  8123 ashfall-world (Tailscale address), 8130 inbox backend (H-023; 127.0.0.1 only, `docs/inbox-backend.md`).
   Kijk bij twijfel met `ss -ltn`.
   Zet `restart: unless-stopped` in het compose-bestand; na een reboot start homelab-deploy de containers ook zelf.
 - **A compose repo with a secret** (a database password, an API key): it does *not* go in the repo, and a `.env` next

@@ -20,6 +20,8 @@
 
   <properties>
     <java.version>21</java.version>
+    <!-- Not managed by the Spring Boot parent: pinned here. Lets pgjdbc talk to PostgreSQL over its unix socket (Q2). -->
+    <junixsocket.version>2.11.1</junixsocket.version>
   </properties>
 
   <dependencies>
@@ -38,6 +40,13 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.kohlschutter.junixsocket</groupId>
+      <artifactId>junixsocket-core</artifactId>
+      <version>${junixsocket.version}</version>
+      <type>pom</type>
       <scope>runtime</scope>
     </dependency>
 

@@ -5,7 +5,7 @@ Python inbox; nothing is switched over to it yet. For now it only has `GET /api/
 
 - Java 21, Spring Boot 4.1.2 (the parent POM pins all plugin and dependency versions), Maven 3.9.16 through the
   wrapper (`mvnw`, version and checksum in `.mvn/wrapper/maven-wrapper.properties`).
-- Dependencies: web, JDBC, Flyway, pgjdbc and the test starter. The datasource and Flyway are switched off in
+- Dependencies: web, JDBC, Flyway, pgjdbc, junixsocket (pinned in `pom.xml`, for the PostgreSQL unix socket) and the test starter. The datasource and Flyway are switched off in
   `application.properties` until the database tasks (B2, B4) add them.
 
 ## Build and test
@@ -26,8 +26,14 @@ curl http://127.0.0.1:8130/api/backend/health
 ```
 
 It binds to loopback only. `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`) override this; the
-install task (B3) records the real port in `config/inbox.conf`. Never set `BACKEND_HOST` to anything but a loopback
+port is also in `config/inbox.conf` (`BACKEND_PORT`). Never set `BACKEND_HOST` to anything but a loopback
 address.
+
+## On the box
+
+`scripts/27-backend.sh` builds the jar as a throwaway user and runs it as `homelab-inbox-backend.service` on
+`127.0.0.1:8130`; see `docs/inbox-backend.md` (install, hardening, how to measure the heap). Database access goes over
+PostgreSQL's unix socket with junixsocket (`junixsocket.version` in `pom.xml`), configured in the unit.
 
 ## Changing versions
 

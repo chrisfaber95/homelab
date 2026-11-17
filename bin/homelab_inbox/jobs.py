@@ -17,7 +17,7 @@ import yaml
 
 from . import conversation
 from .config import CONF, HOME, JOBS, TZ, _cancel_runs, _lock
-from .helpers import as_list, gh, git, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, sync_branch, task_cmd
+from .helpers import claude_result, as_list, gh, git, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, sync_branch, task_cmd
 from .memory import load_memory
 from .storage import db, get, log, now
 
@@ -848,7 +848,7 @@ def make_draft(draft_id):
         os.chmod(share / f, 0o640)
     try:
         code, out = task_cmd("draft", f"d{draft_id}", timeout=300)
-        result = json.loads(out[out.find("{"):]) if "{" in out else {}
+        result = claude_result(out)
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
         m = re.search(r"```job\n(.*?)```", result.get("result") or "", re.S)

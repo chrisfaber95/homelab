@@ -123,6 +123,19 @@ def task_cmd(*args, timeout=600):
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+def claude_result(out):
+    """The JSON result of `claude -p --output-format json` in task_cmd's output. task_cmd appends stderr, so a warning
+    line after the JSON (e.g. `[claude-code:unrecognized_model]`) must not break the parse and hide the real error."""
+    start = out.find("{")
+    if start < 0:
+        return {}
+    try:
+        data, _ = json.JSONDecoder().raw_decode(out[start:])
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 LOGS = HOME / "logs"
 
 

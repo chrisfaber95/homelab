@@ -112,5 +112,19 @@ class TaskLimit(unittest.TestCase):
         self.assertEqual((kind, len(tasks)), ("tasks", 25))
 
 
+class ClaudeResult(unittest.TestCase):
+    """task_cmd appends stderr to stdout: a warning line after the JSON must not hide the real error (inbox 203, 204)."""
+
+    def test_stderr_line_after_the_json(self):
+        from homelab_inbox.helpers import claude_result
+        out = json.dumps({"is_error": True, "result": "model unavailable"}) + '\n[claude-code:unrecognized_model] {"model":"x"}'
+        self.assertEqual(claude_result(out)["result"], "model unavailable")
+
+    def test_no_json_gives_empty(self):
+        from homelab_inbox.helpers import claude_result
+        self.assertEqual(claude_result("boom"), {})
+        self.assertEqual(claude_result("{broken"), {})
+
+
 if __name__ == "__main__":
     unittest.main()

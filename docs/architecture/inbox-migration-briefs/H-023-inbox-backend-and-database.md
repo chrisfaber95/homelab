@@ -3,6 +3,7 @@ id: H-023
 title: "Inbox migration 4: Spring Boot backend and PostgreSQL beside the old inbox"
 status: draft
 priority: could
+max_tasks: 8
 repos: [homelab]
 build:
   kit:

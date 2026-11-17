@@ -7,7 +7,7 @@ import uuid
 
 from .config import ACCEPTABLE, ACTIVE, CONF, HOME, STATUS_NL, _cancel, _lock
 from . import conversation
-from .helpers import first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
+from .helpers import claude_result, first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
 from .memory import remember_task
 from .storage import db, get, log, now, update
 
@@ -100,7 +100,7 @@ def route_task(task_id):
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
         log_line(f"t{task_id}", "info", "router gestart")
         code, out = task_cmd("route", f"r{task_id}", timeout=300)
-        result = json.loads(out[out.find("{"):]) if "{" in out else {}
+        result = claude_result(out)
         if code != 0 or result.get("is_error"):
             raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
         if task_id in _cancel:

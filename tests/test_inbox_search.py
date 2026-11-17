@@ -97,7 +97,7 @@ class SearchTab(unittest.TestCase):
         for needle in ('href="/search" aria-current=page', 'id="sq"', 'name="hard"', 'id="sproject"', 'id="stype"',
                        'width=device-width', 'id="sanswer"', 'id="sresults"'):
             self.assertIn(needle, html)
-        self.assertIn('<a href="/search">Search</a>', self.req("GET", "/")[1])
+        self.assertIn('<a href="/search">Search</a>', self.req("GET", "/taken")[1])
 
     def test_filters_and_results_are_proxied_with_filters(self):
         self.assertEqual(json.loads(self.req("GET", "/api/search/filters")[1])["projects"], ["homelab"])

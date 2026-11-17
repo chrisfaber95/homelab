@@ -97,6 +97,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Jobs page renders (jobs, catalogue, drafts, latest runs) as data
+         * @description The data of `GET /jobs` (`pages.jobs_page`): the Claude-run counter of today, the open drafts (newest 10), the
+         *     catalogue of `agents/`, all jobs (sorted by name) and the 20 latest runs. Texts are the Dutch ones the page
+         *     shows (`next`, `last`, `status_label`, times in `timezone`). A broken job or catalogue file has only `name` and
+         *     `error`; it never hides the others. `refresh` is true while a draft is still being drafted (the page reloads
+         *     itself every 20 seconds then). The query string is ignored. Not `/api/jobs`: that is kitt's door.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Jobs page as data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["JobsPage"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory": {
         parameters: {
             query?: never;
@@ -144,6 +187,122 @@ export interface paths {
                     };
                 };
                 403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Skills tab shows, as JSON
+         * @description The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
+         *     20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
+         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Skills page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            intro: string;
+                            /** @description shown when `skills` is empty */
+                            empty: string;
+                            /** @description shown when `proposals` is empty */
+                            proposals_empty: string;
+                            skills: {
+                                name: string;
+                                description: string;
+                                /** @description names of the jobs that use it; empty shows 'geen' */
+                                jobs: string[];
+                            }[];
+                            proposals: {
+                                name: string;
+                                pr_url: string;
+                                task_id: number | null;
+                                created: string;
+                            }[];
+                        };
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the SSH page shows (account, confirm window, key history)
+         * @description The data `ssh_page` renders (`pages.ssh_state`): the account a key is added for (`SSH_KEY_USER`), the minutes
+         *     the owner has to confirm on the phone (`CONFIRM_SECONDS` / 60) and the last 15 `sshkey` entries of the
+         *     changes log, newest first (empty when the log is missing or unreadable). `status` is `waiting` for a request
+         *     that still awaits confirmation, otherwise `ok` or `fail`. `at` is the ISO timestamp from the log; the page
+         *     shows it in local time. The request form (`POST /ssh`) is unchanged.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The state. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": {
+                            /** @example chris */
+                            user: string;
+                            /** @example 5 */
+                            confirm_minutes: number;
+                            history: {
+                                /** @enum {string} */
+                                status: "waiting" | "ok" | "fail";
+                                summary: string;
+                                result: string;
+                                at: string;
+                                by: string;
+                            }[];
+                        };
+                    };
+                };
             };
         };
         put?: never;
@@ -211,7 +370,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/skills": {
+    "/api/overview": {
         parameters: {
             query?: never;
             header?: never;
@@ -219,10 +378,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What the Skills tab shows, as JSON
-         * @description The data `skills_page` renders, for the TypeScript page: the merged skills with the jobs that use each, the
-         *     20 newest skill proposals (newest first) and the page's Dutch texts. `created` is already formatted as
-         *     `dd-mm HH:MM` in the box's time zone (`-` when empty). The HTML page `/skills` is unchanged.
+         * Everything the Overview page ("/") shows, as data
+         * @description The data behind the former `pages.overview_page()` (H-022 F6a): status sentence, live items, the job timeline, the last
+         *     five changes, services, the Discord and kitt switches, a week of usage and the health block. Texts are the
+         *     same Dutch sentences the HTML page shows; times are ISO strings. Not cached.
          */
         get: {
             parameters: {
@@ -233,31 +392,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The Skills page data. */
+                /** @description The Overview data. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json; charset=utf-8": {
-                            intro: string;
-                            /** @description shown when `skills` is empty */
-                            empty: string;
-                            /** @description shown when `proposals` is empty */
-                            proposals_empty: string;
-                            skills: {
-                                name: string;
-                                description: string;
-                                /** @description names of the jobs that use it; empty shows 'geen' */
-                                jobs: string[];
-                            }[];
-                            proposals: {
-                                name: string;
-                                pr_url: string;
-                                task_id: number | null;
-                                created: string;
-                            }[];
-                        };
+                        "application/json; charset=utf-8": components["schemas"]["Overview"];
                     };
                 };
                 403: components["responses"]["ApiForbidden"];
@@ -807,6 +948,95 @@ export interface paths {
                 502: components["responses"]["UpstreamUnreachable"];
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Tasks page (/taken) renders, as JSON
+         * @description Added for the page port (H-022 F10). Matched on `url.path`. `repos` fills the new-task form (`auto` is the extra
+         *     option "auto (homelab beslist)"); `queue` holds queued, running and waiting tasks, oldest first; `history` the
+         *     rest of the 200 newest, newest first. Times are the stored ISO 8601 UTC strings. `refresh` is true while the
+         *     queue is not empty (the HTML page reloads itself then).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The lists of the Tasks page. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["TaskList"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the task page (/task/<id>) renders, as JSON, with the log so far
+         * @description Added for the page port (H-022 F10). Matched on `url.path`. Unknown id: 404 `{"error": "Not found."}`.
+         *     `actions` says which forms the page shows (answer, cancel, retry, accept, attended); the POSTs stay the form
+         *     routes of `/task/{id}/{action}`. `log` holds the first 2000 lines and `next`; the page keeps polling
+         *     `GET /api/log/t<id>?from=<next>` until `done` (no server-sent events).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["NumericId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The task page data. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["TaskDetail"];
+                    };
+                };
+                403: components["responses"]["ApiForbidden"];
+                404: components["responses"]["ApiNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2971,6 +3201,77 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        JobsPage: {
+            /** @description Claude runs started by jobs today */
+            claude_runs_today: number;
+            /** @description daily limit (`JOB_CLAUDE_CAP`) */
+            claude_cap: number;
+            /** @description e.g. Europe/Amsterdam */
+            timezone: string;
+            /** @description a draft is still being drafted */
+            refresh: boolean;
+            drafts: {
+                id: number;
+                /** @enum {string} */
+                status: "drafting" | "ready" | "failed";
+                /** @description first line of the request */
+                request: string;
+            }[];
+            catalogue: components["schemas"]["CatalogueAgent"][];
+            jobs: components["schemas"]["JobSummary"][];
+            runs: components["schemas"]["JobRunSummary"][];
+        };
+        /** @description With `error` set only `name` and `error` are present. */
+        CatalogueAgent: {
+            name: string;
+            /** @description why the file in agents/ is broken */
+            error: string | null;
+            /** @description a job of this name exists */
+            on?: boolean;
+            /** @description first paragraph of the instruction, at most 300 characters */
+            what?: string;
+            when?: string;
+            /** @enum {string} */
+            model?: "lokaal" | "Claude";
+            /** @enum {string} */
+            deliver?: "page" | "ntfy" | "conversation";
+            /** @description what to fill in when switching on */
+            fill?: string | null;
+        };
+        /** @description With `error` set only `name` and `error` are present. */
+        JobSummary: {
+            name: string;
+            error: string | null;
+            /** @description Dutch kind label */
+            kind?: string;
+            /** @enum {string} */
+            model?: "lokaal" | "Claude";
+            when?: string;
+            /** @description 'gepauzeerd' or e.g. 'morgen 07:00' */
+            next?: string;
+            paused?: boolean;
+            /** @description Dutch status of the latest run, null without runs */
+            last?: string | null;
+        };
+        JobRunSummary: {
+            id: number;
+            job: string;
+            /** @description /job/<name>, or /research for research questions */
+            job_url: string;
+            /** @description dd-mm HH:MM in timezone */
+            due: string;
+            status: string;
+            status_label: string;
+            /** @description /task/<id> or /run/<id> */
+            url: string;
+            /** @enum {string} */
+            model: "lokaal" | "Claude";
+            /** @description started with 'Nu draaien' */
+            manual: boolean;
+            pr: string | null;
+            /** @description first line, empty when none */
+            summary: string;
+        };
         /** @description Error body of every /api/* answer: the chat door, the kitt door and the page endpoints. A flattened upstream error may add keys (e.g. request_id). */
         Error: {
             error: string;
@@ -3047,6 +3348,112 @@ export interface components {
             added_local: string;
             changed_local: string;
         };
+        Overview: {
+            status: {
+                /** @description e.g. 'Alles in orde.' */
+                sentence: string;
+                /** @enum {string} */
+                class: "ok" | "attention" | "bad";
+                /** @description ISO time of this answer, in the inbox time zone */
+                at: string;
+                /** @description the inbox time zone (JOB_TIMEZONE), e.g. Europe/Amsterdam; 'vandaag' and 'morgen' are days in it */
+                timezone: string;
+                /** @description same sentence as GET /api/live */
+                activity: string;
+            };
+            live: {
+                items: components["schemas"]["LiveItem"][];
+                queued: number;
+            };
+            timeline: {
+                /** @description x of 'nu' in percent */
+                now_x: number;
+                ticks: {
+                    x: number;
+                    label: string;
+                    day: boolean;
+                }[];
+                lanes: {
+                    name: string;
+                    /** @enum {string} */
+                    state: "active" | "paused" | "error" | "deleted";
+                    /** @description local or claude; null for error and deleted */
+                    model: string | null;
+                    when: string | null;
+                    marks: {
+                        x: number;
+                        /** @description ok, pr, failed, held, running or plan */
+                        status: string;
+                        link: string;
+                        label: string;
+                    }[];
+                }[];
+            };
+            /** @description the last five, newest first */
+            changes: {
+                ok: boolean;
+                text: string;
+                at: string | null;
+                user: string;
+                reason: string;
+            }[];
+            services: {
+                name: string;
+                address: string;
+                note: string;
+            }[];
+            /** @description address of the Forge line in config/services.conf, or empty */
+            forge_link: string;
+            switches: {
+                /** @description the stored Discord switch */
+                discord: boolean;
+                /** @description the stored approvals switch */
+                discord_approvals: boolean;
+                /** @description Discord is on (the page's 'Discord is off' note shows when false) */
+                discord_on: boolean;
+                kitt: boolean;
+                /** @description kitt's permissions, sorted */
+                kitt_may: string[];
+            };
+            usage: {
+                /** @description the last 7 days, oldest first */
+                days: string[];
+                /** @description null: the helper is unreachable */
+                llm: number[] | null;
+                claude_jobs: number[];
+                inbox: number[];
+                cap: number;
+                /** @description per kind of job */
+                saved_minutes: {
+                    [key: string]: number;
+                };
+            };
+            health: {
+                last: string | null;
+                checks: {
+                    [key: string]: {
+                        /** @description OK, WARN or FAIL */
+                        status: string;
+                        text: string;
+                        since?: string | null;
+                    };
+                };
+                deploys: {
+                    name: string;
+                    /** @description null: not deployed yet */
+                    ok: boolean | null;
+                    at: string | null;
+                    sha: string | null;
+                    sync_error: string | null;
+                }[];
+                backup: {
+                    ok: boolean;
+                    at: string | null;
+                    free_bytes: number;
+                    free_pct: unknown;
+                } | null;
+            };
+        };
         BriefView: {
             id: string;
             title: string;
@@ -3112,6 +3519,85 @@ export interface components {
             /** @description info, claude, tool, result, error, out (forge: info, claude, tool, error) */
             kind: string;
             text: string;
+        };
+        TaskRow: {
+            id: number;
+            /** @description 'Inbox <id>' or 'Job <name>' */
+            label: string;
+            /** @description queued, running, waiting, pr_open, ... (config.STATUS_NL) */
+            status: string;
+            /** @description Dutch status text of the page */
+            status_text: string;
+            /** @description first line of the task text (max 70), or the kind of the job */
+            what: string;
+            repo: string;
+            /** @description the client it came from; null = the page */
+            source: string | null;
+            created: string;
+            ended: string | null;
+            pr_url: string | null;
+            pr_number: number | null;
+        };
+        TaskList: {
+            /** @description sorted */
+            repos: string[];
+            /** @description the repo value that lets homelab decide */
+            auto: string;
+            queue: components["schemas"]["TaskRow"][];
+            history: components["schemas"]["TaskRow"][];
+            refresh: boolean;
+        };
+        /** @description A TaskRow plus everything the task page shows. */
+        TaskDetail: components["schemas"]["TaskRow"] & {
+            text: string;
+            question: string | null;
+            answer: string | null;
+            parent: number | null;
+            reason: string | null;
+            after_task: number | null;
+            brief: string | null;
+            handoff: string | null;
+            criteria: string[];
+            review: string | null;
+            /** @description automatic rework rounds used */
+            reviews: number | null;
+            unattended: boolean;
+            /** @description the 'Build without me' explanation */
+            without_me: string;
+            /** @description a brief build (repo `brief`) */
+            is_build: boolean;
+            build_left_nothing: boolean;
+            children: components["schemas"]["TaskRow"][];
+            summary: string | null;
+            /** @description 'Reden' for a refused task, else 'Samenvatting' */
+            summary_title: string;
+            note: string | null;
+            turns: number | null;
+            rounds: number | null;
+            /** @description e.g. 'Claude (opus-5-5)' */
+            model: string;
+            /** @description limit per round, as configured */
+            max_turns: unknown;
+            /** @description limit per round, as configured */
+            max_minutes: unknown;
+            accepted: boolean;
+            /** @description the predecessor that stops a retry */
+            blocked_by: number | null;
+            /** @enum {string} */
+            retry_label: "Continue" | "Retry";
+            retry_hint: string;
+            /** @description show 'PR #n is not merged as far as the inbox knows' */
+            accept_pr_unmerged: boolean;
+            actions: {
+                answer: boolean;
+                cancel: boolean;
+                retry: boolean;
+                accept: boolean;
+                attended: boolean;
+            };
+            /** @description true while queued (the HTML page reloads itself) */
+            refresh: boolean;
+            log: components["schemas"]["LogChunk"];
         };
         LogChunk: {
             lines: components["schemas"]["LogLine"][];

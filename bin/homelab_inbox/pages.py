@@ -10,13 +10,12 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from .briefs import build_left_nothing, builds, live_build, load_briefs, split_frontmatter
-from . import conversation
-from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, SERVICES, STATUS_NL, TZ
+from .briefs import WITHOUT_ME, build_left_nothing, builds, live_build, load_briefs, split_frontmatter
+from .config import ACCEPTABLE, ACTIVE, AUTO, BRIEF, CONF, JOBS, RETRYABLE, ROOT, SECRET_FILE, STATUS_NL, TZ
 from .helpers import first_line, label, read_log, repo_list
 from .jobs import JOB_KINDS, RESEARCH_JOB, RESEARCH_MODES, RUN_NL, load_agents, claude_runs_today, draft_name, nothing_statement, job_runs, parse_job, run_view, skill_list
 from .memory import MEMORY, MEM_KINDS
-from .overview import CHANGES_LOG, WITHOUT_ME, DAYS_NL, TL_NOW, activity_sentence, ago, day_time, health, live_items, minutes_nl, model_name, status_sentence, timeline, ts, usage
+from .overview import CHANGES_LOG, DAYS_NL, day_time, model_name
 from .router import blocked_by, blocked_followups, children
 from .storage import db, log, tasks
 
@@ -320,228 +319,6 @@ def run_row(r, show_job=False):
             + '</div>')
 
 
-def live_row(it):
-    e = html.escape
-    return (f'<div class="live-item" data-ssr="{it["key"]}" data-started="{it["started"]}">'
-            f'<span class="pulse" aria-hidden="true"></span><div><div class="row-title"><a href="{it["url"]}">'
-            f'{e(it["title"])}</a><span>{e(it["what"])}</span></div>'
-            + meta(e(it["repo"]), e(it["model"]), f'bezig sinds <span class="elapsed">{ago(it["started"])}</span>')
-            + '</div></div>')
-
-
-def timeline_html():
-    e = html.escape
-    lanes, ticks = timeline()
-    if not lanes:
-        return ('<p class="empty">Nog geen jobs. <a href="/jobs">Maak een job</a> en hij verschijnt hier met zijn '
-                'runs en zijn volgende keren.</p>')
-    scale = "".join(f'<span style="left:{t["x"]:.2f}%">{t["label"]}</span>' for t in ticks)
-    days = "".join(f'<i class="tl-day" style="left:{t["x"]:.2f}%"></i>' for t in ticks if t["day"])
-    rows = []
-    for lane in lanes:
-        job = lane["job"]
-        if not job:
-            sub = "verwijderd"
-        elif "error" in job:
-            sub = "fout in het bestand"
-        else:
-            sub = ("gepauzeerd" if job["paused"] else
-                   ("lokaal" if job["model"] == "local" else "Claude") + f", {e(job['when'] or job['schedule'])}")
-        marks = "".join(f'<a class="mk {m["status"]}" style="left:{m["x"]:.2f}%" href="{m["link"]}" '
-                        f'title="{e(m["label"])}" aria-label="{e(m["label"])}"></a>' for m in lane["marks"])
-        rows.append(f'<div class="tl-row"><div class="tl-name"><a href="/job/{e(lane["name"])}">{e(lane["name"])}</a>'
-                    f'<small>{sub}</small></div><div class="tl-lane">{days}<i class="tl-now"></i>{marks}</div></div>')
-    legend = "".join(f'<span><i class="mk {k}"></i>{v}</span>' for k, v in (
-        ("ok", "gelukt"), ("pr", "PR"), ("failed", "mislukt"), ("held", "wacht of vraag"), ("running", "bezig"),
-        ("plan", "gepland")))
-    return (f'<div class="tl"><div class="tl-scale" aria-hidden="true">{scale}'
-            f'<span class="now" style="left:{TL_NOW}%">nu</span></div>{"".join(rows)}</div>'
-            f'<div class="legend">{legend}</div>')
-
-
-def bars(values, days, cap=None):
-    top = max([*values, cap or 0, 1])
-    today = len(values) - 1
-    cols = "".join(f'<i{" class=today" if i == today else ""} style="height:{v / top * 100:.0f}%" '
-                   f'title="{DAYS_NL[d.weekday()]} {d:%d-%m}: {v}"></i>' for i, (v, d) in enumerate(zip(values, days)))
-    capline = f'<span class="cap" style="bottom:{cap / top * 100:.0f}%" title="daglimiet {cap}"></span>' if cap else ""
-    letters = "".join(f"<span>{DAYS_NL[d.weekday()]}</span>" for d in days)
-    return f'<div><div class="bars" aria-hidden="true">{cols}{capline}</div><div class="days" aria-hidden="true">{letters}</div></div>'
-
-
-def usage_html():
-    u = usage()
-    rows = []
-    if u["llm"] is None:
-        rows.append('<div class="use"><div><div class="use-label">Lokaal model</div><div class="use-value">'
-                    '<small>de helper is niet bereikbaar</small></div></div></div>')
-    else:
-        rows.append(f'<div class="use"><div><div class="use-label">Lokaal model</div><div class="use-value">'
-                    f'{sum(u["llm"])}<small>calls, vandaag {u["llm"][-1]}</small></div></div>{bars(u["llm"], u["days"])}</div>')
-    rows.append(f'<div class="use"><div><div class="use-label">Claude voor jobs</div><div class="use-value">'
-                f'{sum(u["claude_jobs"])}<small>runs, vandaag {u["claude_jobs"][-1]} van {u["cap"]}</small></div></div>'
-                f'{bars(u["claude_jobs"], u["days"], u["cap"])}</div>')
-    rows.append(f'<div class="use"><div><div class="use-label">Claude voor jouw taken</div><div class="use-value">'
-                f'{sum(u["inbox"])}<small>taken, vandaag {u["inbox"][-1]}</small></div></div>'
-                f'{bars(u["inbox"], u["days"])}</div>')
-    total = sum(u["saved"].values())
-    kinds = "".join(f'<li><span>{html.escape(k)}</span><b>{minutes_nl(v)}</b></li>'
-                    for k, v in sorted(u["saved"].items(), key=lambda kv: -kv[1]))
-    rows.append(f'<div class="use"><div><div class="use-label">Tijd bespaard door jobs</div><div class="use-value">'
-                f'{minutes_nl(total)}</div></div>'
-                + (f'<ul class="saved">{kinds}</ul>' if kinds else
-                   '<p class="saved">Telt gelukte runs van jobs met <code>minutes</code> in hun bestand.</p>')
-                + '</div>')
-    return "".join(rows)
-
-
-CHECK_NL = {"OK": "in orde", "WARN": "let op", "FAIL": "faalt"}
-
-
-def change_text(c):
-    if c.get("kind") in ("instant", "refused"):
-        what = f"{c.get('action')} {' '.join(c.get('args') or [])}"
-    else:
-        what = f"{c.get('change', 'machine.conf')}: {c.get('summary') or c.get('result', '')}"
-    return what.strip()[:90]
-
-
-def health_html(h):
-    e = html.escape
-    checks = sorted(h["checks"].items(), key=lambda kv: (kv[1].get("status") == "OK", kv[0]))
-    bad = [(n, c) for n, c in checks if c.get("status") != "OK"]
-
-    def check_row(n, c):
-        st = c.get("status", "?")
-        return (f'<div class="check"><span class="st {"ok" if st == "OK" else st.lower()}">{CHECK_NL.get(st, st)}</span>'
-                f'<div><b>{e(n)}</b>' + meta(e(c.get("text", "")), f'sinds {day_time(ts(c["since"]))}' if c.get("since")
-                                               else "") + '</div></div>')
-    parts = [f'<p class="note">{len(checks) - len(bad)} van {len(checks)} checks in orde, laatst gecontroleerd '
-             f'{day_time(ts(h["last"])) if h["last"] else "nooit"}. Alleen lezen.</p>']
-    parts += [check_row(n, c) for n, c in bad]
-    if checks:
-        parts.append(f'<details><summary>Alle checks</summary>{"".join(check_row(n, c) for n, c in checks)}</details>')
-    facts = []
-    for d in h["deploys"]:
-        last = d.get("last_deploy") or {}
-        state = ("ok" if last.get("ok") else "mislukt") if last else "nog niet"
-        facts.append((e(d["name"]), f'<span class="st {"ok" if last.get("ok") else "fail"}">{state}</span>, '
-                                    f'{e((d.get("deployed_sha") or "-")[:7])}, {e(day_time(ts(last["at"])) if last else "-")}'
-                                    + (f'<br><span class="error">{e(d["sync_error"])}</span>' if d.get("sync_error") else "")))
-    b = h["backup"]
-    if b:
-        facts.append(("Backup", f'<span class="st {"ok" if b.get("ok") else "fail"}">{"ok" if b.get("ok") else "mislukt"}'
-                                f'</span>, {e(day_time(ts(b["at"])) if b.get("at") else "-")}; '
-                                f'{b.get("free_bytes", 0) // 2**30} GB vrij ({b.get("free_pct", "?")}%)'))
-    else:
-        facts.append(("Backup", "nog geen"))
-    parts.append('<h3>Deploys en backup</h3><dl class="facts">'
-                 + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>")
-    return "".join(parts)
-
-
-def changes_html(h):
-    e = html.escape
-    parts = []
-    if h["changes"]:
-        parts.append("".join(
-            f'<div class="row"><div class="row-title"><span class="st {"ok" if c.get("ok") else "fail"}">'
-            f'{"ok" if c.get("ok") else "fout"}</span><span>{e(change_text(c))}</span></div>'
-            + meta(e(day_time(ts(c["at"]))), e(c.get("user", "")), e((c.get("reason") or "")[:80])) + '</div>'
-            for c in h["changes"]))
-    return "".join(parts)
-
-
-def services_html():
-    e = html.escape
-
-    def address(a):
-        if a.startswith(("http://", "https://")):
-            return f'<a href="{e(a)}">{e(a.split("://", 1)[1])}</a>'
-        return f"<code>{e(a)}</code>"
-    facts = "".join(f'<dt>{e(s["name"])}</dt><dd>{address(s["address"])}<br><span class="muted">{e(s["note"])}</span></dd>'
-                    for s in SERVICES)
-    return ((f'<dl class="facts">{facts}</dl>' if facts else '<p class="empty">No services in config/services.conf.</p>')
-            + '<h3>Run the designer</h3><p class="note">From your PC with Tailscale on, as <code>claude</code>. tmux '
-            'keeps the session alive if SSH drops; to get back in, run the first two lines again.</p>'
-            '<pre>ssh homelab-claude\ntmux new -A -s designer\ncd ~/dev/product &amp;&amp; claude</pre>'
-            '<p class="note">It interviews you and merges the brief as a draft; approve it on the '
-            '<a href="/briefs">Briefs</a> tab. More in docs/briefs.md.</p>')
-
-
-def forge_html():
-    """Start and Stop for forge (H-015). The buttons talk to the inbox (/api/forge), which calls forge; app.js fills in
-    the state. The link to forge's page is its line in config/services.conf."""
-    link = next((s["address"] for s in SERVICES if s["name"] == "Forge"), "")
-    page_link = f' <a href="{html.escape(link)}">Forge page</a>' if link.startswith(("http://", "https://")) else ""
-    return (f'<section id="forge" class="sec-forge"><div class="section-head"><h2>Forge</h2>'
-            f'<p class="note">autopilot{page_link}</p></div>'
-            '<p id="forge-status" class="note" role="status">Checking forge...</p>'
-            '<div class="forge-actions"><button type="button" data-forge="start">Start</button> '
-            '<button type="button" class="ghost" data-forge="stop">Stop</button></div></section>')
-
-
-def discord_html():
-    """The two Discord switches (H-016): Discord as a whole, and approvals from Discord. Each is a plain form."""
-    st = conversation.state()
-    stored = {n: conversation.switch(n) for n in conversation.SWITCHES}
-
-    def row(name, title, note):
-        on = stored[name]
-        return (f'<div class="switch-row"><div><strong>{title}</strong> <span class="note">{note}</span><br>'
-                f'<span id="switch-{name}" role="status">{"On" if on else "Off"}</span></div>'
-                + form(f"/discord/{name}/{'off' if on else 'on'}", "", "Switch off" if on else "Switch on",
-                       ghost=on) + "</div>")
-    held = "" if st["discord"] else ('<p class="note">Discord is off: nothing is sent or read; what is written meanwhile '
-                                     'arrives when it is switched on.</p>')
-    return ('<section id="discord" class="sec-discord"><div class="section-head"><h2>Discord</h2>'
-            '<p class="note">chat with the box</p></div>'
-            + row("discord", "Discord", "the bot and its messages") + held
-            + row("discord_approvals", "Approvals from Discord", "build buttons and their confirm") + '</section>')
-
-
-def kitt_html():
-    """The switch for kitt (H-018): off, and the app shows itself as disconnected. What it may do is its permission list in
-    config/clients.json."""
-    on = conversation.switch("kitt")
-    allowed = conversation.clients().get("kitt", set())
-    return ('<section id="kitt" class="sec-discord"><div class="section-head"><h2>Kitt</h2>'
-            '<p class="note">the cockpit app</p></div><div class="switch-row"><div><strong>Kitt</strong> '
-            '<span class="note">chat, agents, dashboard, logs and approvals in the app</span><br>'
-            f'<span id="switch-kitt" role="status">{"On" if on else "Off"}</span>'
-            f' <span class="note">may: {html.escape(", ".join(sorted(allowed)) or "nothing")}</span></div>'
-            + form(f"/discord/kitt/{'off' if on else 'on'}", "", "Switch off" if on else "Switch on", ghost=on)
-            + '</div></section>')
-
-
-def overview_page():
-    h = health()
-    sentence, cls = status_sentence(h)
-    items, queued = live_items()
-    live = "".join(live_row(it) for it in items) or \
-        '<p class="empty">Niets bezig. Taken en jobs verschijnen hier zodra ze starten.</p>'
-    body = (f'<section class="hero {cls}{" busy" if items else ""}"><div class="state-label">Status om '
-            f'{datetime.now(TZ):%H:%M}</div><h1>{html.escape(sentence)}</h1><div class="scanner" aria-hidden="true">'
-            f'</div><p id="activity">{html.escape(activity_sentence(items, queued))}</p></section>'
-            f'<div class="grid"><div>'
-            f'<section id="live" class="sec-live" data-csrf="{csrf_token()}"><div class="section-head"><h2>Nu bezig</h2>'
-            f'<p class="note"><span class="queued">{f"{queued} in de rij" if queued else ""}</span> '
-            f'<a href="/taken#nieuw">Taak sturen</a></p></div><div class="live-list">{live}</div></section>'
-            f'<section class="sec-jobs"><div class="section-head"><h2>Jobs</h2><p class="note">Zeven dagen terug, 24 uur vooruit. '
-            f'<a href="/jobs">Alle jobs</a></p></div>{timeline_html()}</section>'
-            f'<section class="sec-changes"><div class="section-head"><h2>Wijzigingen op de box</h2><p class="note">de laatste vijf, '
-            f'via homelab-admin</p></div>{changes_html(h) or "<p class=empty>Nog geen wijzigingen.</p>"}</section>'
-            f'</div><div>'
-            f'<section class="sec-services"><div class="section-head"><h2>Services</h2><p class="note">only over '
-            f'Tailscale</p></div>{services_html()}</section>'
-            f'{forge_html()}{discord_html()}{kitt_html()}'
-            f'<section class="sec-week"><div class="section-head"><h2>Deze week</h2><p class="note">de laatste 7 dagen</p></div>'
-            f'{usage_html()}</section>'
-            f'<section class="sec-health"><h2>Gezondheid</h2>{health_html(h)}</section>'
-            f'</div></div>')
-    return page("homelab", body)
-
-
 def job_facts(job):
     e = html.escape
     times = ", ".join(when(t) for t in job["cron"].next_times(datetime.now(timezone.utc)))
@@ -756,32 +533,42 @@ def admin_ask(req):
         s.close()
 
 
-def ssh_page(done=None, error=None, key="", name=""):
-    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
-    e = html.escape
-    user = CONF.get("SSH_KEY_USER", "chris")
-    minutes = int(CONF.get("CONFIRM_SECONDS", 300)) // 60
-    if done:
-        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
-               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
-               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
-    else:
-        top = f'<p class="error">{e(error)}</p>' if error else ""
+def ssh_state():
+    """What the SSH page shows besides the form: the account, the confirm window and the last 15 key requests (newest
+    first). `status` is waiting, ok or fail. Shared by ssh_page and GET /api/ssh."""
     try:
         entries = [c for l in CHANGES_LOG.read_text().splitlines() if '"sshkey"' in l
                    and (c := json.loads(l)).get("kind") == "sshkey"]
     except (OSError, ValueError):
         entries = []
 
-    def st(c):
+    def status(c):
         if c.get("result", "").startswith("aangevraagd"):
-            return "waiting", "aanvraag"
-        return ("ok", "ok") if c.get("ok") else ("fail", "fout")
+            return "waiting"
+        return "ok" if c.get("ok") else "fail"
+    return {"user": CONF.get("SSH_KEY_USER", "chris"),
+            "confirm_minutes": int(CONF.get("CONFIRM_SECONDS", 300)) // 60,
+            "history": [{"status": status(c), "summary": c.get("summary", ""), "result": c.get("result", ""),
+                         "at": c["at"], "by": c.get("user", "")} for c in entries[::-1][:15]]}
+
+
+def ssh_page(done=None, error=None, key="", name=""):
+    """SSH-sleutels (via homelab-admin): aanvragen hier, bevestigen op de telefoon."""
+    e = html.escape
+    state = ssh_state()
+    user, minutes = state["user"], state["confirm_minutes"]
+    if done:
+        top = (f'<div class="row"><div class="row-title"><span class="st waiting">bevestig op je telefoon</span>'
+               f'<b>{e(name)}</b></div><div><code>{e(done["fingerprint"])}</code></div>'
+               + meta(f'binnen {minutes} min, tot {local(done["deadline"])}', e(done["id"])) + '</div>')
+    else:
+        top = f'<p class="error">{e(error)}</p>' if error else ""
+    label = {"waiting": "aanvraag", "ok": "ok", "fail": "fout"}
     rows = "".join(
-        f'<div class="row"><div class="row-title"><span class="st {st(c)[0]}">{st(c)[1]}</span>'
-        f'<span>{e(c.get("summary", ""))}</span></div><div class="muted wrap">{e(c.get("result", ""))}</div>'
-        + meta(e(local(c["at"])), e(c.get("user", ""))) + '</div>'
-        for c in entries[::-1][:15])
+        f'<div class="row"><div class="row-title"><span class="st {h["status"]}">{label[h["status"]]}</span>'
+        f'<span>{e(h["summary"])}</span></div><div class="muted wrap">{e(h["result"])}</div>'
+        + meta(e(local(h["at"])), e(h["by"])) + '</div>'
+        for h in state["history"])
     body = (f'<h1>SSH</h1><p class="muted">Een publieke sleutel om als <code>{e(user)}</code> in te loggen. Hij komt pas '
             f'in <code>authorized_keys</code> als je binnen {minutes} minuten op <b>Bevestig</b> drukt in de melding op je '
             f'telefoon. Vergelijk daar de vingerafdruk met <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code>.</p>{top}'

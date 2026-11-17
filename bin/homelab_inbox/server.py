@@ -15,9 +15,9 @@ from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
 from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
 from .memory import MEM_ID_RE, entry_text, entry_view, load_memory, mem_get, memory_view, save_memory
-from .overview import activity_sentence, brief_data, briefs_data, live_items
+from .overview import activity_sentence, brief_data, briefs_data, jobs_data, live_items, overview_json, task_view, tasks_view
 from . import forge, search
-from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, overview_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, task_page, tasks_page
+from .pages import Access, WEB, admin_ask, brief_page, briefs_page, csrf_token, draft_page, entry_page, job_page, jobs_page, memory_page, research_page, page, run_page, search_page, skills_data, skills_page, ssh_page, ssh_state, task_page, tasks_page
 from .queue import answer_task, cancel_task, recover, retry_task, scheduler
 from .router import accept_task, blocked_by, children
 from .storage import db, get, log, new_task, now, update
@@ -261,6 +261,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, f.read_bytes(), ctype, cache="private, max-age=86400")
         if url.path == "/api/session":
             return self.send_upstream(200, {"csrf_token": csrf_token()})
+        if url.path == "/api/jobs-page":
+            return self.send_upstream(200, jobs_data())
+        if url.path == "/api/overview":
+            return self.send_upstream(200, overview_json())
         if url.path == "/api/memory":
             return self.send_upstream(200, memory_view(urllib.parse.parse_qs(url.query).get("q", [""])[0][:200]))
         if (m := re.fullmatch(r"/api/memory/e/(.+)", url.path)):
@@ -309,8 +313,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/search/results":
             params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
             return self.send_upstream(*search.results(params.get("q", ""), params))
+        if url.path == "/api/tasks":
+            return self.send_upstream(200, tasks_view())
+        if m := re.fullmatch(r"/api/tasks/(\d+)", url.path):
+            if t := get(int(m.group(1))):
+                return self.send_upstream(200, task_view(t))
+            return self.send_upstream(404, {"error": "Not found."})
         if url.path == "/taken":
             return self.send(200, tasks_page())
+        if url.path == "/api/ssh":
+            return self.send_upstream(200, ssh_state())
         if url.path == "/ssh":
             return self.send(200, ssh_page())
         if url.path == "/memory":
@@ -319,7 +331,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, entry_page(entry))
         m = re.fullmatch(r"/task/(\d+)", self.path)
         if self.path == "/":
-            return self.send(200, overview_page())
+            # The Overview is TypeScript (frontend/dist, PORTED_PAGES); getting here means the build is missing.
+            return self.refuse(503, "<p>De frontend is niet gebouwd (frontend/dist ontbreekt).</p>",
+                               "The frontend build is missing.")
         if m and (t := get(int(m.group(1)))):
             return self.send(200, task_page(t))
         if self.path == "/jobs":

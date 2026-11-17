@@ -1,6 +1,7 @@
 import { renderBrief, renderBriefs } from "./pages/briefs";
 import { renderJobs } from "./pages/jobs";
 import { renderOverview } from "./pages/overview";
+import { renderSkills } from "./pages/skills";
 import { renderSsh } from "./pages/ssh";
 import { renderTask } from "./pages/task";
 import { renderTasks } from "./pages/tasks";
@@ -12,6 +13,7 @@ const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLEle
   "/jobs": { tab: "jobs", title: "jobs", render: renderJobs },
   "/taken": { tab: "taken", title: "taken", render: renderTasks },
   "/briefs": { tab: "briefs", title: "briefs", render: renderBriefs },
+  "/skills": { tab: "skills", title: "skills", render: renderSkills },
   "/ssh": { tab: "ssh", title: "ssh", render: renderSsh },
 };
 const taskId = /^\/task\/(\d+)$/.exec(location.pathname)?.[1];

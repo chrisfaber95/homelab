@@ -76,8 +76,7 @@ In short, how the frontend fits into the inbox (details in the sections below):
 - `GET /api/jobs-page` returns what the Jobs page renders (counter, drafts, catalogue, jobs, latest runs) as JSON
   (`overview.jobs_data`). `/api/jobs` is kitt's door, hence the name. The Jobs page is TypeScript (`frontend/src/pages/jobs.ts`); its forms are the
   same HTML forms as before (hidden `csrf` field, same actions).
-- `PORTED_PAGES` defaults to `/,/jobs,/taken,/task` (Overview, Jobs and the Tasks pages; `/task` stands for every `/task/<id>`);
-  every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
+- `PORTED_PAGES` defaults to `/,/jobs,/ssh,/taken,/task` (Overview, Jobs, SSH and the Tasks pages; `/task` stands for every `/task/<id>`; the SSH page is `frontend/src/pages/ssh.ts`, data from `GET /api/ssh`, form posting to `POST /api/ssh`); every other page is still rendered by the Python inbox. A path listed there gets `frontend/dist/index.html`. Without a
   build, these pages answer 503 ("The frontend build is missing"), because their Python versions are gone; other listed
   paths fall back to their Python page.
 - `scripts/21-inbox.sh` builds `frontend/dist` with `npm ci --ignore-scripts` as an unprivileged throwaway user (never as
@@ -120,11 +119,12 @@ Alles zit in de dienst `homelab-inbox`; na een wijziging aan `bin/homelab-inbox`
 
 ## Ported pages (H-021)
 
-`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/ssh`; default `/,/jobs,/taken,/task`)
+`PORTED_PAGES` (environment variable of the inbox, comma-separated URL paths such as `/taken,/skills`; default `/,/jobs,/ssh,/taken,/task`)
 lists the pages that the TypeScript frontend has taken over. For a GET on a listed path the inbox sends
 `frontend/dist/index.html`; its built assets are served under `/app/` from `frontend/dist` (override the folder with
 `FRONTEND_DIST`). Every other path is rendered by `pages.py` as before, so URLs and notification links stay valid. If a
-listed path has no `frontend/dist/index.html`, the Python page is served and a warning goes to the journal.
+listed path has no `frontend/dist/index.html`, a warning goes to the journal and the Python page is served; for a page
+whose Python code is deleted (`/`, `/jobs`, `/ssh`, `/taken`, `/task/<id>`) that means a 503, so run `scripts/21-inbox.sh` to build the frontend.
 Tests: `tests/test_inbox_ported_pages.py`.
 
 Build on the box: `scripts/21-inbox.sh` (rerun line lists `frontend`) copies `frontend/` to a staging folder and runs

@@ -2,6 +2,7 @@ import { renderJobs } from "./pages/jobs";
 import { renderOverview } from "./pages/overview";
 import { renderTask } from "./pages/task";
 import { renderTasks } from "./pages/tasks";
+import { renderSsh } from "./pages/ssh";
 import { renderShell } from "./shell";
 
 const app = document.getElementById("app");
@@ -9,6 +10,7 @@ const PAGES: Record<string, { tab: string; title: string; render: (main: HTMLEle
   "/": { tab: "overzicht", title: "homelab", render: renderOverview },
   "/jobs": { tab: "jobs", title: "jobs", render: renderJobs },
   "/taken": { tab: "taken", title: "taken", render: renderTasks },
+  "/ssh": { tab: "ssh", title: "ssh", render: renderSsh },
 };
 const taskId = /^\/task\/(\d+)$/.exec(location.pathname)?.[1];
 const page = PAGES[location.pathname] ?? (taskId ? {

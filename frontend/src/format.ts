@@ -34,6 +34,12 @@ export function clockTime(date: Date, timeZone: string): string {
   return `${pad(l.h)}:${pad(l.min)}`;
 }
 
+/** '16-11 07:00': the short date and time of the task lists. */
+export function shortDate(date: Date, timeZone: string): string {
+  const l = localParts(date, timeZone);
+  return `${pad(l.d)}-${pad(l.m)} ${pad(l.h)}:${pad(l.min)}`;
+}
+
 /** 'vandaag 07:00', 'morgen 07:00', 'gisteren 22:10', 'wo 07:00'; within a week, otherwise with the date. */
 export function dayTime(date: Date, timeZone: string, now: Date = new Date()): string {
   const l = localParts(date, timeZone);

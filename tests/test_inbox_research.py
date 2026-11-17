@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.update(INBOX_RUNNER_HOME=tempfile.mkdtemp(), NTFY_FAKE="1", REPOS_CONF=str(ROOT / "config/repos.conf"),
                   INBOX_ALLOW_ALL="1")
 sys.path.insert(0, str(ROOT / "bin"))
-from homelab_inbox import chat, conversation, jobs, pages, queue, rounds  # noqa: E402
+from homelab_inbox import chat, conversation, jobs, overview, pages, queue, rounds  # noqa: E402
 from homelab_inbox.storage import db, get  # noqa: E402
 
 FILE = ('---\nwhen: weekly\nschedule: "0 9 * * 1"\nkind: research\nmodel: claude\n{extra}---\n'
@@ -177,7 +177,7 @@ class Finish(unittest.TestCase):
         self.assertRegex(first, r"^Research report \| mode: deep \| time taken: \d+ (min \d+ )?s$")
         self.assertIn("https://example.org/a", t["answer"])
         self.assertIn(("cleanup", t["id"]), [c.args[:2] for c in cmd.call_args_list])
-        self.assertIn("https://example.org/a", pages.task_page(t))
+        self.assertIn("https://example.org/a", overview.task_view(t)["answer"])
         self.assertEqual(jobs.job_runs("research")[0]["mode"], "deep")
 
     def test_page_question_delivers_nothing_extra(self):

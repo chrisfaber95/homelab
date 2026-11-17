@@ -23,7 +23,7 @@ CLIENTS = {"clients": {
 os.environ["CLIENTS_JSON"] = json.dumps(CLIENTS)
 sys.path.insert(0, str(ROOT / "bin"))
 from homelab_inbox import briefs, chat, config, conversation  # noqa: E402
-from homelab_inbox import helpers, pages, server, storage  # noqa: E402
+from homelab_inbox import helpers, overview, pages, server, storage  # noqa: E402
 
 BID = "H-016"
 FAKE_BRIEF = {"id": BID, "title": "Chat", "status": "draft", "repos": ["homelab"], "build": {},
@@ -75,7 +75,7 @@ class StartTask(Base):
         self.assertEqual(status, 200)
         t = storage.get(r["task"])
         self.assertEqual((t["repo"], t["status"], t["source"], t["unattended"]), ("homelab", "queued", "discord", 0))
-        self.assertIn("Discord", pages.task_page(t))  # its page says where it came from
+        self.assertEqual(overview.task_view(t)["source"], "discord")  # its page says where it came from
         self.assertIn("via Discord", pages.task_row(t))
         page_id = storage.new_task("homelab", "from the page")
         self.assertIsNone(storage.get(page_id)["source"])
@@ -178,7 +178,7 @@ class Approval(Base):
         self.assertIn("build without me", self.commits[0])
         t = storage.get(r["task"])
         self.assertEqual((t["repo"], t["source"], t["unattended"]), ("brief", "discord", 1))
-        self.assertIn("approved there", pages.task_page(t))  # on the build's page
+        self.assertEqual((overview.task_view(t)["source"], overview.task_view(t)["is_build"]), ("discord", True))  # the build's page says "approved there"
         self.assertEqual(self.kinds("approval")[0]["client"], "discord")
         self.assertEqual(len(self.pushed), 1)  # and an ntfy notification
         self.assertIn("from Discord", self.pushed[0][0])

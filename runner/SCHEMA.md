@@ -158,3 +158,19 @@ stdout, one JSON object per line, each with `"v":1`:
 
 stderr is Claude's and diagnostics. Exit code: that of `homelab-inbox-task run` (the table above; a child killed by signal
 S gives 128+S); 2 for bad runner arguments (usage on stderr).
+
+## Runner `review.py` (H-025 R2)
+
+`runner/review.py <id>` (numeric task id) is the process contract in front of `review v<id>`: Claude without tools judges
+a brief task's PR against its criteria. Started like `round.py` (`python3 -I runner/review.py <id>`, `TASK_CMD` as
+there, so the sudoers line is unchanged); the prompt and system prompt are files in `share/v<id>/`, so no prompt or token
+is in any argument. The runner owns the parsing of Claude's `--output-format json` document (the first JSON object with
+`result` or `is_error`; a warning line after it is ignored). The caller (`helpers.run_runner`) owns the deadline: SIGTERM
+to the runner is forwarded, then SIGKILL.
+
+stdout, NDJSON with `"v":1`: `{"event":"log","kind":"info","text":...}` once, then exactly one
+`{"event":"result","ok":bool,"text":...,"detail":...,"exit_code":C,"raw":{...}|null}`. `ok` is true when the script exited 0
+and Claude gave a result without `is_error`; `text` is Claude's `result` string; `detail` (the last 1000 characters of
+the script's stdout and stderr) is filled when not ok. `parse_review` of the text stays in the inbox (`briefs.py`:
+orchestration). Exit code: that of `homelab-inbox-task review` (child killed by signal S gives 128+S); 2 for bad runner
+arguments (usage on stderr).

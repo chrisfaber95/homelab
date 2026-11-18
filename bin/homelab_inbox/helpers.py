@@ -2,12 +2,14 @@
 import json
 import os
 import re
+import shlex
 import subprocess
+import sys
 import threading
 import urllib.request
 from pathlib import Path
 
-from .config import CONF, FAKE_GH, GH_TOKEN_FILE, HOME, JOBS, NEW_REPOS, NTFY_TOKEN_FILE, REPOS_CONF, SECRET_RE, TASK_CMD, _lock
+from .config import CONF, FAKE_GH, GH_TOKEN_FILE, HOME, JOBS, NEW_REPOS, NTFY_TOKEN_FILE, REPOS_CONF, RUNNER_DIR, SECRET_RE, TASK_CMD, _lock
 from . import conversation
 from .storage import get, log, now
 
@@ -121,6 +123,34 @@ def _refresh_cache(name, slug):
 def task_cmd(*args, timeout=600):
     p = subprocess.run([*TASK_CMD, *map(str, args)], capture_output=True, text=True, timeout=timeout)
     return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def run_runner(script, *args, timeout=600):
+    """Run a runner script (runner/<script>, H-025) to the end and return the `result` event of its NDJSON. No prompt or
+    token goes in the arguments: the runner reads the share files and calls homelab-inbox-task itself. At the deadline
+    the runner gets SIGTERM (it forwards it to Claude) and then SIGKILL; a missing result event gives ok False."""
+    p = subprocess.Popen([sys.executable, "-I", str(RUNNER_DIR / script), *map(str, args)],
+                         env={**os.environ, "TASK_CMD": shlex.join(TASK_CMD)}, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, errors="replace")
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        try:
+            out, err = p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+        return {"ok": False, "text": "", "detail": f"timed out after {timeout} s", "exit_code": None}
+    result = None
+    for line in out.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("event") == "result":
+            result = ev
+    return result or {"ok": False, "text": "", "detail": (out + err).strip()[-1000:], "exit_code": p.returncode}
 
 
 def claude_result(out):

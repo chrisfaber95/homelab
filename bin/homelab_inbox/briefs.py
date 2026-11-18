@@ -12,7 +12,7 @@ import yaml
 
 from .config import ACCEPTABLE, BRIEF, CONF, HOME, NEW_REPOS, SETUP_PATHS, _cancel, _lock
 from . import conversation
-from .helpers import claude_result, NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, task_cmd
+from .helpers import claude_result, NEVER_SELF_MERGE, as_list, gh, git, label, log_line, merges_itself, notify, page_url, read_json, refresh_cache, repo_list, run_runner, task_cmd
 from .router import children, repo_profiles
 from .storage import db, get, log, now, update
 
@@ -382,11 +382,10 @@ def review_pr(task_id, cache):
         for f in ("prompt.txt", "system.txt"):
             os.chmod(share / f, 0o640)
         log_line(f"t{task_id}", "info", f"brief review of PR #{t['pr_number']} started")
-        code, out = task_cmd("review", f"v{task_id}", timeout=900)
-        result = claude_result(out)
-        if code != 0 or result.get("is_error"):
-            raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
-        rows, summary = parse_review(result.get("result") or "", criteria)
+        result = run_runner("review.py", task_id, timeout=900)  # H-025 R2: the runner owns the Claude call
+        if not result.get("ok"):
+            raise RuntimeError(f"Claude: {(result.get('text') or result.get('detail') or '')[-300:]}")
+        rows, summary = parse_review(result["text"], criteria)
         misses = [r for r in rows if r["verdict"] == "miss"]
         mark = {"pass": "✅", "miss": "❌", "ci": "🧪", "unclear": "❔"}
         body = (f"**Brief review** ({t['brief']}, round {(t['reviews'] or 0) + 1}): {summary}\n\n"

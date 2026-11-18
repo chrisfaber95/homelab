@@ -87,6 +87,25 @@ class InboxUsesRunner(unittest.TestCase):
         self.assertEqual((r["ok"], r["text"]), (True, "fake claude"))
         self.assertFalse(bad["ok"])
 
+    def test_review_pr_reads_the_runner_result(self):
+        from unittest import mock
+        from homelab_inbox import briefs
+        text = "```review\n" + json.dumps({"summary": "ok", "criteria": [{"criterion": "c", "verdict": "pass"}]}) + "\n```"
+        t = {"id": 5, "repo": "homelab", "criteria": '["c"]', "text": "x", "pr_number": 3, "reviews": 0, "brief": "H-1",
+             "parent": None, "summary": "", "pr_url": "u", "unattended": 0}
+        for result, review_ok in (({"ok": True, "text": text}, 1), ({"ok": False, "text": "", "detail": "boom"}, 0)):
+            upd = {}
+            with tempfile.TemporaryDirectory() as home, \
+                    mock.patch.object(briefs, "HOME", Path(home)), mock.patch.object(briefs, "get", lambda i: t), \
+                    mock.patch.object(briefs, "repo_list", lambda: {"homelab": "o/r"}), \
+                    mock.patch.object(briefs, "review_diff", lambda c, i: ("diff", [])), \
+                    mock.patch.object(briefs, "run_runner", lambda *a, **k: result), \
+                    mock.patch.object(briefs, "gh"), mock.patch.object(briefs, "notify"), \
+                    mock.patch.object(briefs, "log_line"), mock.patch.object(briefs, "merges_itself", lambda t: False), \
+                    mock.patch.object(briefs, "update", lambda i, **kw: upd.update(kw)):
+                briefs.review_pr(5, "cache")
+            self.assertEqual(upd["review_ok"], review_ok)
+
 
 if __name__ == "__main__":
     unittest.main()

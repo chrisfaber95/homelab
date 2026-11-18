@@ -158,3 +158,5 @@ hebben een token en worden alleen vanaf de pagina zelf geaccepteerd (tegen CSRF)
 ## Claude round runner (H-025 R1)
 
 `rounds.stream_claude` no longer calls `homelab-inbox-task run` itself: it starts `python3 -I runner/round.py <id> <session> <new|resume> [research]` (`RUNNER_DIR`, installed to `/usr/local/lib/homelab/runner` by `21-inbox.sh`) and reads its NDJSON events (log, model, turn, result). The runner owns the stream-json parsing and calls `homelab-inbox-task` through the same sudoers line; the inbox keeps the turn limit, the deadline and cancel. The contract is in `runner/SCHEMA.md`; a Java `RunnerService` starts the same script later. Rollback: revert the PR.
+
+H-025 R2 part 1: `router.run_route` starts `python3 -I runner/route.py <task id>` the same way and reads its one `result` line; the runner owns the Claude call (`route r<id>` through the same sudoers line) and the parsing of Claude's JSON, `router.py` keeps when and with what. No prompt or token in the arguments. Contract: "Runner `route.py`" in `runner/SCHEMA.md`. Rollback: revert the PR.

@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
  * It never starts a process, never writes to a file, GitHub, ntfy or the conversation.
  */
 public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies, Effects.Notifier,
-        Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups {
+        Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.JobIo {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -86,5 +86,40 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     @Override
     public void revive(Task task) {
         record("revive " + task.id());
+    }
+
+    @Override
+    public void notify(String title, String body, String url, int limit) {
+        record("notify " + title);
+    }
+
+    @Override
+    public String boxOverview() throws java.io.IOException {
+        record("boxOverview");
+        return "";
+    }
+
+    @Override
+    public String fetchPage(String url) throws java.io.IOException {
+        record("fetchPage " + url);
+        return "";
+    }
+
+    @Override
+    public Object github(String path) throws java.io.IOException {
+        record("github " + path);
+        return List.of();
+    }
+
+    @Override
+    public Effects.ScriptResult runScript(String repo, String script, List<String> args, long runId) {
+        record("runScript " + repo + " " + script);
+        return new Effects.ScriptResult(0, "");
+    }
+
+    @Override
+    public String summarize(String jobName, String instruction, String text) throws java.io.IOException {
+        record("summarize " + jobName);
+        return "";
     }
 }

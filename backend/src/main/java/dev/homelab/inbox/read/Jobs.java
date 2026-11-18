@@ -29,7 +29,8 @@ public class Jobs {
 
     /** A job file: valid ({@code error == null}) or not. */
     public record Job(String name, String error, Cron cron, String when, String schedule, String kind, String model,
-                      boolean paused, Long minutes, List<String> skills) {
+                      boolean paused, Long minutes, List<String> skills, String repo, String script, List<String> args,
+                      List<String> sources, String deliver, String mode, String instruction) {
 
         public boolean ok() {
             return error == null;
@@ -37,6 +38,21 @@ public class Jobs {
 
         public boolean active() {
             return ok() && !paused;
+        }
+    }
+
+    /** A catalogue file that is valid except for the sources the user fills in when switching it on; {@link #job} is
+     * the job as far as it goes ({@code jobs.NeedsInput}). */
+    public static final class NeedsInput extends IllegalArgumentException {
+        private final transient Job job;
+
+        public NeedsInput(String message, Job job) {
+            super(message);
+            this.job = job;
+        }
+
+        public Job job() {
+            return job;
         }
     }
 
@@ -101,7 +117,7 @@ public class Jobs {
             try {
                 found.put(name, parse(name, text, repos, skills));
             } catch (IllegalArgumentException | IllegalStateException e) {
-                found.put(name, new Job(name, String.valueOf(e.getMessage()), null, null, null, null, null, false, null, List.of()));
+                found.put(name, new Job(name, String.valueOf(e.getMessage()), null, null, null, null, null, false, null, List.of(), null, null, List.of(), List.of(), "page", null, ""));
             }
         }
         return found;
@@ -234,11 +250,16 @@ public class Jobs {
                 throw new IllegalArgumentException("script moet een pad in de repo zijn, bijvoorbeeld scripts/iets.sh");
             }
         }
+        String scriptPath = Text.truthy(script) ? Text.pyStr(script) : null;
+        String jobRepo = k.equals("script") && repo == null ? "homelab" : repo;
+        Job partial = new Job(name, null, cron, when, schedule, k, (String) model, paused, null, skillList, jobRepo,
+                scriptPath, asList(meta.get("args")), sources, deliver, Text.truthy(mode) ? Text.pyStr(mode) : null,
+                instruction);
         if (k.equals("digest") && sources.isEmpty()) {
-            throw new IllegalArgumentException("een digest heeft sources nodig (URL's of github:eigenaar/repo)");
+            throw new NeedsInput("een digest heeft sources nodig (URL's of github:eigenaar/repo)", partial);
         }
         if (k.equals("repo-watch") && sources.isEmpty()) {
-            throw new IllegalArgumentException("een repo-waker heeft sources nodig (github:eigenaar/repo, een of meer)");
+            throw new NeedsInput("een repo-waker heeft sources nodig (github:eigenaar/repo, een of meer)", partial);
         }
         if (k.equals("repo-watch") && !sources.stream().allMatch(s -> s.startsWith("github:"))) {
             throw new IllegalArgumentException("een repo-waker bekijkt alleen GitHub-repo's: github:eigenaar/repo");
@@ -288,6 +309,8 @@ public class Jobs {
                 throw new IllegalArgumentException("minutes is een heel aantal minuten (0 of meer)");
             }
         }
-        return new Job(name, null, cron, when, schedule, k, (String) model, paused, mins, skillList);
+        String finalMode = k.equals("research") ? (Text.truthy(mode) ? Text.pyStr(mode) : "quick") : null;
+        return new Job(name, null, cron, when, schedule, k, (String) model, paused, mins, skillList, jobRepo,
+                scriptPath, asList(meta.get("args")), sources, deliver, finalMode, instruction);
     }
 }

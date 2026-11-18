@@ -2,7 +2,11 @@ package dev.homelab.inbox.core;
 
 import dev.homelab.inbox.conversation.ConversationDb;
 import dev.homelab.inbox.core.Effects.ConversationNotes;
+import dev.homelab.inbox.core.Effects.ConversationNotes;
 import dev.homelab.inbox.core.Effects.Followups;
+import dev.homelab.inbox.core.Effects.JobIo;
+import dev.homelab.inbox.core.Effects.Notifier;
+import dev.homelab.inbox.read.Jobs;
 import dev.homelab.inbox.core.Effects.RoundRunner;
 import dev.homelab.inbox.core.Effects.TaskLog;
 import dev.homelab.inbox.core.Effects.WorkingCopies;
@@ -76,5 +80,38 @@ class CoreConfig {
         String base = "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
         return new TaskActions(store, settings, cancellations, runner, copies, log, notes, followups, coreExecutor,
                 clock, base);
+    }
+
+    @Bean
+    JobSettings jobSettings(Settings conf, CoreSettings core) {
+        return new JobSettings(conf.confInt("JOB_CLAUDE_CAP", 10), conf.confInt("RESEARCH_QUICK_MINUTES", 6),
+                conf.confInt("RESEARCH_QUICK_TURNS", 25), core.maxMinutes(), core.maxTurns(), JobSettings.LOCAL_MAX_CHARS,
+                conf.tz());
+    }
+
+    @Bean
+    JobRuns jobRuns(ConversationDb db) {
+        return new JobRuns(db::open);
+    }
+
+    /** Jobs and research in shadow (K6): the engine exists, nothing calls it, and its ticks do nothing while the
+     * scheduler is off. */
+    @Bean
+    JobEngine jobEngine(JobRuns runs, TaskStore store, CoreSettings core, JobSettings settings, Jobs jobs, JobIo io,
+                        Notifier notifier, TaskLog log, ConversationNotes notes, WorkingCopies copies, Clock clock,
+                        java.util.concurrent.ExecutorService coreExecutor, Settings conf) {
+        String base = "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
+        return new JobEngine(runs, store, core, settings, jobs::load, io, notifier, log, notes, copies,
+                new Cancellations(), coreExecutor, clock, base);
+    }
+
+    @Bean
+    AgentCatalogue agentCatalogue(Settings conf, Jobs jobs, JobRuns runs, TaskStore store) {
+        return new AgentCatalogue(conf.skillsDir().resolveSibling("agents"), jobs, runs, store);
+    }
+
+    @Bean
+    JobPages jobPages(JobEngine engine, JobRuns runs, JobSettings settings, Jobs jobs, AgentCatalogue catalogue, Clock clock) {
+        return new JobPages(engine, runs, settings, jobs::load, catalogue, jobs, clock);
     }
 }

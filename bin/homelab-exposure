@@ -107,19 +107,19 @@ fi
 ports+=("$kitt_gate_port")
 svc_ports+=("$kitt_gate_port")
 # --- H-023 inbox backend (Spring Boot): loopback only. No ufw rule, no tailnet port: it binds 127.0.0.1 and the unit
-#     only writes the memory clone (ReadWritePaths). Since H-024 M5 it also pushes to GitHub, so outgoing traffic is not
+#     only writes the memory and jobs clones (ReadWritePaths). Since H-024 M5 it also pushes to GitHub, so outgoing traffic is not
 #     limited by the unit any more (inbound still is: it only listens on loopback). The old inbox forwards to it (B6). ---
 backend_unit="$REPO/systemd/homelab-inbox-backend.service"
 backend_port=$(sed -n 's/^BACKEND_PORT=//p' "$REPO/config/inbox.conf" | tr -d '"')
 if [[ -e $backend_unit ]]; then
   if [[ $(sed -n 's/^Environment=BACKEND_HOST=//p' "$backend_unit") == 127.0.0.1 \
         && $(sed -n 's/^Environment=BACKEND_PORT=//p' "$backend_unit") == "$backend_port" && $backend_port =~ ^81[0-9][0-9]$ ]] \
-     && [[ $(sed -n 's/^ReadWritePaths=//p' "$backend_unit") == /var/lib/homelab-inbox/memory-repo ]] \
+     && [[ $(sed -n 's/^ReadWritePaths=//p' "$backend_unit") == "/var/lib/homelab-inbox/memory-repo /var/lib/homelab-inbox/jobs-repo" ]] \
      && ! grep -vE '^[[:space:]]*#' "$backend_unit" | grep -qE '0\.0\.0\.0|BACKEND_HOST=(::|\*)' \
      && grep -qE '^server\.address=\$\{BACKEND_HOST:127\.0\.0\.1\}' "$REPO/backend/src/main/resources/application.properties"; then
-    report OK "exposure:backend:bind" "systemd/homelab-inbox-backend.service: listens on 127.0.0.1:$backend_port only (BACKEND_PORT in config/inbox.conf), writes only the memory clone"
+    report OK "exposure:backend:bind" "systemd/homelab-inbox-backend.service: listens on 127.0.0.1:$backend_port only (BACKEND_PORT in config/inbox.conf), writes only the memory and jobs clones"
   else
-    report FAIL "exposure:backend:bind" "the backend unit must set BACKEND_HOST=127.0.0.1, the BACKEND_PORT of config/inbox.conf (8100-8199), ReadWritePaths=/var/lib/homelab-inbox/memory-repo only; application.properties must default server.address to 127.0.0.1"
+    report FAIL "exposure:backend:bind" "the backend unit must set BACKEND_HOST=127.0.0.1, the BACKEND_PORT of config/inbox.conf (8100-8199), ReadWritePaths=/var/lib/homelab-inbox/memory-repo /var/lib/homelab-inbox/jobs-repo only; application.properties must default server.address to 127.0.0.1"
   fi
   if grep -vE '^[[:space:]]*#' "$REPO/scripts/27-backend.sh" | grep -q ufw; then
     report FAIL "exposure:backend:no-ufw" "scripts/27-backend.sh touches ufw; the backend is loopback only and gets no rule"

@@ -158,3 +158,17 @@ stdout, one JSON object per line, each with `"v":1`:
 
 stderr is Claude's and diagnostics. Exit code: that of `homelab-inbox-task run` (the table above; a child killed by signal
 S gives 128+S); 2 for bad runner arguments (usage on stderr).
+
+## Runner `draft.py` (H-025 R2)
+
+`runner/draft.py d<draft id>` is the process contract in front of `draft` (a job draft, Claude without tools). Same rules as
+`round.py`: started with an argument array (`python3 -I runner/draft.py d12`), calls `TASK_CMD draft d12` itself (same sudoers
+line), imports nothing from the inbox, no prompt or token in any argument (`share/d<id>/prompt.txt` and `system.txt` are
+written by the caller). The runner owns the parsing of Claude's `--output-format json` document (a warning line around it is
+ignored). The caller still decides what the text means (it looks for the ```` ```job ```` block).
+
+stdout, exactly one line: `{"event":"result","v":1,"text":...,"is_error":bool,"exit_code":C,"raw":{...}|null,"output_tail":...}`.
+`text` is Claude's `result` (empty if there was no JSON); `is_error` is true when Claude says so or `exit_code` is not 0;
+`raw` is Claude's document (`null` if none); `output_tail` the last 300 characters of stdout + stderr, for error messages.
+stderr is Claude's own, passed through. Exit code: that of `homelab-inbox-task draft` (table above; a child killed by signal S
+gives 128+S); 2 for bad runner arguments (usage on stderr). SIGTERM is forwarded.

@@ -60,6 +60,10 @@ FAKE_GH = os.environ.get("INBOX_FAKE_GITHUB") == "1"
 TASK_CMD = shlex.split(os.environ.get("TASK_CMD", "sudo -n -u inbox /usr/local/lib/homelab/bin/homelab-inbox-task"))
 
 
+# H-025 R1: the runner scripts (runner/*.py), started as `python3 -I <RUNNER_DIR>/round.py`; installed by 21-inbox.sh.
+RUNNER_DIR = Path(os.environ.get("RUNNER_DIR", ROOT / "runner"))
+
+
 REPOS_CONF = Path(os.environ.get("REPOS_CONF", "/srv/homelab/repos/homelab/config/repos.conf"))
 
 

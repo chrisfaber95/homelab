@@ -8,7 +8,7 @@
 #   van DATA_REPO, een eigen privé repo (de homelab-repo mag public).
 # Opnieuw draaien na een wijziging aan bin/homelab-inbox*, bin/homelab_inbox/ (de modules), bin/homelab-admin, bin/homelab-health, web/, frontend/ of config/inbox.conf.
 # Draai als: sudo bash /var/lib/homelab/repo/scripts/21-inbox.sh
-# homelab-rerun: root scripts/conversation-import.sh scripts/memory-import.sh scripts/jobs-import.sh bin/homelab-inbox bin/homelab_inbox bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web frontend config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
+# homelab-rerun: root scripts/conversation-import.sh scripts/memory-import.sh scripts/jobs-import.sh bin/homelab-inbox bin/homelab_inbox runner bin/homelab-inbox-task bin/homelab-admin bin/homelab-health web frontend config/inbox.conf config/services.conf config/clients.json config/admin.conf config/deploy.conf config/llm.conf config/backup.conf
 set -euo pipefail
 
 REPO="$(dirname "$(dirname "$(readlink -f "$0")")")"
@@ -123,6 +123,9 @@ install -m 644 "$REPO"/web/fonts/* "$DEST/web/fonts/"
 # The modules of homelab-inbox next to the script (it imports them); --delete drops a module that left the repo.
 install -d -m 755 "$DEST/bin/homelab_inbox"
 rsync -rtp --delete --exclude=__pycache__ --chmod=D755,F644 "$REPO/bin/homelab_inbox/" "$DEST/bin/homelab_inbox/"
+# H-025 R1: the runner scripts (round.py), started by the inbox with python3 -I; they call homelab-inbox-task themselves.
+install -d -m 755 "$DEST/runner"
+rsync -rtp --delete --exclude=__pycache__ --chmod=D755,F644 "$REPO/runner/" "$DEST/runner/"
 ln -sfn "$DEST/bin/homelab-inbox" /usr/local/bin/homelab-inbox
 
 echo "== Frontend bouwen (H-021): npm nooit als root"

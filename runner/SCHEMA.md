@@ -136,3 +136,25 @@ code is that of the command the script ran and can be any value.
 How the service reads them: `behind` 0 then `sync` (0 merged, 4 conflict, else ignored) before a round; `bundle` 3 =
 nothing to push, other non-zero = error; `has` non-zero = prepare again; `script` 65 = refused (error), other codes are
 shown to the user as `(exitcode N)`.
+
+## Runner `round.py` (H-025 R1)
+
+`runner/round.py <id> <session> <new|resume> [research]` is the process contract in front of `run`: the caller (the Python
+inbox now, a Java `RunnerService` later) starts it with an argument array (`python3 -I runner/round.py ...`) and reads
+NDJSON; it never parses Claude's stream-json. The runner calls `TASK_CMD run ...` itself (default: the sudo line above, so
+the sudoers line is unchanged), imports nothing from the inbox, and puts no prompt or token in any argument: the prompt
+files are in `share/<id>/` as for `run`, the token is read by `homelab-inbox-task`.
+
+stdout, one JSON object per line, each with `"v":1`:
+
+- `{"event":"log","kind":"info|claude|tool|result|error","text":...}` readable log lines (same as the old `stream_lines`).
+- `{"event":"model","model":...}` once Claude reports its model.
+- `{"event":"turn","turns":N}` after every assistant message; N counts from 1 in this run. The caller owns the turn limit
+  and the deadline: to stop, run `homelab-inbox-task kill <id>` or send SIGTERM to the runner (it forwards it).
+- Last, exactly one `{"event":"result","outcome":"done|answer|question|refused|none","text":...,"turns":N,"exit_code":C,
+  "raw":{...}|null}`. `raw` is Claude's own `result` event (`null` if Claude ended without one, for example when killed);
+  `text` its final message; `outcome` follows the first word (`KLAAR`, `ANTWOORD`, `VRAAG`, `GEWEIGERD`, else `none`,
+  also when `is_error`).
+
+stderr is Claude's and diagnostics. Exit code: that of `homelab-inbox-task run` (the table above; a child killed by signal
+S gives 128+S); 2 for bad runner arguments (usage on stderr).

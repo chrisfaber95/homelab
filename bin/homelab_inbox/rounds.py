@@ -2,13 +2,15 @@
 import json
 import os
 import re
+import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
 
-from .config import CONF, HOME, TASK_CMD, _cancel, _lock, _procs, _round_started
+from .config import CONF, HOME, RUNNER_DIR, TASK_CMD, _cancel, _lock, _procs, _round_started
 from .jobs import research_limits, research_run
 from .helpers import git, log_line, repo_lock, task_cmd
 from .memory import memory_for
@@ -52,38 +54,6 @@ RESEARCH_SYSTEM_PROMPT = """Je werkt voor de homelab-inbox aan een onderzoeksvra
 - Je laatste bericht begint met `ANTWOORD:` en bevat het rapport zoals de prompt het vraagt."""
 
 
-def tool_brief(inp):
-    for k in ("command", "file_path", "pattern", "path", "url", "description", "prompt"):
-        if inp.get(k):
-            return str(inp[k])[:240]
-    return json.dumps(inp, ensure_ascii=False)[:240]
-
-
-def stream_lines(ev):
-    """Wat er in een stream-json-gebeurtenis van Claude Code gebeurt, als leesbare logregels."""
-    kind = ev.get("type")
-    if kind == "system" and ev.get("subtype") == "init":
-        return [("info", f"sessie gestart, model {ev.get('model', '?')}")]
-    if kind == "result":
-        return [("info", f"ronde klaar na {ev.get('num_turns', '?')} beurten, "
-                         f"{round((ev.get('duration_ms') or 0) / 1000)} s")]
-    out = []
-    for b in (ev.get("message") or {}).get("content") or [] if kind in ("assistant", "user") else []:
-        if not isinstance(b, dict):
-            continue
-        if b.get("type") == "text" and b.get("text", "").strip():
-            out.append(("claude", b["text"].strip()[:1500]))
-        elif b.get("type") == "tool_use":
-            out.append(("tool", f"{b.get('name')}: {tool_brief(b.get('input') or {})}"))
-        elif b.get("type") == "tool_result":
-            c = b.get("content")
-            txt = (c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))).strip()
-            n = len(txt.splitlines())
-            first = txt.splitlines()[0][:200] if txt else "(leeg)"
-            out.append(("error" if b.get("is_error") else "result", first + (f" (+{n - 1} regels)" if n > 1 else "")))
-    return out
-
-
 def write_prompt(t, text):
     share = HOME / "share" / str(t["id"])
     share.mkdir(parents=True, exist_ok=True)
@@ -100,13 +70,16 @@ def stream_claude(task_id, mode):
     t = get(task_id)
     errfile = tempfile.TemporaryFile(mode="w+")  # niet als pipe: een volle stderr-pipe zou Claude laten hangen
     research = research_run(t)
-    p = subprocess.Popen([*TASK_CMD, "run", str(task_id), t["session"], mode, *(["research"] if research else [])], stdout=subprocess.PIPE,
-                         stderr=errfile, text=True)
+    # The runner (runner/round.py, H-025 R1) owns the Claude call and its stream-json; we read its NDJSON events.
+    p = subprocess.Popen([sys.executable, "-I", str(RUNNER_DIR / "round.py"), str(task_id), t["session"], mode,
+                          *(["research"] if research else [])],
+                         env={**os.environ, "TASK_CMD": shlex.join(TASK_CMD)}, stdout=subprocess.PIPE, stderr=errfile, text=True)
     with _lock:
         _procs[task_id] = p
     minutes, max_turns = research_limits(research["mode"]) if research else (int(CONF["MAX_MINUTES"]), int(CONF["MAX_TURNS"]))
     deadline = time.monotonic() + 60 * minutes
-    turns, result, capped = t["turns"] or 0, None, None
+    base_turns = t["turns"] or 0
+    turns, result, capped = base_turns, None, None
     watchdog = threading.Thread(target=watch, args=(task_id, p, deadline), daemon=True)
     watchdog.start()
     for line in p.stdout:
@@ -114,19 +87,20 @@ def stream_claude(task_id, mode):
             ev = json.loads(line)
         except ValueError:
             continue
-        for kind, text in stream_lines(ev):
-            log_line(f"t{task_id}", kind, text)
-        if ev.get("type") == "system" and ev.get("model"):
+        kind = ev.get("event") if isinstance(ev, dict) else None
+        if kind == "log":
+            log_line(f"t{task_id}", ev.get("kind", "info"), ev.get("text", ""))
+        elif kind == "model":
             update(task_id, model=ev["model"])
-        if ev.get("type") == "assistant":
-            turns += 1
+        elif kind == "turn":
+            turns = base_turns + ev["turns"]
             if turns % 5 == 0:
                 update(task_id, turns=turns)
-            if turns - (t["turns"] or 0) >= max_turns and capped is None:
+            if turns - base_turns >= max_turns and capped is None:
                 capped = f"{max_turns} beurten"
                 stop(task_id)
-        elif ev.get("type") == "result":
-            result = ev
+        elif kind == "result":
+            result = ev.get("raw")
     p.wait()
     _round_started.pop(task_id, None)
     with _lock:

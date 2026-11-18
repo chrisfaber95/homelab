@@ -76,7 +76,7 @@ final class CoreFixture {
                 String col = columnValues[i * 2];
                 String v = values.get(i);
                 boolean number = List.of("rounds", "restarts", "parent", "after_task", "pr_number", "reprepare", "turns",
-                        "accepted", "no_auto_revive").contains(col);
+                        "accepted", "no_auto_revive", "run_id").contains(col);
                 if (v == null) {
                     st.setObject(7 + i, null);
                 } else if (number) {

@@ -2,12 +2,15 @@
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
+import sys
 import uuid
 
-from .config import ACCEPTABLE, ACTIVE, CONF, HOME, STATUS_NL, _cancel, _lock
+from .config import ACCEPTABLE, ACTIVE, CONF, HOME, RUNNER_DIR, STATUS_NL, TASK_CMD, _cancel, _lock
 from . import conversation
-from .helpers import claude_result, first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
+from .helpers import first_line, git, label, log_line, notify, page_url, refresh_cache, repo_list, task_cmd
 from .memory import remember_task
 from .storage import db, get, log, now, update
 
@@ -81,6 +84,26 @@ def parse_route(text, repos, limit):
     return "tasks", out
 
 
+def run_route(task_id, timeout=300):
+    """Start runner/route.py (H-025 R2) and return its final result event; the runner owns the Claude call and its
+    parsing. A runner that fails to start, times out or writes no result line gives an error result."""
+    fail = {"text": "", "is_error": True, "exit_code": -1, "raw": None, "stderr": ""}
+    try:
+        p = subprocess.run([sys.executable, "-I", str(RUNNER_DIR / "route.py"), str(task_id)],
+                           env={**os.environ, "TASK_CMD": shlex.join(TASK_CMD)}, capture_output=True, text=True,
+                           timeout=timeout, errors="replace")
+    except subprocess.TimeoutExpired:
+        return {**fail, "stderr": f"de router duurde langer dan {timeout} s"}
+    for line in reversed(p.stdout.splitlines()):
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("event") == "result":
+            return {**fail, **ev, "stderr": ev.get("stderr") or p.stderr.strip()}
+    return {**fail, "exit_code": p.returncode, "stderr": p.stderr.strip() or "de route-runner gaf geen resultaat"}
+
+
 def route_task(task_id):
     """De router (Claude zonder tools) verdeelt een auto-taak; de kindtaken lopen daarna als gewone taken."""
     t = get(task_id)
@@ -99,13 +122,12 @@ def route_task(task_id):
             os.chmod(share / f, 0o640)
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None)
         log_line(f"t{task_id}", "info", "router gestart")
-        code, out = task_cmd("route", f"r{task_id}", timeout=300)
-        result = claude_result(out)
-        if code != 0 or result.get("is_error"):
-            raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
+        res = run_route(task_id)
+        if res["is_error"]:
+            raise RuntimeError(f"Claude: {(res['text'] or res['stderr'])[-300:]}")
         if task_id in _cancel:
             return update(task_id, status="cancelled", ended=now())
-        kind, value = parse_route(result.get("result") or "", repos, limit)
+        kind, value = parse_route(res["text"], repos, limit)
         if kind == "tasks" and len(value) > limit:
             kind, value = "vraag", (f"Dit wordt {len(value)} taken, maximaal {limit} per bericht: "
                                     + "; ".join(f"{v['repo']}: {first_line(v['text'])}" for v in value)

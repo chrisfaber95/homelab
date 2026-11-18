@@ -125,6 +125,11 @@ public class Settings {
         return conf("MEMORY_BRANCH", "memory");
     }
 
+    /** The branch of DATA_REPO that holds the job files (the clone {@code jobs-repo}). */
+    public String jobsBranch() {
+        return conf("JOBS_BRANCH", "jobs");
+    }
+
     public String dataRepo() {
         return conf("DATA_REPO", "");
     }

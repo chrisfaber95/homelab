@@ -130,7 +130,7 @@ public class Jobs {
     }
 
     /** jobs.skill_list: the merged skills, from the service's copy of main. */
-    Set<String> skillNames() {
+    public Set<String> skillNames() {
         Set<String> names = new TreeSet<>();
         Path dir = settings.skillsDir();
         if (!Files.isDirectory(dir)) {
@@ -161,7 +161,7 @@ public class Jobs {
     }
 
     /** jobs.parse_job, as far as the overview needs the result; throws IllegalArgumentException with the reason. */
-    Job parse(String name, String text, Set<String> repos, Set<String> skills) {
+    public Job parse(String name, String text, Set<String> repos, Set<String> skills) {
         if (!NAME.matcher(name).matches()) {
             throw new IllegalArgumentException("de naam mag alleen kleine letters, cijfers en streepjes hebben");
         }

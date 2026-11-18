@@ -158,3 +158,17 @@ stdout, one JSON object per line, each with `"v":1`:
 
 stderr is Claude's and diagnostics. Exit code: that of `homelab-inbox-task run` (the table above; a child killed by signal
 S gives 128+S); 2 for bad runner arguments (usage on stderr).
+
+## Runner `route.py` (H-025 R2, part 1)
+
+`runner/route.py <task id>` is the process contract in front of `route r<id>` (the router's Claude without tools). Started
+like `round.py` (`python3 -I runner/route.py 228`, argument array, no shell); it calls `TASK_CMD route r<id>` itself, so
+the sudoers line is unchanged, imports nothing from the inbox, and has no prompt or token in any argument (`share/r<id>/`
+holds the files, as for `route`). The caller owns the deadline: SIGTERM is forwarded to the child.
+
+stdout is exactly one line, with `"v":1`:
+`{"event":"result","text":...,"is_error":bool,"exit_code":C,"raw":{...}|null,"stderr":"..."}`. `raw` is Claude's JSON
+document (the last JSON object with `result` or `is_error` in the output, so a warning line after it does not matter;
+`null` if there is none); `text` its `result`; `is_error` is true when Claude said so, when the exit code is not 0 or
+when there is no document; `stderr` the last 1000 characters of the command's stderr (also passed through on stderr).
+Exit code: that of `homelab-inbox-task route` (a child killed by signal S gives 128+S); 2 for bad arguments (no output).

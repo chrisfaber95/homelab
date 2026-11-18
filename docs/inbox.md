@@ -154,3 +154,7 @@ hebben een token en worden alleen vanaf de pagina zelf geaccepteerd (tegen CSRF)
 - Code: `bin/homelab-inbox` is the entry point; the parts are modules in `bin/homelab_inbox/` (map in `CLAUDE.md`).
   `scripts/21-inbox.sh` installs them next to it.
 - Logs: `journalctl -u homelab-inbox`.
+
+## Claude round runner (H-025 R1)
+
+`rounds.stream_claude` no longer calls `homelab-inbox-task run` itself: it starts `python3 -I runner/round.py <id> <session> <new|resume> [research]` (`RUNNER_DIR`, installed to `/usr/local/lib/homelab/runner` by `21-inbox.sh`) and reads its NDJSON events (log, model, turn, result). The runner owns the stream-json parsing and calls `homelab-inbox-task` through the same sudoers line; the inbox keeps the turn limit, the deadline and cancel. The contract is in `runner/SCHEMA.md`; a Java `RunnerService` starts the same script later. Rollback: revert the PR.

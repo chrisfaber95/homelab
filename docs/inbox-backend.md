@@ -159,6 +159,45 @@ Fill this in from a real run on the box (date, what the service was doing, the n
 No number is written here yet: it appears on the box only once `scripts/27-backend.sh` has run (the box had no JDK on
 2026-11-17 and an inbox task has no root). After the merge, copy the first log line into this table.
 
+### Measuring with one command (H-026 K9)
+
+`bin/homelab-backend-heap [--gc] [unit-or-pid]` prints heap used, heap committed, the max heap setting, the JVM flags and
+the scheduler switch of the running backend (default unit `homelab-inbox-backend`). `--gc` forces a full GC first, so
+*used* is the live set. It re-runs itself as the owner of the process through `sudo -u inbox-runner` (jcmd only attaches
+as the same user), reads only, and changes no port, config or service. The first line to record is the one with `--gc`.
+
+```sh
+sudo /var/lib/homelab/repo/bin/homelab-backend-heap --gc      # path of root's clone; or run it from a checkout of main
+```
+
+**Shadow mode, against a copy of the data.** The backend is in shadow when `CORE_SCHEDULER_ENABLED` is unset or `false`
+(the default: no scheduler, no real task, merge or notification). To measure it against a copy and not the live data, do
+the import into a scratch database and start a second instance on another loopback port, then measure that one by pid:
+
+```sh
+sudo -u postgres createdb -O inbox_app inbox_copy      # scratch copy; drop it afterwards: dropdb inbox_copy
+sudo -u inbox-runner env BACKEND_PORT=8131 CORE_SCHEDULER_ENABLED=false \
+  SPRING_DATASOURCE_URL='jdbc:postgresql://localhost/inbox_copy?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg&socketFactoryArg=/var/run/postgresql/.s.PGSQL.5432' \
+  SPRING_DATASOURCE_USERNAME=inbox_app BACKEND_SECRET_FILE=/var/lib/homelab-inbox/backend-secret \
+  INBOX_CONFIG_DIR=/usr/local/lib/homelab/config \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:MaxDirectMemorySize=64m \
+  -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar &
+# import the data into inbox_copy as in "The import" of the sections above, then:
+sudo /var/lib/homelab/repo/bin/homelab-backend-heap --gc <pid of that java>
+```
+
+Use the same flags as `ExecStart` in the unit, so the number is the one of the service. Stop the copy by its pid and
+drop `inbox_copy` when done. Nothing here opens a port beyond loopback or switches a route to Java.
+
+### Heap record (H-026 K9)
+
+One row per measurement: paste the output of `homelab-backend-heap --gc`. Fill it in on the box; leave older rows.
+Empty until someone measures: no value is claimed here.
+
+| Date | Machine | JVM flags | State (shadow, scheduler off; data copy or live) | Heap used after full GC (MiB) | Heap committed (MiB) | Max heap (MiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| *not measured yet* | | | | | | |
+
 ## Rollback
 
 Revert the commit and run nothing; to remove what was installed:

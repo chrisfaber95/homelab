@@ -279,3 +279,10 @@ hun PR.
 - Instellingen in `config/inbox.conf`: `DATA_REPO`, `JOBS_BRANCH`, `JOB_TIMEZONE`, `JOB_CLAUDE_CAP`, `JOB_SCRIPT_MINUTES`, `RESEARCH_QUICK_MINUTES`, `RESEARCH_QUICK_TURNS` (PR, daarna
   `scripts/21-inbox.sh`).
 - De geschiedenis van runs staat in `/var/lib/homelab-inbox/inbox.db` (naast de taken).
+
+## Job files in Java (H-024 M6)
+
+Since H-024 M6 the Java backend is the only writer of the job files (the clone `jobs-repo`, branch `jobs`): the pages and kitt keep
+their routes and forms, but saving, pausing, resuming and deleting a job is done by the backend, one commit per change. The inbox
+reads the files for the scheduler and the pages; the queue, the scheduler and the run history stay in Python. If the backend is down
+the page answers 502 and nothing is saved. Details, the import and the rollback: `docs/inbox-backend.md`, "Job files (M6)".

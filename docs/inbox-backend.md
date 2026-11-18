@@ -458,3 +458,80 @@ pushed. To do it by hand: `sudo -u inbox-runner git -C /var/lib/homelab-inbox/me
 (reference inbox with the old write code against the inbox in front of Java: every page post, then the same files and commits on the branch;
 the direct `/internal/memory/*` contract against the Java base URL); `tests.test_inbox_memory_writes` (Python side); the M1/M2 parity run
 (`tests.test_inbox_m1_parity`, harness `backend/parity/parity.py` and contract tests) covers the memory reads after the switch.
+
+## Job files (M6, H-024)
+
+The job files are the clone `jobs-repo` of the `jobs` branch of DATA_REPO: one `jobs/<name>.md` per job, plus a README. **From the merge on
+the Java backend is their only writer**: it syncs the clone to GitHub, checks the file with the rules of `parse_job`, writes it, makes one
+commit and pushes to the `jobs` branch with the token of the inbox. Code: `backend/src/main/java/dev/homelab/inbox/jobs/` (`JobsRepo` the
+clone and the one-commit save, `JobsWriter` the rules and the pause/resume edit, `JobsController` the routes), `.../gitstore/BranchRepo.java`
+(the git work and the owner marker, shared with `MemoryRepo`) and `.../db/JobsCommand.java` (import and export). The Python side
+(`bin/homelab_inbox/jobs.py`) only reads the files (the `JOBS` cache, for the scheduler and the pages) and asks the backend to write.
+**Not moved**: the task queue, the scheduler, runs and run history, drafts (SQLite), research, delivery, GitHub polling and briefs.
+
+### Routes
+
+The public routes keep their paths, forms, CSRF/owner check, drafts, status codes, `{"error": ...}` bodies and 303 redirects: they are still
+answered by `server.py` (and kitt's pause/resume by `kitt.py`), which checks the owner and the draft, validates the file with `parse_job` and
+then sends the file here. No read route moved: the job pages (`/api/jobs-page`, `/api/job/<name>`, the catalogue) join the files with the
+runs and drafts of the Python queue, so they are still Python's and read the clone; `BACKEND_ROUTES` is unchanged. Java answers (facade
+secret required, loopback only):
+
+| Public route (unchanged) | Internal route (Java) | Answer |
+| --- | --- | --- |
+| `POST /draft/<id>/confirm`, `POST /job/<name>/save` | `POST /internal/jobs/save` `{name, text, message}` | `{"saved": bool}`, 400 `{"error"}` (the `parse_job` messages) |
+| `POST /job/<name>/delete` | `POST /internal/jobs/delete` `{name, message}` | `{"saved": bool}` |
+| `POST /job/<name>/pause`, kitt pause | `POST /internal/jobs/pause` `{name, message}` | `{"saved": bool}`, 404 `Niet gevonden.` for an unknown job |
+| `POST /job/<name>/resume`, kitt resume | `POST /internal/jobs/resume` `{name, message}` | same |
+| start of the inbox and the scheduler's reload (`load_jobs`) | `POST /internal/jobs/sync` | `{"ok", "owned"}` |
+
+If the backend does not answer, the page gets 502 `{"error"}` and nothing is written (no fallback writer in Python). Commit author and
+messages (`jobs: <name> nieuw|gewijzigd|bewerkt|gepauzeerd|hervat|verwijderd (<who>)`) are the ones Python used.
+
+### The import (the switch)
+
+`scripts/jobs-import.sh`, called by `21-inbox.sh` and `27-backend.sh` (whichever runs last), skips unless the installed Python code is the M6
+code (`pause_job` exists) and the installed jar has `JobsCommand`. It stops `homelab-inbox` and runs as `inbox-runner`:
+
+```sh
+sudo -u inbox-runner env INBOX_CONFIG_DIR=/usr/local/lib/homelab/config INBOX_RUNNER_HOME=/var/lib/homelab-inbox \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar import-jobs --if-not-imported
+```
+
+`import-jobs` brings the clone exactly to GitHub (the fresh import: Python pushed every change), counts the job files and writes the marker
+`jobs-repo/.git/inbox-jobs-owner`. **Java refuses every write until that marker exists**, and the Python code never writes, so there is
+exactly one writer at any moment: the old code before the import, Java after. `--if-not-imported` makes a re-run a no-op; without it a
+second import refuses (`--replace` redoes it, only before the switch). The unit's `ReadWritePaths` now lists `memory-repo` and `jobs-repo`
+(`bin/homelab-exposure` checks both).
+
+### Rollback (revert the PR, then re-import into the Python store)
+
+Hand the store back **with the jar of this PR, before the revert is installed** (the revert removes the command):
+
+```sh
+sudo systemctl stop homelab-inbox
+sudo -u inbox-runner env INBOX_CONFIG_DIR=/usr/local/lib/homelab/config INBOX_RUNNER_HOME=/var/lib/homelab-inbox \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar export-jobs
+# prints: export ok: job files=N (equal to GitHub), the marker is removed; refuses (exit 1) while the clone holds
+# a commit that GitHub does not have
+# then merge the revert PR; homelab-admin reruns 21-inbox.sh and 27-backend.sh (old Python code, old jar)
+sudo systemctl start homelab-inbox     # if the rerun did not already start it
+```
+
+The old Python code re-imports by itself at its start: `load_jobs()` runs `sync_branch`, which resets `jobs-repo` to the branch that Java
+pushed. By hand: `sudo -u inbox-runner git -C /var/lib/homelab-inbox/jobs-repo fetch origin jobs && sudo -u inbox-runner git -C
+/var/lib/homelab-inbox/jobs-repo checkout --force -B jobs FETCH_HEAD` (needs the token helper; the restart is easier). Check afterwards that
+`ls /var/lib/homelab-inbox/jobs-repo/jobs | wc -l` equals the export line. If the revert was already installed, build this PR's jar from its merge commit.
+
+### After the merge: what to check
+
+1. `ls /var/lib/homelab-inbox/jobs-repo/.git/inbox-jobs-owner` exists; `systemctl is-active homelab-inbox homelab-inbox-backend`.
+2. On the Jobs page pause, resume and change a job (confirm the draft), and delete a test job; the `jobs` branch on GitHub shows the commits.
+3. Ask kitt to pause a job; the scheduler still runs the jobs that are due.
+
+### Tests
+
+`mvn verify` (`JobsWriterTest`: local bare repository as DATA_REPO, rules, commits, import and export); `python3 -m unittest
+tests.test_inbox_m6_parity` (reference inbox with the old write code against the inbox in front of Java: every job post, then the same
+files and commits on the branch and the same page reads; the `/internal/jobs/*` contract against the Java base URL; export and
+re-import); `tests.test_inbox_jobs_writes` and `tests.test_inbox_kitt` (Python side); `tests.test_inbox_contract`.

@@ -1,6 +1,6 @@
 # homelab: H-023 (B3), the Spring Boot backend of the inbox, beside the old Python inbox. Installed by
 # scripts/27-backend.sh; the jar is built there. Loopback only: it binds 127.0.0.1:8130 (BACKEND_HOST/BACKEND_PORT); there
-# is no ufw rule and no tailnet port. Since H-024 M5 it also reaches GitHub (git push of the memory branch), so outgoing
+# is no ufw rule and no tailnet port. Since H-024 M5 it also reaches GitHub (git push of the memory and jobs branches), so outgoing
 # traffic is no longer limited to loopback here (see the end of the [Service] section).
 # Runs as inbox-runner, the account the PostgreSQL role inbox_app trusts (peer authentication over the unix socket,
 # scripts/28-inbox-db.sh): a DynamicUser would have another name and be refused. Docs: docs/inbox-backend.md.
@@ -54,9 +54,9 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 # H-024 M5: the backend owns the clone of the memory branch of DATA_REPO and pushes to GitHub (git over https, the token of
 # the inbox in /etc/homelab/inbox-github-token, readable as for the old inbox). So there is no IPAddressDeny any more: the
 # addresses of GitHub change, and a list of them would break the push. It still listens only on 127.0.0.1 (BACKEND_HOST);
-# nothing reaches it from outside, and the only files it may write are the memory clone below.
+# nothing reaches it from outside, and the only files it may write are the two clones below (memory, M5; job files, M6).
 # The directory is created by scripts/27-backend.sh (the unit does not start without it: no leading '-' on purpose).
-ReadWritePaths=/var/lib/homelab-inbox/memory-repo
+ReadWritePaths=/var/lib/homelab-inbox/memory-repo /var/lib/homelab-inbox/jobs-repo
 
 [Install]
 WantedBy=multi-user.target

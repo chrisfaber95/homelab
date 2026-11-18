@@ -627,8 +627,8 @@ class KittDoor(Contract):
         config.JOBS["nightly"] = {"name": "nightly", "when": "daily 7:00", "schedule": "0 7 * * *", "model": "local",
                                   "deliver": "page", "paused": False, "text": "---\nkind: digest\n---\nx",
                                   "cron": Cron("0 7 * * *")}
-        saved, orig = [], kitt.save_job
-        kitt.save_job = lambda name, text, msg: saved.append((name, msg))
+        saved, orig = [], kitt.pause_job
+        kitt.pause_job = lambda name, paused, msg: saved.append((name, msg))
         try:
             r = self.conforms(self.kitt("GET", "/api/jobs"), "/api/jobs", "get", 200, JSON_UTF8)
             self.assertEqual([(j["name"], j["paused"], j["lastResult"], j["error"]) for j in r.body["jobs"]],
@@ -643,7 +643,7 @@ class KittDoor(Contract):
             r = self.conforms(self.kitt("POST", "/api/jobs/nightly/pause", {}), "/api/jobs/{name}/{action}", "post", 403)
             self.error(r, 403, "kitt may not run job")
         finally:
-            kitt.save_job = orig
+            kitt.pause_job = orig
             config.JOBS.pop("nightly")
 
     def test_health(self):

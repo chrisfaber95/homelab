@@ -15,7 +15,7 @@ from .briefs import brief_by_id, set_brief_status, start_build
 from .config import ACTIVE, ROOT, FRONTEND_DIST, PORTED_PAGES, STATIC_PREFIX, AUTO, BRIEF, CONF, HOME, JOBS, RETRYABLE, _cancel_runs, _lock
 from .github import poll_github
 from .helpers import label, log_line, page_url, read_log, repo_list, task_cmd
-from .jobs import RESEARCH_JOB, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, save_job, set_paused, start_draft, switch_on_agent, update_draft, update_run
+from .jobs import RESEARCH_JOB, Unavailable, ask_research, dispatch, draft_name, get_draft, job_scheduler, parse_job, pause_job, save_job, start_draft, switch_on_agent, update_draft, update_run
 from .memory import entry_view, load_memory, mem_get, memory_view, page_write
 from .overview import (activity_sentence, brief_data, briefs_data, draft_detail, job_detail, jobs_data, live_items, overview_json,
                        research_data, run_detail, admin_ask, skills_data, ssh_state, task_view, tasks_view)
@@ -525,6 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError(f"de naam blijft {d['base']}")
                 parse_job(name, text)
                 save_job(name, text, f"jobs: {name} {'gewijzigd' if d['base'] else 'nieuw'} ({who})")
+            except Unavailable as ex:  # the backend does not answer: nothing was written
+                return self.send_upstream(502, {"error": str(ex)})
             except Exception as ex:
                 return self.send_upstream(400, {"error": str(ex)})
             update_draft(d["id"], status="confirmed", text=text)
@@ -539,14 +541,16 @@ class Handler(BaseHTTPRequestHandler):
             if action == "run" and "error" not in job:
                 dispatch(job, now(), manual=True)
             elif action in ("pause", "resume") and "error" not in job:
-                save_job(name, set_paused(job["text"], action == "pause"),
-                         f"jobs: {name} {'gepauzeerd' if action == 'pause' else 'hervat'} ({who})")
+                pause_job(name, action == "pause",
+                          f"jobs: {name} {'gepauzeerd' if action == 'pause' else 'hervat'} ({who})")
             elif action == "save" and text:
                 parse_job(name, text)
                 save_job(name, text, f"jobs: {name} bewerkt ({who})")
             elif action == "delete":
                 save_job(name, None, f"jobs: {name} verwijderd ({who})")
                 return self.send(303, "", location="/jobs")
+        except Unavailable as ex:  # the backend does not answer: nothing was written
+            return self.send_upstream(502, {"error": str(ex)})
         except Exception as ex:
             return self.send_upstream(400, {"error": str(ex)})
         return self.send(303, "", location=f"/job/{name}")

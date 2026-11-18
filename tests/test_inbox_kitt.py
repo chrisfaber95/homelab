@@ -195,17 +195,16 @@ class JobsAndLogs(Base):
                              ("nightly", "local", "page", False, None))
             self.assertTrue(card["nextRun"])
             saved = []
-            orig = kitt.save_job
-            kitt.save_job = lambda name, text, msg: saved.append((name, text, msg))
+            orig = kitt.pause_job
+            kitt.pause_job = lambda name, paused, msg: saved.append((name, paused, msg))
             try:
                 self.assertEqual(call(self.port, "POST", "/api/jobs/nightly/pause", {})[0], 200)
-                self.assertIn("paused: true", saved[0][1])
-                self.assertEqual(saved[0][2], "jobs: nightly paused (from kitt)")
+                self.assertEqual(saved[0], ("nightly", True, "jobs: nightly paused (from kitt)"))
                 self.set_clients(["read", "write", "ask"])
                 self.assertEqual(call(self.port, "POST", "/api/jobs/nightly/resume", {})[0], 403)
                 self.assertEqual(call(self.port, "POST", "/api/jobs/nightly/run", {})[0], 403)
             finally:
-                kitt.save_job = orig
+                kitt.pause_job = orig
             self.assertEqual(call(self.port, "POST", "/api/jobs/nope/run", {})[0], 404)
         finally:
             config.JOBS.pop("nightly")

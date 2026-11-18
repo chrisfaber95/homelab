@@ -535,3 +535,19 @@ pushed. By hand: `sudo -u inbox-runner git -C /var/lib/homelab-inbox/jobs-repo f
 tests.test_inbox_m6_parity` (reference inbox with the old write code against the inbox in front of Java: every job post, then the same
 files and commits on the branch and the same page reads; the `/internal/jobs/*` contract against the Java base URL; export and
 re-import); `tests.test_inbox_jobs_writes` and `tests.test_inbox_kitt` (Python side); `tests.test_inbox_contract`.
+
+## RunnerService (H-025 R3)
+
+`backend/.../runner/RunnerService.java` starts a runner of `runner/` as the process contract says
+(`docs/architecture/inbox-split.md`, "Backend ↔ Python runners"). Nothing calls it yet; the queue slices (K) will.
+
+- The command is an argument array, put behind `setsid` (also an argument) so the runner leads its own process group.
+  No shell. The prompt is a file in `share/<id>/`, the token is read by `homelab-inbox-task`; `RunnerRequest` only
+  has `stdin` and `env` for what the contract allows, never arguments for either.
+- stdout is NDJSON: non-JSON lines are ignored, the last `{"event":"result","v":1,...}` line plus the exit code is the
+  `RunnerResult`, every other event goes to the listener untouched (Java does not parse stream-json, Q7). stderr: the last
+  4000 characters.
+- Deadline or `cancel()`: first the request's `killCommand` (the `homelab-inbox-task kill <id>` action, as an array), then,
+  if the runner is still there after `killGrace`, `kill -KILL -- -<pid>` on the group and its descendants.
+- Test: `RunnerServiceTest` with `src/test/resources/runner/fake_runner.py` (result, exit code, deadline, cancel, group
+  kill of a runner that ignores SIGTERM, no shell). `./mvnw verify`. The sudoers line is unchanged.

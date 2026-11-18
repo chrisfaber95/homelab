@@ -11,7 +11,7 @@ from . import chat, conversation, search
 from .briefs import load_briefs
 from .config import CONF, JOBS
 from .helpers import first_line, read_log
-from .jobs import dispatch, job_runs, run_view, save_job, set_paused
+from .jobs import Unavailable, dispatch, job_runs, pause_job, run_view
 from .overview import health
 from .storage import db, get, now, tasks
 
@@ -241,8 +241,12 @@ def job_action(name, action):
         return chat.run_job(CLIENT, name)
     if not conversation.allowed(CLIENT, "run_job"):
         return _refuse_text("run_job")
-    save_job(name, set_paused(job["text"], action == "pause"),
-             f"jobs: {name} {'paused' if action == 'pause' else 'resumed'} (from kitt)")
+    try:
+        pause_job(name, action == "pause", f"jobs: {name} {'paused' if action == 'pause' else 'resumed'} (from kitt)")
+    except Unavailable as e:
+        return 502, {"error": str(e)}
+    except ValueError as e:
+        return 400, {"error": str(e)}
     conversation.note("chris", CLIENT, "message", f"{'Paused' if action == 'pause' else 'Resumed'} job {name}",
                       ref=f"job:{name}")
     return 200, {"job": name, "paused": action == "pause"}

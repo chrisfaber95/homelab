@@ -1,4 +1,9 @@
-"""Jobs (F-022): scheduled jobs, drafts, skills proposals; local and Claude runs."""
+"""Jobs (F-022): scheduled jobs, drafts, skills proposals; local and Claude runs.
+
+Since H-024 M6 the Java backend owns the job files: it is the only writer of the clone `jobs-repo` (the commits, the pushes,
+the check of a file before it is saved). This module only reads the files of the clone (the cache JOBS, for the scheduler
+and the pages) and asks the backend to write, through /internal/jobs/* on loopback with the facade secret. When the
+backend cannot be reached nothing is written here: the caller gets the error."""
 import html
 import json
 import os
@@ -15,9 +20,9 @@ from pathlib import Path
 
 import yaml
 
-from . import conversation
+from . import conversation, facade
 from .config import CONF, HOME, JOBS, TZ, _cancel_runs, _lock
-from .helpers import claude_result, as_list, gh, git, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, sync_branch, task_cmd
+from .helpers import claude_result, as_list, gh, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, task_cmd
 from .memory import load_memory
 from .storage import db, get, log, now
 
@@ -224,9 +229,31 @@ def parse_job(name, text, repos=None, skills=None):
     return job
 
 
-def jobs_sync():
-    """De clone met de job-branch."""
-    return sync_branch(JOBS_DIR, CONF.get("JOBS_BRANCH", "jobs"))
+class Unavailable(RuntimeError):
+    """The Java backend did not answer (down, not imported yet, or no secret): nothing was written."""
+
+
+def _http(path, body):
+    """The transport: one POST to the backend, (status, body bytes). Tests replace `transport` with an in-process fake
+    (tests/jobs_fake.py); production always goes through facade.forward."""
+    try:
+        status, _, raw = facade.forward("POST", path, {"Content-Type": "application/json"}, json.dumps(body).encode(),
+                                        "inbox", timeout=120)
+        return status, raw
+    except RuntimeError as e:
+        raise Unavailable(f"job files: {e}") from e
+
+
+transport = _http
+
+
+def backend(path, body):
+    """(status, parsed JSON) of one call to /internal/jobs/<path>; Unavailable when the backend does not answer."""
+    status, raw = transport(f"/internal/jobs/{path}", body)
+    try:
+        return status, json.loads(raw or b"{}")
+    except ValueError as e:
+        raise Unavailable(f"job files: not JSON (HTTP {status})") from e
 
 
 def load_jobs(fetch=True):
@@ -234,7 +261,9 @@ def load_jobs(fetch=True):
         if fetch:
             try:
                 refresh_cache("homelab", CONF["HOMELAB_REPO"])  # voor de lijst met skills
-                jobs_sync()
+                status, data = backend("sync", {})  # the backend brings the clone to GitHub
+                if status != 200:
+                    raise Unavailable(f"HTTP {status}: {data.get('error', '')}")
             except Exception as e:
                 log(f"jobs ophalen: {e}")  # dan de laatst opgehaalde
         repos, skills, found = repo_list(), skill_list(), {}
@@ -249,36 +278,23 @@ def load_jobs(fetch=True):
 
 
 def save_job(name, text, message):
-    """Een job opslaan (text) of weghalen (None): één commit op de job-branch, gepusht met het token van de dienst."""
-    branch = CONF.get("JOBS_BRANCH", "jobs")
-    with _jobs_lock:
-        d = jobs_sync()
-        f = d / "jobs" / f"{name}.md"
-        if text is None:
-            f.unlink(missing_ok=True)
-        else:
-            f.parent.mkdir(exist_ok=True)
-            f.write_text(text.strip() + "\n")
-        readme = d / "README.md"
-        if not readme.exists():
-            readme.write_text("# jobs\n\nDe geplande jobs van de homelab (F-022), één bestand per job in `jobs/`. "
-                              "Uitleg: `docs/jobs.md` op `main`.\nDeze branch wordt nooit gemerged; de homelab-inbox "
-                              "leest hem en slaat hier op wat je op de pagina bevestigt.\n")
-        git(d, "add", "-A")
-        if not git(d, "status", "--porcelain").strip():
-            return
-        git(d, "commit", "--quiet", "-m", message)
-        # Alleen naar de job-branch: de bestemming staat hier vast.
-        git(d, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+    """Een job opslaan (text) of weghalen (None): the backend checks the file, makes one commit on the job-branch and pushes
+    it. A refusal is a ValueError with the reason; Unavailable when the backend does not answer."""
+    status, data = backend("save" if text is not None else "delete", {"name": name, "text": text, "message": message})
+    _stored(status, data)
+
+
+def pause_job(name, paused, message):
+    """Pause or resume a job: the backend changes the `paused:` line of the file and commits it."""
+    status, data = backend("pause" if paused else "resume", {"name": name, "message": message})
+    _stored(status, data)
+
+
+def _stored(status, data):
+    if status != 200:
+        raise ValueError(data.get("error", f"HTTP {status}"))
+    if data.get("saved"):
         load_jobs(fetch=False)
-
-
-def set_paused(text, paused):
-    head, sep, rest = text[4:].partition("\n---")
-    lines = [l for l in head.splitlines() if not l.startswith("paused:")]
-    if paused:
-        lines.append("paused: true")
-    return "---\n" + "\n".join(lines) + sep + rest
 
 
 def today_start():

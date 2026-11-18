@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -21,8 +22,8 @@ from pathlib import Path
 import yaml
 
 from . import conversation, facade
-from .config import CONF, HOME, JOBS, TZ, _cancel_runs, _lock
-from .helpers import claude_result, as_list, gh, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, task_cmd
+from .config import CONF, HOME, JOBS, RUNNER_DIR, TASK_CMD, TZ, _cancel_runs, _lock
+from .helpers import as_list, gh, label, log_line, notify, page_url, refresh_cache, remote_url, repo_list, task_cmd
 from .memory import load_memory
 from .storage import db, get, log, now
 
@@ -863,11 +864,20 @@ def make_draft(draft_id):
     for f in ("prompt.txt", "system.txt"):
         os.chmod(share / f, 0o640)
     try:
-        code, out = task_cmd("draft", f"d{draft_id}", timeout=300)
-        result = claude_result(out)
-        if code != 0 or result.get("is_error"):
-            raise RuntimeError(f"Claude: {(result.get('result') or out)[-300:]}")
-        m = re.search(r"```job\n(.*?)```", result.get("result") or "", re.S)
+        # The runner (runner/draft.py, H-025 R2) owns the Claude call and the parsing of its JSON; we read its result line.
+        p = subprocess.run([sys.executable, "-I", str(RUNNER_DIR / "draft.py"), f"d{draft_id}"], capture_output=True,
+                           text=True, timeout=300, env={**os.environ, "TASK_CMD": shlex.join(TASK_CMD)})
+        result = {}
+        for line in p.stdout.splitlines():
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get("event") == "result":
+                result = ev
+        if p.returncode != 0 or result.get("is_error") or not result:
+            raise RuntimeError(f"Claude: {(result.get('text') or result.get('output_tail') or (p.stdout + p.stderr).strip())[-300:]}")
+        m = re.search(r"```job\n(.*?)```", result.get("text") or "", re.S)
         if not m:
             raise RuntimeError("Claude gaf geen job-bestand terug")
         update_draft(draft_id, status="ready", text=m.group(1).strip() + "\n")

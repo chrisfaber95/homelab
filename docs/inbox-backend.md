@@ -551,3 +551,64 @@ re-import); `tests.test_inbox_jobs_writes` and `tests.test_inbox_kitt` (Python s
   if the runner is still there after `killGrace`, `kill -KILL -- -<pid>` on the group and its descendants.
 - Test: `RunnerServiceTest` with `src/test/resources/runner/fake_runner.py` (result, exit code, deadline, cancel, group
   kill of a runner that ignores SIGTERM, no shell). `./mvnw verify`. The sudoers line is unchanged.
+
+## Core in shadow: task store, scheduler, recovery (H-026 K1)
+
+`backend/.../core/` is the start of the inbox core in Java. **Nothing is switched**: Python owns the `tasks` table and the
+queue; no route calls this code; the running service never opens a task connection at start.
+
+- `TaskStore` (`get`, `update`, `tasks`, `newTask`, `now`) over the `tasks` table, same columns and ISO-8601 `+00:00`
+  strings as the SQLite database. `update` only takes known column names.
+- `Scheduler.tick()` (the pass of `queue.scheduler`): oldest queued first; `MAX_RUNNING` in total, `MAX_PER_REPO` per repo
+  (`auto` and `brief` are exempt); waits for `after_task` (a brief task also while its predecessor is `pr_open`).
+- `Recovery.recover()` (`queue.recover`): a running task goes back in the queue with a restart note and `restarts+1`; after
+  `RESTART_ROUNDS` (2) cut-offs in a row it fails; router and planner start over without a note; a brief task whose review
+  was cut off is reviewed again.
+- `RoundLimits`: the turn limit (`MAX_TURNS`, counted on top of the task's turns, every 5th turn stored), the time limit
+  (`MAX_MINUTES`) and cancel of one round, with the reason strings of Python (`N beurten`, `N minuten`, `geannuleerd`).
+- `TaskActions`: `answer`, `cancel`, `retry` (Continue for a capped task) and `sweepCapped` of `queue.py`.
+- `Effects`: everything with a side effect is an interface (`RoundRunner`, `WorkingCopies`, `Notifier`, `GitHubWrites`,
+  `TaskLog`, `ConversationNotes`, `Followups`). In shadow they are all `ShadowEffects`, which only records the call.
+
+**The switch:** `core.scheduler.enabled` (env `CORE_SCHEDULER_ENABLED`), default **off**. Off: the `SchedulerLoop` bean does not
+exist, and `tick`, `recover` and `sweepCapped` return without reading or writing anything. On: `SchedulerLoop` refuses to
+start while the effects are the shadow ones, so until the real effects exist (K2 and later) switching it on is a start
+error, not a way to run tasks. Limits come from the same `*.conf` keys as Python (`MAX_RUNNING`, `MAX_PER_REPO`, `MAX_TURNS`,
+`MAX_MINUTES`, `CAPPED_KEEP_DAYS`).
+
+Left for later tasks (K2 to K7): `run_round`/`finish_round`, the router and the follow-up chain (`Followups` is only the
+hook), `settle_routed`/`settle_briefs`, `catch_up_main`, the real effects, and the loop calling the K2+ pieces.
+
+### Which Python test each Java test covers
+
+The Python tests of `tests/` hardly cover the scheduler, limits and recovery directly: no test calls `scheduler()` or
+`recover()`, and the turn/time limits are only exercised for the turn count. Where a rule has no Python test, the Java test is
+written from the Python code and says so in its comment ("no Python test").
+
+| Java test (`backend/src/test/java/dev/homelab/inbox/core/`) | Python test it ports |
+|---|---|
+| `TaskStoreTest.aNewTaskIsQueuedAndRemembersWhereItCameFrom` | `test_inbox_chat.StartTask.test_task_is_queued_like_a_page_task_and_marked_discord` |
+| `TaskStoreTest.anUnknownTaskIsEmpty` | `test_inbox_tasks_api.test_unknown_task_is_a_json_404` (store half) |
+| `TaskStoreTest.tasksComeNewestFirstAndAreLimited` | `test_inbox_tasks_api.test_list_has_the_form_repos_queue_and_history` (order) |
+| `TaskStoreTest.updateChangesOnlyTheGivenFieldsOfThatTask` | `test_inbox_chat.Lists.test_state_lists_running_waiting_and_queued` (the rows) |
+| `TaskStoreTest.updateCanSetAColumnToNull` | `test_inbox_followups.test_retry_a_refused_task` (summary to NULL), `test_inbox_chat.Answer` |
+| `TaskStoreTest.theTextIsCutAt8000Characters`, `updateRefusesAColumnThatIsNotOnTheTable`, `nowIsIsoSecondsWithAnOffset` | none (written from `storage.py`) |
+| `RoundLimitsTest.turnsAreCountedOnTopOfTheTurnsTheTaskAlreadyHad` | `test_runner_round.InboxUsesRunner.test_stream_claude_reads_the_runner_events` (turns 3 + 1 = 4, no cap) |
+| `RoundLimitsTest` other 5 cases (every 5th turn, turn limit once, deadline, cancel vs time-out, time-out over turn limit) | none (from `rounds.stream_claude` and `rounds.watch`) |
+| `SchedulerTest` (10 cases: oldest first, `MAX_RUNNING`, `MAX_PER_REPO`, router/planner exempt, predecessor, brief and `pr_open`, window of 200, failing round, scheduler off) | none (from `queue.scheduler`) |
+| `RecoveryTest` (6 cases: requeue with note, fail after 2, router/planner, other statuses untouched, review again, scheduler off) | none (from `queue.recover`) |
+| `TaskActionsTest.anAnswerQueuesTheWaitingTaskAgain...` | `test_inbox_chat.Answer.test_answer_continues_the_task_like_the_page` |
+| `TaskActionsTest.anAnswerToATaskThatIsNotWaiting...` | `test_inbox_chat.Answer.test_not_waiting_unknown_and_forbidden` (not-waiting half; 404/403 belong to the route, H-027) |
+| `TaskActionsTest.retryOfARefusedTaskQuotes...` | `test_inbox_followups.test_retry_a_refused_task` (the follow-ups queueing is K3: only the `Followups` hook is checked) |
+| `TaskActionsTest.continueOfACappedTaskKeepsItsWorkingCopy` | `test_inbox_followups.test_capped_round_keeps_its_working_copy_for_continue` (retry half; the capped `finish_round` half is K2) |
+| `TaskActionsTest.retryClearsTheAcceptedMark...` | `test_inbox_followups.test_retry_clears_the_mark` |
+| `TaskActionsTest.theNoteOfATaskThatNeverRan...` | `test_inbox_followups.test_retry_note_of_a_task_that_never_ran_goes_in_its_text` |
+| `TaskActionsTest.theSweepRemovesOnlyOldCappedWorkingCopies...` | `test_inbox_followups.test_sweep_removes_only_old_capped_working_copies` |
+| `TaskActionsTest` cancel, reaction-to-answer, rebuilt-from-commits, sweep edge cases | none |
+| `ShadowModeTest` | the acceptance criterion (scheduler off on a copy of the data: no change, no effect) |
+
+Not ported in K1 because they test later slices: `test_inbox_catch_up` (`run_round`, K2), the follow-up chain of
+`test_inbox_followups` (K3), `test_inbox_auto_merge` (K5), `test_inbox_builds` (K4), `test_inbox_followups.test_migration_flags_only_existing_followups`
+(a SQLite `ALTER TABLE`; V1 has `no_auto_revive` with default 0 and the import copies the value).
+
+Test: `cd backend && ./mvnw verify` (`core/` tests use a throwaway PostgreSQL, like the other database tests).

@@ -89,10 +89,13 @@ class InboxUsesRunner(unittest.TestCase):
 
     def test_review_pr_reads_the_runner_result(self):
         from unittest import mock
+        os.environ.setdefault("INBOX_RUNNER_HOME", tempfile.mkdtemp())
+        os.environ.setdefault("BACKEND_ROUTES", "")
+        sys.path.insert(0, str(ROOT / "bin"))
         from homelab_inbox import briefs
         text = "```review\n" + json.dumps({"summary": "ok", "criteria": [{"criterion": "c", "verdict": "pass"}]}) + "\n```"
         t = {"id": 5, "repo": "homelab", "criteria": '["c"]', "text": "x", "pr_number": 3, "reviews": 0, "brief": "H-1",
-             "parent": None, "summary": "", "pr_url": "u", "unattended": 0}
+             "parent": None, "job": None, "summary": "", "pr_url": "u", "unattended": 0}
         for result, review_ok in (({"ok": True, "text": text}, 1), ({"ok": False, "text": "", "detail": "boom"}, 0)):
             upd = {}
             with tempfile.TemporaryDirectory() as home, \

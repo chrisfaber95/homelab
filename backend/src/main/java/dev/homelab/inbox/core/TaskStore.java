@@ -64,6 +64,27 @@ public class TaskStore {
         return query("SELECT * FROM tasks WHERE parent=? ORDER BY id", parent);
     }
 
+    /** The tasks in one of these statuses, oldest first ({@code SELECT ... WHERE status IN (...) ORDER BY id}). */
+    public List<Task> withStatus(String... statuses) {
+        String marks = String.join(",", java.util.Collections.nCopies(statuses.length, "?"));
+        return query("SELECT * FROM tasks WHERE status IN (" + marks + ") ORDER BY id", (Object[]) statuses);
+    }
+
+    /** How many tasks this source created at or after {@code since} (an ISO-8601 UTC string, as stored). */
+    public int countFromSince(String source, String since) {
+        try (Connection c = db.open(); PreparedStatement st = c.prepareStatement(
+                "SELECT COUNT(*) FROM tasks WHERE source=? AND created>=?")) {
+            st.setString(1, source);
+            st.setString(2, since);
+            try (ResultSet rs = st.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("cannot count tasks: " + e.getMessage(), e);
+        }
+    }
+
     /** Queue a task: the one place a task is created. {@code source} is the client it came from (null = the page). */
     public synchronized long newTask(String repo, String text, String source) {
         String sql = "INSERT INTO tasks (repo, text, status, created, session, source) VALUES (?,?,?,?,?,?)";

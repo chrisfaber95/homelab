@@ -32,7 +32,7 @@ import tools.jackson.databind.node.ObjectNode;
  *   <li>{@code /internal/conversation/*}: what the rest of the Python inbox (queue, kitt door, notifications, overview)
  *   needs from the store now that it no longer writes it itself.</li>
  * </ul>
- * {@code /api/chat/action} is not here: it is the task queue and the approvals, which stay in Python until K7.
+ * {@code /api/chat/action} is ported in shadow (the {@code door} package, K7) and still served by Python until H-027.
  */
 @RestController
 public class ConversationController {

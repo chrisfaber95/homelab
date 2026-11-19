@@ -100,6 +100,54 @@ public class TaskStore {
         }
     }
 
+    /** {@code router.children}: the tasks planned from a build, oldest first. */
+    public List<Task> children(long parent) {
+        return query("SELECT * FROM tasks WHERE parent=? ORDER BY id", parent);
+    }
+
+    /** {@code briefs.builds}: the build parents (pseudo-repo brief), newest first; of one brief when {@code briefId} is set. */
+    public List<Task> builds(String briefId) {
+        return briefId == null
+                ? query("SELECT * FROM tasks WHERE repo=? ORDER BY id DESC", CoreSettings.BRIEF)
+                : query("SELECT * FROM tasks WHERE repo=? AND brief=? ORDER BY id DESC", CoreSettings.BRIEF, briefId);
+    }
+
+    /** Builds that are planned and finished but have no handoff PR yet ({@code settle_briefs}). */
+    public List<Task> buildsToHandOff() {
+        return query("SELECT * FROM tasks WHERE repo=? AND status='routed' AND ended IS NOT NULL AND handoff IS NULL",
+                CoreSettings.BRIEF);
+    }
+
+    /** The build task of {@code start_build}: queued, on the pseudo-repo {@code brief}. */
+    public synchronized long newBuild(String briefId, String text, boolean unattended, String source) {
+        return insert("INSERT INTO tasks (repo, text, status, created, session, brief, unattended, source) "
+                + "VALUES (?,?,?,?,?,?,?,?)", CoreSettings.BRIEF, text, "queued", now(), UUID.randomUUID().toString(),
+                briefId, unattended ? 1 : 0, source);
+    }
+
+    /** A task planned from a brief: queued, with its parent, predecessor and criteria (a JSON array). */
+    public synchronized long newChild(String repo, String text, long parent, Long after, String reason, String briefId,
+                                      String criteriaJson) {
+        return insert("INSERT INTO tasks (repo, text, status, created, session, parent, after_task, reason, brief, "
+                + "criteria) VALUES (?,?,?,?,?,?,?,?,?,?)", repo, text, "queued", now(), UUID.randomUUID().toString(),
+                parent, after, reason, briefId, criteriaJson);
+    }
+
+    private long insert(String sql, Object... args) {
+        try (Connection c = db.open(); PreparedStatement st = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            for (int i = 0; i < args.length; i++) {
+                st.setObject(i + 1, args[i]);
+            }
+            st.executeUpdate();
+            try (ResultSet keys = st.getGeneratedKeys()) {
+                keys.next();
+                return keys.getLong("id");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("cannot create a task: " + e.getMessage(), e);
+        }
+    }
+
     /** {@code storage.update}: set the given columns of one task. */
     public synchronized void update(long id, Map<String, Object> fields) {
         if (fields.isEmpty()) {

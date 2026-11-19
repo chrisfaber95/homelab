@@ -785,6 +785,63 @@ and (once the scheduler is on, which needs real effects) by K7/H-027.
 Not ported because they test the git side, not Java: `test_inbox_catch_up.BehindSubcommand` (the `behind` and `sync` commands of
 `bin/homelab-inbox-task` against real git; unchanged and still run by Python), and `test_runner_contract`.
 
+## Core in shadow: briefs (H-026 K4)
+
+The briefs of `bin/homelab_inbox/briefs.py` exist in Java with the same behaviour, in `backend/.../core/`:
+
+| Class | Python | What |
+|---|---|---|
+| `BriefParsing` | `split_frontmatter`, `load_briefs` (one file), `task_limit`, `parse_plan`, `parse_review`, `REVIEW_SKIP`, the status edits of `set_brief_status` and `handoff` | Pure text and JSON handling, no I/O |
+| `Briefs` | `load_briefs`, `builds`, `build_left_nothing`, `live_build`, `set_brief_status`, `start_build`, `add_new_repo`, `merge_setup_pr`, `helpers.merges_itself` | Brief intake and the builds |
+| `BriefRounds` | `plan_task`, `review_pr`, `review_diff`, `handoff`, `settle_briefs` | Planning into tasks or a question back to the user, the PR review with one rework round, the handoff PR |
+| `BriefPages` | `overview.briefs_data`, `brief_data`, `brief_view`, `build_view` | The data of the Briefs page; no route uses it |
+
+Everything outside the task store goes through new interfaces in `Effects` (`ProductRepo`, `BriefGitHub`, `BriefClaude`,
+`RepoProfiles`, `NewRepos`, `Diffs`), plus the existing `Notifier`, `ConversationNotes`, `PullRequests` and `Repos`. The
+`ShadowEffects` implement all of them and do nothing: no Claude run, commit, comment, PR, merge or notification (the shadow
+test `withTheShadowEffectsNothingLeavesTheCore` checks this). `Sessions.plan` and `AfterEffects.reviewPr` are still the shadow
+ones: wiring them to `BriefRounds.planTask` and `reviewPr` is part of the cut-over (H-027), together with the real effects.
+No route is switched. `TaskStore` got `children`, `builds`, `buildsToHandOff`, `newBuild` and `newChild`.
+
+Differences from Python, on purpose: the planner and reviewer get Claude's answer as a `ClaudeAnswer` (the runner owns the
+parsing of Claude's JSON, Q7), so `helpers.claude_result` stays in Python; the criteria of a child task are written with
+Jackson (non-ASCII is not escaped, as `json.dumps` does by default).
+
+### Which Python test each Java test covers
+
+All Java tests are in `BriefsTest`; "new" marks behaviour of `briefs.py` that no Python test covers.
+
+| Java test | Python test |
+|---|---|
+| `aCancelledBuildDoesNotBlockANewOne` | `test_inbox_builds.Builds.test_a_cancelled_build_does_not_block_a_new_one` |
+| `aPlannedBuildWhoseTasksWereAllCancelledCanBeStartedAgain` | `...test_a_planned_build_whose_tasks_were_all_cancelled_can_be_started_again` |
+| `aBuildWithAMergedTaskStaysLive` | `...test_a_build_with_a_merged_task_stays_live` |
+| `aBuildThatIsStillRunningStaysLive` | `...test_a_build_that_is_still_running_stays_live` |
+| `aBuildWithoutTasksYetStaysLive` | `...test_a_build_without_tasks_yet_stays_live` |
+| `aCancelledBuildDoesNotHideAnEarlierOneWithMergedWork` | `...test_a_cancelled_build_does_not_hide_an_earlier_one_with_merged_work` |
+| `theSettingAppliesWhenTheBriefSaysNothing` | `test_inbox_builds.TaskLimit.test_the_setting_applies_when_the_brief_says_nothing` |
+| `theBriefSetsItsOwnLimit` | `...test_the_brief_sets_its_own_limit` |
+| `aPlanOverTheLimitIsRefused` | `...test_a_plan_over_the_limit_is_refused` |
+| `limitZeroTakesAnyNumberOfTasks` | `...test_limit_zero_takes_any_number_of_tasks` |
+| `theListGroupsBriefsByStatusWithTheirActions` | `test_inbox_briefs_api.BriefsApi.test_list` |
+| `anUnreadableProductRepoGivesAnErrorAndEmptyLists` | `...test_unreadable_product_repo` |
+| `oneBriefComesWithItsBodyPathAndZone` | `...test_one_brief`, `...test_times_come_with_their_zone` |
+| `anUnknownBriefIsNotFound` | `...test_unknown_brief` (the 404 itself is the route's) |
+| `aBuildThatCannotStartSaysWhy` | `...test_a_failed_build_is_400_with_the_reason` (the 400 itself is the route's) |
+| `parkingADraftCommitsTheNewStatusAndKeepsTheComment` | `...test_park_redirects_to_the_briefs_page` (the redirect is the route's) |
+| `theReviewReadsTheRunnersResult` | `test_runner_review.InboxUsesRunner.test_review_pr_reads_the_runner_result` |
+| `withTheShadowEffectsNothingLeavesTheCore` | acceptance criterion 2 (no Python counterpart) |
+
+Not ported, because they test Python-only parts: `test_inbox_builds.ClaudeResult` (`helpers.claude_result`), and the
+runner process tests of `test_runner_review.Review` (`runner/review.py` stays Python; `RunnerServiceTest` covers the Java
+side of the contract). The brief parts of `test_inbox_followups`, `test_inbox_auto_merge` and `test_inbox_tasks_api` belong
+to K3 (follow-ups), K5 (auto merge) and the routes (K8). The other Java tests are new and cover the planner
+(`thePlannerMakesChildTasks`, `aQuestionFromThePlannerWaits`, `theAnswerGoesBackToThePlanner`,
+`whatGoesWrongFailsTheBuildWithTheReason`, `aCancelledPlannerMakesNoTasks`, `thePlanIsChecked`), the review
+(`aPassedReviewIsCommentedAndNotified`, `aMissSendsTheTaskBackOnce`, `aBuildWithoutMeMergesProductRepoPrsItself`,
+`mergesItselfNeedsEveryCondition`, `theReviewerDiffLeavesOutLockfilesAndPutsDocsLast`, `theReviewIsChecked`), the setup PR,
+`start_build` and the handoff.
+
 ## Chat actions, approvals, kitt door and gate in shadow (H-026 K7)
 
 `backend/src/main/java/dev/homelab/inbox/door/` ports `chat.py`, `kitt.py`, the chat door's action route and `gate.py`.

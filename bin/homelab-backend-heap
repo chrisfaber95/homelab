@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# homelab: H-026 (K9), measures the heap of the running Java backend: used, committed and the max setting, plus the JVM
+# flags and the shadow switch, as one line you can paste into docs/inbox-backend.md ("Measured values").
+# Usage: homelab-backend-heap [--gc] [unit-or-pid]   (default unit: homelab-inbox-backend)
+#   --gc   force a full GC first, so "used" is the live set (what the application really holds on to)
+# jcmd and jstat attach only as the account of the process, so run it as inbox-runner or with sudo; it re-runs itself
+# through `sudo -u <owner>` when needed. Read-only apart from the optional GC. Touches no port, config or service.
+set -euo pipefail
+
+JDK=${JDK_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}
+GC=0
+if [ "${1:-}" = "--gc" ]; then GC=1; shift; fi
+TARGET=${1:-homelab-inbox-backend}
+
+if [[ "$TARGET" =~ ^[0-9]+$ ]]; then
+  PID=$TARGET
+else
+  PID=$(systemctl show -p MainPID --value "$TARGET")
+fi
+if [ -z "$PID" ] || [ "$PID" = 0 ] || [ ! -d "/proc/$PID" ]; then
+  echo "homelab-backend-heap: $TARGET is not running" >&2; exit 1
+fi
+OWNER=$(stat -c %U "/proc/$PID")
+if [ "$(id -un)" != "$OWNER" ]; then
+  exec sudo -u "$OWNER" "$0" $([ "$GC" = 1 ] && echo --gc) "$PID"
+fi
+
+[ "$GC" = 1 ] && "$JDK/bin/jcmd" "$PID" GC.run >/dev/null
+# jstat -gc (KB): S0C S1C S0U S1U EC EU OC OU ... ; used and committed are the sums over the young and old generations.
+read -r COMMITTED USED < <("$JDK/bin/jstat" -gc "$PID" | awk 'NR==2 {printf "%d %d\n", $1+$2+$5+$7, $3+$4+$6+$8}')
+MAXHEAP=$("$JDK/bin/jcmd" "$PID" VM.flags | tr ' ' '\n' | awk -F= '$1=="-XX:MaxHeapSize" {print $2}')
+FLAGS=$(tr '\0' ' ' < "/proc/$PID/cmdline" | sed 's/ -jar .*//; s#^[^ ]*java ##')
+SHADOW=$(tr '\0' '\n' < "/proc/$PID/environ" 2>/dev/null | sed -n 's/^CORE_SCHEDULER_ENABLED=//p')
+
+mib() { awk -v k="$1" 'BEGIN {printf "%.1f", k/1024}'; }
+echo "date=$(date -u +%FT%TZ) host=$(hostname) pid=$PID after_gc=$GC"
+echo "heap_used_mib=$(mib "$USED") heap_committed_mib=$(mib "$COMMITTED") heap_max_mib=$(awk -v b="$MAXHEAP" 'BEGIN {printf "%.1f", b/1048576}')"
+echo "scheduler_enabled=${SHADOW:-false (default)}"
+echo "jvm_flags=$FLAGS"

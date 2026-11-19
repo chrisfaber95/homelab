@@ -10,7 +10,7 @@ cd "$(dirname "$(dirname "$(readlink -f "$0")")")"
 
 echo "== shellcheck"
 if command -v shellcheck >/dev/null; then
-  shellcheck -S error scripts/*.sh bin/homelab-health bin/homelab-inbox-task bin/homelab-exposure changes/*/*.sh
+  shellcheck -S error scripts/*.sh bin/homelab-health bin/homelab-inbox-task bin/homelab-exposure bin/homelab-backend-heap changes/*/*.sh
 else
   # In CI (CI=true, set by GitHub Actions) a missing shellcheck is a failure, never a silent skip.
   [[ ${CI:-} == true ]] && { echo "shellcheck is not installed" >&2; exit 1; }

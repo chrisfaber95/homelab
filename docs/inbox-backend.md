@@ -591,6 +591,32 @@ re-import); `tests.test_inbox_jobs_writes` and `tests.test_inbox_kitt` (Python s
 - Test: `RunnerServiceTest` with `src/test/resources/runner/fake_runner.py` (result, exit code, deadline, cancel, group
   kill of a runner that ignores SIGTERM, no shell). `./mvnw verify`. The sudoers line is unchanged.
 
+## Front door: access, CSRF, CSP and the SSH tab (H-026 K8)
+
+`backend/src/main/java/dev/homelab/inbox/frontdoor/` is the Python front door (`access.py`, the guard and `csrf_ok` of
+`server.py`, `ssh_state`, `POST /api/ssh`) in Java, with the same behaviour. It is **in shadow**: nothing is in front of
+it yet, no port, bind address, unit, proxy, `services.conf` entry or `BACKEND_ROUTES` changed, and the whole package is
+off unless `inbox.front-door.enabled=true` (nothing sets it; H-027 does when it switches the routes).
+`FrontDoorOffTest` checks that with the default there is no front-door bean, no `/api/session` or `/api/ssh` route and
+no CSP header, and that the facade secret still guards every route.
+
+| Class | Python | What it does |
+|---|---|---|
+| `TailnetAccess` | `access.Access` | Owner from `tailscale status --json`; a peer is allowed only when `tailscale whois` names the owner. The box's own addresses and an unknown owner are refused, a failed whois is refused, answers are kept 5 minutes. `INBOX_ALLOW_ALL=1` opens it, for tests only. |
+| `Csrf` | `access.csrf_token`, `csrf_ok` | Token = HMAC-SHA256 of `inbox-form` with `<INBOX_RUNNER_HOME>/csrf-secret` (same file, so tokens are interchangeable with Python's), constant-time compare; Origin netloc must equal Host. |
+| `FrontDoorFilter` | `Handler.guard`, `csrf_ok`, `handle_mutating` | GET: owner check. POST: owner check, then Origin and token (`X-CSRF-Token` on `/api/*`, the `csrf` form field on pages). PUT/PATCH/DELETE: same checks then 405 on `/api/*`, 501 elsewhere. Errors are `{"error": ...}` on `/api/*`, a small HTML page elsewhere. |
+| `SecurityHeaders` | `Handler.send` | CSP, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store` on every answer. The CSP string is Python's, byte for byte (a test compares it with `server.py`). |
+| `SessionController` | `GET /api/session` | `{"csrf_token": ...}`. |
+| `SshController`, `AdminSocket` | `ssh_state`, `admin_ask`, `POST /api/ssh` | History (last 15 `sshkey` lines of the changes log, newest first), and a key request to `homelab-admin` over its unix socket. |
+
+Java tests (`backend/src/test/java/dev/homelab/inbox/frontdoor/`): `CsrfTest`, `TailnetAccessTest`, `FrontDoorTest`
+(ports `tests/test_inbox_session.py` and `tests/test_inbox_ssh_api.py`, with negative tests for no access, a missing or
+wrong token, a wrong origin and the CSP), `FrontDoorOffTest`.
+
+Not ported, on purpose: `flat_error` and the frontend-source check of `test_inbox_session.py` (they belong to the
+Python proxy and the TypeScript client), and the chat and kitt doors and the gate on 8121 (K7). Tomcat writes
+`Content-Type: application/json;charset=utf-8` without the space Python has; the tests compare it that way.
+
 ## Core in shadow: task store, scheduler, recovery (H-026 K1)
 
 `backend/.../core/` is the start of the inbox core in Java. **Nothing is switched**: Python owns the `tasks` table and the

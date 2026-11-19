@@ -95,4 +95,37 @@ class ShadowModeTest {
                 .web(WebApplicationType.NONE).properties("backend.secret=x").run("--core.scheduler.enabled=true").close())
                 .hasStackTraceContaining("needs a real RoundRunner");
     }
+
+    /** Jobs and research (K6) with the scheduler off, over a copy that holds a due job and a held run: nothing runs, nothing
+     * is sent and nothing in the data changes. */
+    @Test
+    void jobsAndResearchWithTheSchedulerOffChangeNothingAndSendNothing() throws Exception {
+        JobFixture.clean(db);
+        JobRuns runs = new JobRuns(db);
+        runs.setLastDue("daily", "2026-11-10T10:00:00+00:00");
+        runs.insertRun("research", "research", "claude", "x", "2026-11-17T08:00:00+00:00", "held", false, null, "quick", null, null);
+        java.util.Map<String, dev.homelab.inbox.read.Jobs.Job> jobs = java.util.Map.of("daily",
+                JobFixture.parse("daily", "---\nschedule: \"0 7 * * *\"\nkind: box-report\nmodel: claude\n---\nReport.\n"));
+        JobFixture.Recorder fx = new JobFixture.Recorder();
+        CoreFixture.MutableClock clock = new CoreFixture.MutableClock("2026-11-18T10:00:00Z");
+        JobEngine engine = new JobEngine(runs, new TaskStore(db, clock), CoreSettings.shadowDefaults(), JobFixture.SETTINGS,
+                () -> jobs, fx, fx, fx, fx, fx, new Cancellations(), Runnable::run, clock, "http://h");
+        engine.tick();
+        engine.releaseHeld();
+        assertThat(fx.calls()).isEmpty();
+        assertThat(runs.lastDue("daily")).contains("2026-11-10T10:00:00+00:00");
+        assertThat(runs.runs(null, 10)).hasSize(1);
+        assertThat(runs.runs(null, 10).get(0).get("status")).isEqualTo("held");
+    }
+
+    @Test
+    void theApplicationHasTheJobEngineInShadowToo() {
+        try (ConfigurableApplicationContext ctx = new SpringApplicationBuilder(InboxBackendApplication.class)
+                .web(WebApplicationType.NONE).properties("backend.secret=x").run()) {
+            assertThat(ctx.getBean(Effects.JobIo.class)).isInstanceOf(ShadowEffects.class);
+            ctx.getBean(JobEngine.class).tick(); // does nothing, and opens no database connection
+            assertThat(ctx.getBean(JobPages.class)).isNotNull();
+            assertThat(ctx.getBean(AgentCatalogue.class)).isNotNull();
+        }
+    }
 }

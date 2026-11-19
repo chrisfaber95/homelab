@@ -159,6 +159,45 @@ Fill this in from a real run on the box (date, what the service was doing, the n
 No number is written here yet: it appears on the box only once `scripts/27-backend.sh` has run (the box had no JDK on
 2026-11-17 and an inbox task has no root). After the merge, copy the first log line into this table.
 
+### Measuring with one command (H-026 K9)
+
+`bin/homelab-backend-heap [--gc] [unit-or-pid]` prints heap used, heap committed, the max heap setting, the JVM flags and
+the scheduler switch of the running backend (default unit `homelab-inbox-backend`). `--gc` forces a full GC first, so
+*used* is the live set. It re-runs itself as the owner of the process through `sudo -u inbox-runner` (jcmd only attaches
+as the same user), reads only, and changes no port, config or service. The first line to record is the one with `--gc`.
+
+```sh
+sudo /var/lib/homelab/repo/bin/homelab-backend-heap --gc      # path of root's clone; or run it from a checkout of main
+```
+
+**Shadow mode, against a copy of the data.** The backend is in shadow when `CORE_SCHEDULER_ENABLED` is unset or `false`
+(the default: no scheduler, no real task, merge or notification). To measure it against a copy and not the live data, do
+the import into a scratch database and start a second instance on another loopback port, then measure that one by pid:
+
+```sh
+sudo -u postgres createdb -O inbox_app inbox_copy      # scratch copy; drop it afterwards: dropdb inbox_copy
+sudo -u inbox-runner env BACKEND_PORT=8131 CORE_SCHEDULER_ENABLED=false \
+  SPRING_DATASOURCE_URL='jdbc:postgresql://localhost/inbox_copy?socketFactory=org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg&socketFactoryArg=/var/run/postgresql/.s.PGSQL.5432' \
+  SPRING_DATASOURCE_USERNAME=inbox_app BACKEND_SECRET_FILE=/var/lib/homelab-inbox/backend-secret \
+  INBOX_CONFIG_DIR=/usr/local/lib/homelab/config \
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:MaxDirectMemorySize=64m \
+  -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -jar /usr/local/lib/homelab/inbox-backend/inbox-backend.jar &
+# import the data into inbox_copy as in "The import" of the sections above, then:
+sudo /var/lib/homelab/repo/bin/homelab-backend-heap --gc <pid of that java>
+```
+
+Use the same flags as `ExecStart` in the unit, so the number is the one of the service. Stop the copy by its pid and
+drop `inbox_copy` when done. Nothing here opens a port beyond loopback or switches a route to Java.
+
+### Heap record (H-026 K9)
+
+One row per measurement: paste the output of `homelab-backend-heap --gc`. Fill it in on the box; leave older rows.
+Empty until someone measures: no value is claimed here.
+
+| Date | Machine | JVM flags | State (shadow, scheduler off; data copy or live) | Heap used after full GC (MiB) | Heap committed (MiB) | Max heap (MiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| *not measured yet* | | | | | | |
+
 ## Rollback
 
 Revert the commit and run nothing; to remove what was installed:
@@ -551,6 +590,32 @@ re-import); `tests.test_inbox_jobs_writes` and `tests.test_inbox_kitt` (Python s
   if the runner is still there after `killGrace`, `kill -KILL -- -<pid>` on the group and its descendants.
 - Test: `RunnerServiceTest` with `src/test/resources/runner/fake_runner.py` (result, exit code, deadline, cancel, group
   kill of a runner that ignores SIGTERM, no shell). `./mvnw verify`. The sudoers line is unchanged.
+
+## Front door: access, CSRF, CSP and the SSH tab (H-026 K8)
+
+`backend/src/main/java/dev/homelab/inbox/frontdoor/` is the Python front door (`access.py`, the guard and `csrf_ok` of
+`server.py`, `ssh_state`, `POST /api/ssh`) in Java, with the same behaviour. It is **in shadow**: nothing is in front of
+it yet, no port, bind address, unit, proxy, `services.conf` entry or `BACKEND_ROUTES` changed, and the whole package is
+off unless `inbox.front-door.enabled=true` (nothing sets it; H-027 does when it switches the routes).
+`FrontDoorOffTest` checks that with the default there is no front-door bean, no `/api/session` or `/api/ssh` route and
+no CSP header, and that the facade secret still guards every route.
+
+| Class | Python | What it does |
+|---|---|---|
+| `TailnetAccess` | `access.Access` | Owner from `tailscale status --json`; a peer is allowed only when `tailscale whois` names the owner. The box's own addresses and an unknown owner are refused, a failed whois is refused, answers are kept 5 minutes. `INBOX_ALLOW_ALL=1` opens it, for tests only. |
+| `Csrf` | `access.csrf_token`, `csrf_ok` | Token = HMAC-SHA256 of `inbox-form` with `<INBOX_RUNNER_HOME>/csrf-secret` (same file, so tokens are interchangeable with Python's), constant-time compare; Origin netloc must equal Host. |
+| `FrontDoorFilter` | `Handler.guard`, `csrf_ok`, `handle_mutating` | GET: owner check. POST: owner check, then Origin and token (`X-CSRF-Token` on `/api/*`, the `csrf` form field on pages). PUT/PATCH/DELETE: same checks then 405 on `/api/*`, 501 elsewhere. Errors are `{"error": ...}` on `/api/*`, a small HTML page elsewhere. |
+| `SecurityHeaders` | `Handler.send` | CSP, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store` on every answer. The CSP string is Python's, byte for byte (a test compares it with `server.py`). |
+| `SessionController` | `GET /api/session` | `{"csrf_token": ...}`. |
+| `SshController`, `AdminSocket` | `ssh_state`, `admin_ask`, `POST /api/ssh` | History (last 15 `sshkey` lines of the changes log, newest first), and a key request to `homelab-admin` over its unix socket. |
+
+Java tests (`backend/src/test/java/dev/homelab/inbox/frontdoor/`): `CsrfTest`, `TailnetAccessTest`, `FrontDoorTest`
+(ports `tests/test_inbox_session.py` and `tests/test_inbox_ssh_api.py`, with negative tests for no access, a missing or
+wrong token, a wrong origin and the CSP), `FrontDoorOffTest`.
+
+Not ported, on purpose: `flat_error` and the frontend-source check of `test_inbox_session.py` (they belong to the
+Python proxy and the TypeScript client), and the chat and kitt doors and the gate on 8121 (K7). Tomcat writes
+`Content-Type: application/json;charset=utf-8` without the space Python has; the tests compare it that way.
 
 ## Core in shadow: task store, scheduler, recovery (H-026 K1)
 

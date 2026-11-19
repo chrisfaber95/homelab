@@ -64,4 +64,18 @@ public class Clients {
         }
         return out;
     }
+
+    /** A setting of one client in the file (such as {@code tasks_per_day}), or null when it is not there. */
+    public JsonNode setting(String client, String key) {
+        String text = settings.clientsJson();
+        if (text == null) {
+            return null;
+        }
+        try {
+            JsonNode value = json.readTree(text).path("clients").path(client).path(key);
+            return value.isMissingNode() || value.isNull() ? null : value;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
 }

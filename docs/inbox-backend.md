@@ -348,7 +348,7 @@ inbox; only the Maven *build* uses a `DynamicUser`. The plan in `inbox-split.md`
 | `GET /api/chat/state` | Java | same body; non-GET is 405 `GET only` |
 | `GET /api/chat/entries?after=&limit=` | Java | cursor, limit 1 to 1000, `next`; 403 `refused: no permission 'read'`, 400 for non-numbers |
 | `POST /api/chat/entries` | Java | always written as Chris; kind needs `write`/`ask`/`answer`; scrubbing, 20000 characters, `ref` 80 |
-| `POST /api/chat/action` | **Python** | task queue and approvals; stays until K7 |
+| `POST /api/chat/action` | **Python** | task queue and approvals; ported in shadow (K7, `door/`), still Python's until H-027 |
 
 The paths, bodies and status codes are unchanged. **Tokens:** the bearer token (`/etc/homelab/chat-<name>-token`) is still checked by
 the Python door (`conversation.authenticate`), which also checks loopback; it then calls Java with `X-Inbox-Client: <name>`. Java trusts
@@ -784,3 +784,27 @@ and (once the scheduler is on, which needs real effects) by K7/H-027.
 
 Not ported because they test the git side, not Java: `test_inbox_catch_up.BehindSubcommand` (the `behind` and `sync` commands of
 `bin/homelab-inbox-task` against real git; unchanged and still run by Python), and `test_runner_contract`.
+
+## Chat actions, approvals, kitt door and gate in shadow (H-026 K7)
+
+`backend/src/main/java/dev/homelab/inbox/door/` ports `chat.py`, `kitt.py`, the chat door's action route and `gate.py`.
+Exposure is unchanged: no route, no listener and no scheduled job uses it, the Python inbox still serves both doors and
+the Python gate still listens on 8121.
+
+| Class | Python | What |
+|---|---|---|
+| `ChatActions` | `chat.py` | start task (daily cap from local midnight), answer, state, jobs, run job, research, drafts, two-step approval (token in `approvals`, one use, expires) |
+| `ChatDoor` | `server.py chat_door/chat_action` | `POST /api/chat/action`: loopback only, bearer token from `chat-<name>-token`, switches, forbidden actions. `entries` and `state` stay the conversation controller's |
+| `KittDoor` | `kitt.py`, `server.py kitt_door` | the peer check (`identify`: client header, socket owner = kitt's account, owner login from the gate) and all kitt routes |
+| `ProcPeers` | `peer_uid`, `account_uid` | owner of the loopback socket from `/proc/net/tcp(6)`, account from passwd |
+| `KittGate` | `gate.py` | owner check, identity headers set, forged ones dropped, 502 when kitt is down. `listen` refuses a wildcard host, and in shadow every non-loopback host |
+| `TailscaleOwner` | `access.py Access` | `tailscale status/whois`, cached 5 min; no allow-all switch |
+| `ShadowPorts` | | briefs (K4), jobs and research (K6) and search are ports; the shadow versions start nothing |
+| `DoorHttp` | | loopback listener for tests only; not a bean |
+
+Deliberate differences: a gate request body over 1 MiB gets 413 (Python cut it and kept the length); the forwarded `Host`
+header is the upstream's. Tests: `backend/src/test/java/dev/homelab/inbox/door/` port `tests/test_inbox_chat.py` and
+`tests/test_inbox_kitt.py` (the page switch case is covered by the store's switch test), plus peer-check, gate-only-allows
+what Python allows (`TailscaleOwnerTest`), and `ShadowDoorTest` (no round, merge or notification; no gate listener).
+Real briefs, jobs and search ports arrive with K4 and K6; a bean that replaces `ShadowPorts` must provide all three.
+`TailscaleOwner` overlaps the K8 `frontdoor` access check; unify them at the cut-over (H-027).

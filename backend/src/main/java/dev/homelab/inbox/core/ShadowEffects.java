@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies, Effects.Notifier,
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
-        Effects.Repos, Effects.Sessions, Effects.GitHubReads {
+        Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.GitHubReads {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -119,6 +119,29 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     }
 
     @Override
+    public void notify(String title, String body, String url, int limit) {
+        record("notify " + title);
+    }
+
+    @Override
+    public String boxOverview() throws java.io.IOException {
+        record("boxOverview");
+        return "";
+    }
+
+    @Override
+    public String fetchPage(String url) throws java.io.IOException {
+        record("fetchPage " + url);
+        return "";
+    }
+
+    @Override
+    public Object github(String path) throws java.io.IOException {
+        record("github " + path);
+        return List.of();
+    }
+
+    @Override
     public Result prepare(long taskId, String repo) {
         record("prepare " + taskId + " " + repo);
         return new Result(0, "");
@@ -140,6 +163,18 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     public List<String> push(long taskId, String cache) {
         record("push " + taskId);
         return List.of();
+    }
+
+    @Override
+    public Effects.ScriptResult runScript(String repo, String script, List<String> args, long runId) {
+        record("runScript " + repo + " " + script);
+        return new Effects.ScriptResult(0, "");
+    }
+
+    @Override
+    public String summarize(String jobName, String instruction, String text) throws java.io.IOException {
+        record("summarize " + jobName);
+        return "";
     }
 
     @Override

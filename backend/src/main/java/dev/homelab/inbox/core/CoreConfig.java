@@ -109,6 +109,18 @@ class CoreConfig {
                 pageBase(conf));
     }
 
+    @Bean
+    GitHubPoller gitHubPoller(TaskStore store, CoreSettings settings, Effects.GitHubReads reads,
+                              Effects.GitHubWrites writes, Notifier notifier, TaskLog log, WorkingCopies copies,
+                              MemorySteps memory, Followups followups, Repos repos, TaskCommands commands,
+                              Pushes pushes, Research research, Clock clock, Settings conf) {
+        String owner = System.getenv("OWNER_LOGIN") != null ? System.getenv("OWNER_LOGIN")
+                : conf.conf("OWNER_GITHUB", "chrisfaber95");
+        return new GitHubPoller(store, settings, new GitHubPoller.GitHubSettings(owner, conf.confInt("CONFLICT_ROUNDS", 2)),
+                reads, writes, notifier, log, copies, memory, followups, repos, commands, pushes, research, clock,
+                pageBase(conf));
+    }
+
     private static String pageBase(Settings conf) {
         return "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
     }

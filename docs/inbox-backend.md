@@ -720,3 +720,39 @@ and (once the scheduler is on, which needs real effects) by K7/H-027.
 
 Not ported because they test the git side, not Java: `test_inbox_catch_up.BehindSubcommand` (the `behind` and `sync` commands of
 `bin/homelab-inbox-task` against real git; unchanged and still run by Python), and `test_runner_contract`.
+
+## Core in shadow: GitHub polling and auto merge (H-026 K5)
+
+Still **nothing switched**: Python's `github.py` polls and merges; `GitHubPoller` (`core/`) is only called by tests and, once
+`core.scheduler.enabled=true` with real effects exists, by `GitHubPollLoop` (every `GITHUB_POLL_SECONDS`).
+
+- `GitHubPoller.poll()` is one cycle of `poll_github`: open PRs of tasks (`pr_open`), then the PRs of tasks of
+  `refused/failed/capped/cancelled` that still have blocked follow-ups. `checkPr` ports `check_pr` (closed or merged PR; review
+  comments of the owner, `OWNER_LOGIN` or `OWNER_GITHUB`, send the task back; `mergeable=false` goes to `onConflict`, with the
+  `CONFLICT_ROUNDS` limit and one handling per head sha; otherwise `autoMerge`). `ciState` ports `ci_state` (check runs, the
+  Actions runs when the token gets a 403, the commit status, a repo with workflows but no run yet is pending, 30 minutes of
+  pending is failed). `mergesItself` ports `helpers.merges_itself` (brief task, parent is a build without me, not `homelab`,
+  `review_ok` 1 or 2). One merge per repo per cycle. All Dutch/English texts are Python's.
+- **Read-only in shadow.** `Effects.GitHubReads` has a `get` and nothing else; the only write is `Effects.GitHubWrites.merge`.
+  `ShadowEffects` answers every read with "nothing" and only records a merge. With the scheduler off `poll()` returns before
+  reading anything; `GitHubPollLoop` does not exist then, and it refuses to start on shadow reads or writes.
+- `FollowupChain` ports `blocked_followups` and `revive_followups` (K3 wires it and ports the rest of the router);
+  `TaskStore.children`, `MemorySteps.remember` (default no-op) are new. `GitHubWrites.merge` now takes the head sha and the
+  commit title.
+- Not done: a real `GitHubReads`/`GitHubWrites` over HTTP with the token (`/etc/homelab`). It comes with the cut-over (H-027),
+  because until then nothing may merge from Java.
+
+| Java test (`GitHubPollerTest`) | Python test it ports |
+|---|---|
+| `aGreenPrIsMerged` | `test_inbox_auto_merge.AutoMerge.test_green_pr_is_merged` |
+| `aTokenWithoutCheckRunsReadsTheActionsRuns` | `AutoMerge.test_token_without_check_runs_reads_the_actions_runs` |
+| `aFailedActionsRunIsNotMerged` | `AutoMerge.test_failed_actions_run_is_not_merged` |
+| `unreadableCiIsReportedOnceAndRetried` | `AutoMerge.test_unreadable_ci_is_reported_once_and_retried` |
+| `aMergedPrRequeuesFollowupsInAChain` | `test_inbox_followups.Followups.test_merged_pr_requeues_followups_in_a_chain` |
+| `anOpenOrClosedPrChangesNothing` | `Followups.test_open_or_closed_pr_changes_nothing` |
+| `aMergeDoesNotRestartAFollowupFromBeforeThisFeature` | `Followups.test_merge_does_not_restart_a_followup_from_before_this_feature` |
+| `withTheSchedulerOffNoMergeCallIsMadeNoGitHubIsAskedAndNothingChanges`, `theShadowEffectsNeverReachGitHub` | the acceptance criterion (no Python test) |
+| the other 21 (draft, no CI with `review_ok` 2, 30-minute wait, workflows without run, commit status, neutral/skipped, unknown mergeability, `merges_itself` cases, one merge per repo, refused merge, closed PR, owner comments, ignored comments, reviews, conflicts: clean, files, same head, round limit, failing sync; the loop watching blocked PRs) | none: written from `github.py` and `helpers.merges_itself` |
+
+Not ported: `test_inbox_followups.test_mark_as_fine_*` and `test_unmarked_task_still_stops_followups` (`accept_task`,
+`settle_routed`: K3); the `merges_itself` patch in `test_runner_review` (the brief review, K4).

@@ -59,6 +59,11 @@ public class TaskStore {
         return query("SELECT * FROM tasks ORDER BY id DESC LIMIT ?", limit);
     }
 
+    /** {@code router.children}: the tasks of a routed message or build, oldest first. */
+    public List<Task> children(long parent) {
+        return query("SELECT * FROM tasks WHERE parent=? ORDER BY id", parent);
+    }
+
     /** Queue a task: the one place a task is created. {@code source} is the client it came from (null = the page). */
     public synchronized long newTask(String repo, String text, String source) {
         String sql = "INSERT INTO tasks (repo, text, status, created, session, source) VALUES (?,?,?,?,?,?)";

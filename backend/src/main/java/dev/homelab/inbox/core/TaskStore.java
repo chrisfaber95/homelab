@@ -59,6 +59,11 @@ public class TaskStore {
         return query("SELECT * FROM tasks ORDER BY id DESC LIMIT ?", limit);
     }
 
+    /** {@code router.children}: the tasks of a routed message or build, oldest first. */
+    public List<Task> children(long parent) {
+        return query("SELECT * FROM tasks WHERE parent=? ORDER BY id", parent);
+    }
+
     /** The tasks in one of these statuses, oldest first ({@code SELECT ... WHERE status IN (...) ORDER BY id}). */
     public List<Task> withStatus(String... statuses) {
         String marks = String.join(",", java.util.Collections.nCopies(statuses.length, "?"));

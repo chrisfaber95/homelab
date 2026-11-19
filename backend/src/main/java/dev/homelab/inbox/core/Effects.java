@@ -48,6 +48,41 @@ public final class Effects {
         }
     }
 
+    /** A GitHub answer that was not 2xx ({@code urllib.error.HTTPError}): the status, the URL and the body. */
+    public static class GitHubHttpException extends RuntimeException {
+        private final int code;
+        private final String url;
+        private final String body;
+
+        public GitHubHttpException(int code, String url, String body) {
+            super("HTTP " + code + " " + url);
+            this.code = code;
+            this.url = url;
+            this.body = body == null ? "" : body;
+        }
+
+        public int code() {
+            return code;
+        }
+
+        public String url() {
+            return url;
+        }
+
+        public String body() {
+            return body;
+        }
+    }
+
+    /**
+     * Reads from GitHub ({@code gh("GET", ...)}): read-only by construction, there is no other method. {@code path} is
+     * the API path with its query ({@code /repos/o/r/pulls/3}). Returns the JSON answer (null or a missing node when
+     * there is none); throws {@link GitHubHttpException} on a non-2xx answer.
+     */
+    public interface GitHubReads {
+        tools.jackson.databind.JsonNode get(String path);
+    }
+
     /** What a job run reads from the outside world (K6): the box overview, web pages, GitHub (read only), a script of
      * a repo and the local model. In shadow mode none of it is called for real. */
     public interface JobIo {
@@ -72,7 +107,11 @@ public final class Effects {
 
     /** Writes to GitHub: the only way the core can merge. */
     public interface GitHubWrites {
-        void merge(String repoSlug, int prNumber);
+        /**
+         * Merge a PR with a merge commit ({@code gh("PUT", .../merge)}). {@code sha} (may be null) is the head the
+         * merge is allowed for. Throws {@link GitHubHttpException} when GitHub refuses.
+         */
+        void merge(String repoSlug, int prNumber, String sha, String commitTitle);
     }
 
     /** The log of a task or run ({@code helpers.log_line}). */
@@ -88,6 +127,12 @@ public final class Effects {
     /** Brings the follow-ups of a task back in the queue after a retry (K3). */
     public interface Followups {
         void revive(Task task);
+
+        /** The follow-ups cancelled because this task did not end well; {@code automatic}: only those a merge may restart. */
+        java.util.List<Task> blocked(Task task, boolean automatic);
+
+        /** {@code revive_followups(t, automatic=True)}: back in the queue after a merge. Returns how many. */
+        int reviveAfterMerge(Task task);
     }
 
     /** The outcome of a command of {@code homelab-inbox-task}: exit code and output. */
@@ -147,6 +192,9 @@ public final class Effects {
         MemorySplit split(String text);
 
         void afterRound(long taskId, java.util.List<String> blocks);
+
+        /** {@code remember_task}: the history of a finished task (K5: after its PR was merged or closed). */
+        default void remember(long taskId) {}
 
         record MemorySplit(String text, java.util.List<String> blocks) {}
     }

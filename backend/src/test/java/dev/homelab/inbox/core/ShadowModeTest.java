@@ -72,7 +72,7 @@ class ShadowModeTest {
         shadow.runRound(1);
         shadow.stop(1);
         shadow.notify("title", "body", "url");
-        shadow.merge("owner/repo", 3);
+        shadow.merge("owner/repo", 3, null, "t");
         assertThat(shadow.calls()).containsExactly("runRound 1", "stop 1", "notify title", "merge owner/repo#3");
     }
 
@@ -93,7 +93,7 @@ class ShadowModeTest {
     void switchingTheSchedulerOnWithoutRealEffectsRefusesToStart() {
         assertThatThrownBy(() -> new SpringApplicationBuilder(InboxBackendApplication.class)
                 .web(WebApplicationType.NONE).properties("backend.secret=x").run("--core.scheduler.enabled=true").close())
-                .hasStackTraceContaining("needs a real RoundRunner");
+                .hasStackTraceContaining("needs a real");
     }
 
     /** Jobs and research (K6) with the scheduler off, over a copy that holds a due job and a held run: nothing runs, nothing

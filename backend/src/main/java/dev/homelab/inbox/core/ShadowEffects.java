@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies, Effects.Notifier,
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
-        Effects.Repos, Effects.Sessions, Effects.JobIo {
+        Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.GitHubReads {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -75,8 +75,15 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     }
 
     @Override
-    public void merge(String repoSlug, int prNumber) {
+    public void merge(String repoSlug, int prNumber, String sha, String commitTitle) {
         record("merge " + repoSlug + "#" + prNumber);
+    }
+
+    /** Shadow: GitHub is not asked at all; the answer is "nothing" (Python's fake GitHub does the same). */
+    @Override
+    public tools.jackson.databind.JsonNode get(String path) {
+        record("github GET " + path);
+        return tools.jackson.databind.node.MissingNode.getInstance();
     }
 
     @Override
@@ -92,6 +99,23 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     @Override
     public void revive(Task task) {
         record("revive " + task.id());
+    }
+
+    @Override
+    public List<Task> blocked(Task task, boolean automatic) {
+        record("blocked " + task.id());
+        return List.of();
+    }
+
+    @Override
+    public int reviveAfterMerge(Task task) {
+        record("reviveAfterMerge " + task.id());
+        return 0;
+    }
+
+    @Override
+    public void remember(long taskId) {
+        record("remember " + taskId);
     }
 
     @Override

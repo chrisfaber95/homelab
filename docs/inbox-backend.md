@@ -678,6 +678,70 @@ Not ported in K1 because they test later slices: the follow-up chain of
 
 Test: `cd backend && ./mvnw verify` (`core/` tests use a throwaway PostgreSQL, like the other database tests).
 
+## Jobs and research in shadow (H-026 K6)
+
+`backend/.../core/` also holds the run side of `jobs.py`. As in K1 **nothing is switched**: Python still runs the job scheduler
+and owns `job_runs`, `job_state` and the `kv` keys of jobs; no route calls this code; the file writes were already Java's
+(H-024 M6, `jobs/`).
+
+- `JobEngine`: `tick()` (a job that was due since its previous run runs once, also after downtime; a new or paused job counts
+  from now), `dispatch`, `runJob`, `startClaude` (the daily cap `JOB_CLAUDE_CAP`, one held run per job, one notice a day),
+  `releaseHeld`, `runLocal` (gather, local model, deliver; cancel and failure paths), `askResearch` (page or chat client, the
+  cap, 400/429), `deliverResult`
+  (page / ntfy / conversation, "NOTHING TO REPORT"), `jobOfTask`, `runView`.
+- `JobText`: the research prompt (Dutch text word for word), limits, report header and check, `isNothing`, `sinceDay`, the
+  prompt of a Claude job, `htmlText`. `SourceReader`: `watchRepo`, `fetchSource`, `feedText`. `JobRuns`: the SQL over
+  `job_runs`, `job_state`, `kv` and the one `tasks` insert of a Claude job. `JobSettings`: the cap and the research limits.
+- `AgentCatalogue`: the `agents/` catalogue (broken files kept apart, `NeedsInput` for empty sources, switching on only makes a
+  ready draft). `JobPages`: the data of the Jobs, job, draft, run and Research pages (same keys and Dutch texts as `overview.py`).
+- `Jobs.Job` (the parsed job file) now keeps `repo`, `script`, `args`, `sources`, `deliver`, `mode` and `instruction`;
+  `Jobs.NeedsInput` is `jobs.NeedsInput`.
+- `Effects.JobIo` is what a run reads from outside (box overview, web page, GitHub GET, a script of a repo, the local model).
+  In shadow it is `ShadowEffects`: it records the call and answers empty. A Claude job only becomes a `queued` row in `tasks`;
+  starting it is the K1 scheduler, which is off.
+
+**Switch:** the same `core.scheduler.enabled`. Off: `tick` and `releaseHeld` return without reading or writing anything.
+`askResearch`, `startClaude` and `dispatch` are not called by anything while no route exists (K8/H-027 will).
+
+Left out of K6: the HTTP side of the job pages and `/api/research` (routes, CSRF, JSON errors: K8), the chat permission for
+`research` (K7), the end of a research task (`RoundFinisher.finishResearch`, K2; `JobResearch` is the K6 side of its `Research` hook), the shell script `bin/homelab-inbox-task`
+(read-only tools of a research run, stays as it is), the real `JobIo` (a later task), the job drafts via Claude (`make_draft`,
+a runner process since H-025 R2).
+
+### Which Python test each Java test covers
+
+Java tests live in `backend/src/test/java/dev/homelab/inbox/core/`. "none" means Python has no test for the rule: the Java test
+is written from the Python code.
+
+| Java test | Python test it ports |
+|---|---|
+| `JobFileTest` default mode, bad mode / local model / mode elsewhere, reserved name, no marker for research | `test_inbox_research.Format` (5 tests) |
+| `JobFileTest` default delivery, values, unknown value, marker needed | `test_inbox_job_delivery.Format` (default, values, unknown, must define nothing) |
+| `JobFileTest` digest needs input, watcher takes only GitHub | `test_inbox_agents.FirstAgents.test_sources_start_empty...`, `test_watcher_takes_only_github_repos` (parser half) |
+| `JobFileTest` script defaults to homelab | none |
+| `JobTextTest` prompt, quick smaller than deep, report problems | `test_inbox_research.Prompt` (3 tests) |
+| `JobTextTest` report header | `test_inbox_research.Finish.test_report_has_mode_and_time...` (header line) |
+| `JobTextTest` first-line marker, statement of nothing | `test_inbox_job_delivery.Delivery.test_marker_only_counts_as_first_line`, `Format.test_page_shows_the_statement` |
+| `JobTextTest` since day, first run and cap | `test_inbox_agents.RepoWatcher` (the two `since_day` tests) |
+| `JobTextTest` job prompt, html text | none |
+| `SourceReaderTest` commits/PRs/releases since, nothing new | `test_inbox_agents.RepoWatcher.test_reports_commits_prs_and_releases_since`, `test_nothing_new_says_so` |
+| `SourceReaderTest` failing read, 24-hour digest, feed, page | none |
+| `JobEngineTest` ask: one run against the cap, above the cap, cap 0, scheduled research waits, bad input, chat source | `test_inbox_research.Ask` (6 tests; the 403 permission is K7) |
+| `JobEngineTest` finish: report with mode and time, nothing extra on the page, Discord gets it, nothing found, no sources flagged, no report fails | `test_inbox_research.Finish` (6 of 8; `capped` is K2, `write_prompt` is `rounds.py`) |
+| `JobEngineTest` delivery: page, ntfy, conversation, nothing to report | `test_inbox_job_delivery.Delivery` (4 tests; scrubbing is `ConversationStoreTest`) |
+| `JobEngineTest` local run: nothing to report, failure notice | `test_inbox_job_delivery.LocalRun` (2 tests) |
+| `JobEngineTest` tick (new, downtime, paused/broken, scheduler off), dispatch, hold and release, gather, run view, job of task, cancelled/ok/too-long local run, failure to start | none |
+| `AgentCatalogueTest` examples load, broken file, switch on only makes a draft, broken/unknown, on | `test_inbox_agents.Catalogue` (5 tests) |
+| `AgentCatalogueTest` the three first agents, sources asked for | `test_inbox_agents.FirstAgents` (3 tests) |
+| `JobPagesTest` shape, sorted jobs, catalogue, on, drafts, runs | `test_inbox_jobs_api` (6 tests; the path/query test is the route) |
+| `JobPagesTest` job detail, broken job, draft detail, run detail, research data, unknown | `test_inbox_job_pages_api` (6 data tests), `test_inbox_research.Page` (2 tests) |
+| `ShadowModeTest` jobs with the scheduler off, application has the engine in shadow | the acceptance criterion (no run, no message, no change) |
+
+Already Java before K6, with their own tests: `test_inbox_jobs_writes`, `test_inbox_m6_parity` (`JobsWriterTest`, M6). Not Java
+(HTTP and shell): the route and page tests of `test_inbox_job_pages_api` (`test_pages_get_the_frontend_index`, `..._a_job_named_research...`,
+`..._without_a_build...`, `..._failed_posts_...`, `..._cancelling_a_draft...`), `test_inbox_research.Permissions` (greps
+`bin/homelab-inbox-task`) and `Finish.test_system_prompt_is_the_read_only_one` (`rounds.write_prompt`).
+
 ## Core in shadow: finish_round, conflict rounds (H-026 K2)
 
 Still **nothing switched**: Python's `queue.finish_round` and `run_round` run the tasks; the Java ones are only called by tests

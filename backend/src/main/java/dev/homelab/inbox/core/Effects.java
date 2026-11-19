@@ -40,7 +40,35 @@ public final class Effects {
 
         /** {@code store=false}: the text is in the conversation already (an answer or a question of the task). */
         void notify(String title, String body, String url, boolean store);
+
+        /** As {@code helpers.notify(..., limit=n)}: the push message is cut at {@code limit} characters (the real
+         * implementation overrides this; the default only cuts the text). */
+        default void notify(String title, String body, String url, int limit) {
+            notify(title, body.length() > limit ? body.substring(0, limit) : body, url);
+        }
     }
+
+    /** What a job run reads from the outside world (K6): the box overview, web pages, GitHub (read only), a script of
+     * a repo and the local model. In shadow mode none of it is called for real. */
+    public interface JobIo {
+        /** Output of {@code homelab-overview}. */
+        String boxOverview() throws java.io.IOException;
+
+        /** The raw text of a web page or feed (at most 2 MB). */
+        String fetchPage(String url) throws java.io.IOException;
+
+        /** A GET on the GitHub API; the parsed JSON (a list or a map). */
+        Object github(String path) throws java.io.IOException;
+
+        /** Runs a script of a repo in a working copy; exit code 65 means it did not run. */
+        ScriptResult runScript(String repo, String script, java.util.List<String> args, long runId)
+                throws java.io.IOException;
+
+        /** The local model summarises {@code text} following the job's instruction. */
+        String summarize(String jobName, String instruction, String text) throws java.io.IOException;
+    }
+
+    public record ScriptResult(int code, String output) {}
 
     /** Writes to GitHub: the only way the core can merge. */
     public interface GitHubWrites {

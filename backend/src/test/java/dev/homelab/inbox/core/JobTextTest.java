@@ -42,17 +42,17 @@ class JobTextTest {
 
     @Test // Prompt.test_report_problems
     void aReportIsCheckedForSourcesAndForWhatWasSearched() {
-        assertThat(JobText.reportProblems("## Antwoord\nx\n## Bronnen\n- y\n## Doorzocht\n- z")).isEmpty();
-        assertThat(JobText.reportProblems("NIETS GEVONDEN\n\n## Doorzocht\n- z")).isEmpty();
-        assertThat(JobText.reportProblems("## Antwoord\nx\n## Doorzocht\n- z")).contains("no sources");
-        assertThat(JobText.reportProblems("NIETS GEVONDEN")).contains("no list of what was searched");
+        assertThat(Reports.problems("## Antwoord\nx\n## Bronnen\n- y\n## Doorzocht\n- z")).isEmpty();
+        assertThat(Reports.problems("NIETS GEVONDEN\n\n## Doorzocht\n- z")).isEmpty();
+        assertThat(Reports.problems("## Antwoord\nx\n## Doorzocht\n- z")).contains("no sources");
+        assertThat(Reports.problems("NIETS GEVONDEN")).contains("no list of what was searched");
     }
 
     @Test // Finish.test_report_has_mode_and_time_and_sources (the header line)
     void theReportHeaderHasTheModeAndTheTimeTaken() {
-        assertThat(JobText.reportHeader("deep", 0)).isEqualTo("Research report | mode: deep | time taken: 0 s");
-        assertThat(JobText.reportHeader("quick", 125)).isEqualTo("Research report | mode: quick | time taken: 2 min 5 s");
-        assertThat(JobText.reportHeader("quick", -4)).endsWith("0 s");
+        assertThat(Reports.header("deep", 0)).isEqualTo("Research report | mode: deep | time taken: 0 s");
+        assertThat(Reports.header("quick", 125)).isEqualTo("Research report | mode: quick | time taken: 2 min 5 s");
+        assertThat(Reports.header("quick", -4)).endsWith("0 s");
     }
 
     @Test // Delivery.test_marker_only_counts_as_first_line

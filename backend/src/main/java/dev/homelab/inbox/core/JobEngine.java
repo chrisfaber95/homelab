@@ -253,37 +253,6 @@ public class JobEngine {
                 (String) r.get("mode"), t.str("text")));
     }
 
-    /** The end of a research run: the report becomes the answer, with its mode and time taken on top, and goes where the
-     * question came from. Never a commit, branch or PR: the working copy is thrown away. */
-    public void finishResearch(Task t, Map<String, Object> run, String kind, String body, String text, String note) {
-        long id = t.id();
-        copies.cleanup(id);
-        String label = TaskActions.label(t);
-        if (!"ANTWOORD".equals(kind)) {
-            String shown = body != null && !body.isEmpty() ? body : text;
-            tasks.update(id, TaskStore.fields("status", "failed", "ended", tasks.now(), "summary", cut(shown, 500), "note",
-                    "the research run gave no report (ANTWOORD:)" + (note != null && !note.isEmpty() ? "; " + note : "")));
-            notifier.notify(label + " mislukt", shown.isEmpty() ? "no report" : cut(shown, 500), pageUrl(id));
-            return;
-        }
-        String since = t.has("started") ? t.str("started") : (String) run.get("created");
-        long seconds = java.time.Duration.between(JobText.parseInstant(since), clock.instant()).toSeconds();
-        String report = JobText.reportHeader((String) run.get("mode"), seconds) + "\n\n" + body;
-        List<String> problems = JobText.reportProblems(body);
-        String finalNote = note;
-        if (!problems.isEmpty()) {
-            List<String> parts = new ArrayList<>();
-            if (note != null && !note.isEmpty()) {
-                parts.add(note);
-            }
-            parts.add("report check: " + String.join(", ", problems));
-            finalNote = String.join("; ", parts);
-        }
-        tasks.update(id, TaskStore.fields("status", "answered", "answer", report, "ended", tasks.now(), "note",
-                finalNote == null || finalNote.isEmpty() ? null : finalNote));
-        deliverResult(jobOfTask(t).orElse(null), t.longOrNull("run_id"), report, pageUrl(id));
-    }
-
     // ---- delivery ----
 
     /** Send a successful result where the job file says, in full, with the link to the run. Nothing for the default

@@ -141,7 +141,10 @@ class JobEngineTest {
     }
 
     private Task finish(Task t, String kind, String body, String text) {
-        engine().finishResearch(t, engine().researchRun(t).orElseThrow(), kind, body, text, null);
+        // the end of a research task is K2's RoundFinisher; JobResearch answers its questions from the job tables
+        JobEngine e = engine();
+        new RoundFinisher(store, fx, fx, fx, fx, fx, new JobResearch(e, () -> jobs), fx, fx, Runnable::run, clock,
+                "http://h:8105").finishResearch(t, new JobResearch(e, () -> jobs).runOf(t).orElseThrow(), kind, body, text, null);
         return store.get(t.id()).orElseThrow();
     }
 

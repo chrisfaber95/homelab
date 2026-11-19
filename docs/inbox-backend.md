@@ -576,8 +576,8 @@ start while the effects are the shadow ones, so until the real effects exist (K2
 error, not a way to run tasks. Limits come from the same `*.conf` keys as Python (`MAX_RUNNING`, `MAX_PER_REPO`, `MAX_TURNS`,
 `MAX_MINUTES`, `CAPPED_KEEP_DAYS`).
 
-Left for later tasks (K2 to K7): `run_round`/`finish_round`, the router and the follow-up chain (`Followups` is only the
-hook), `settle_routed`/`settle_briefs`, `catch_up_main`, the real effects, and the loop calling the K2+ pieces.
+Left for later tasks (K3 to K7): the router and the follow-up chain (`Followups` is only the hook),
+`settle_routed`/`settle_briefs`, the real effects, and the loop calling the K2+ pieces. K2 is below.
 
 ### Which Python test each Java test covers
 
@@ -600,14 +600,14 @@ written from the Python code and says so in its comment ("no Python test").
 | `TaskActionsTest.anAnswerQueuesTheWaitingTaskAgain...` | `test_inbox_chat.Answer.test_answer_continues_the_task_like_the_page` |
 | `TaskActionsTest.anAnswerToATaskThatIsNotWaiting...` | `test_inbox_chat.Answer.test_not_waiting_unknown_and_forbidden` (not-waiting half; 404/403 belong to the route, H-027) |
 | `TaskActionsTest.retryOfARefusedTaskQuotes...` | `test_inbox_followups.test_retry_a_refused_task` (the follow-ups queueing is K3: only the `Followups` hook is checked) |
-| `TaskActionsTest.continueOfACappedTaskKeepsItsWorkingCopy` | `test_inbox_followups.test_capped_round_keeps_its_working_copy_for_continue` (retry half; the capped `finish_round` half is K2) |
+| `TaskActionsTest.continueOfACappedTaskKeepsItsWorkingCopy` | `test_inbox_followups.test_capped_round_keeps_its_working_copy_for_continue` (retry half; the capped `finish_round` half is `RoundFinishTest.aCappedRoundKeepsItsWorkingCopy...`, K2) |
 | `TaskActionsTest.retryClearsTheAcceptedMark...` | `test_inbox_followups.test_retry_clears_the_mark` |
 | `TaskActionsTest.theNoteOfATaskThatNeverRan...` | `test_inbox_followups.test_retry_note_of_a_task_that_never_ran_goes_in_its_text` |
 | `TaskActionsTest.theSweepRemovesOnlyOldCappedWorkingCopies...` | `test_inbox_followups.test_sweep_removes_only_old_capped_working_copies` |
 | `TaskActionsTest` cancel, reaction-to-answer, rebuilt-from-commits, sweep edge cases | none |
 | `ShadowModeTest` | the acceptance criterion (scheduler off on a copy of the data: no change, no effect) |
 
-Not ported in K1 because they test later slices: `test_inbox_catch_up` (`run_round`, K2), the follow-up chain of
+Not ported in K1 because they test later slices: the follow-up chain of
 `test_inbox_followups` (K3), `test_inbox_auto_merge` (K5), `test_inbox_builds` (K4), `test_inbox_followups.test_migration_flags_only_existing_followups`
 (a SQLite `ALTER TABLE`; V1 has `no_auto_revive` with default 0 and the import copies the value).
 
@@ -622,7 +622,7 @@ and owns `job_runs`, `job_state` and the `kv` keys of jobs; no route calls this 
 - `JobEngine`: `tick()` (a job that was due since its previous run runs once, also after downtime; a new or paused job counts
   from now), `dispatch`, `runJob`, `startClaude` (the daily cap `JOB_CLAUDE_CAP`, one held run per job, one notice a day),
   `releaseHeld`, `runLocal` (gather, local model, deliver; cancel and failure paths), `askResearch` (page or chat client, the
-  cap, 400/429), `finishResearch` (report header with mode and time, source check, delivery, never a push or PR), `deliverResult`
+  cap, 400/429), `deliverResult`
   (page / ntfy / conversation, "NOTHING TO REPORT"), `jobOfTask`, `runView`.
 - `JobText`: the research prompt (Dutch text word for word), limits, report header and check, `isNothing`, `sinceDay`, the
   prompt of a Claude job, `htmlText`. `SourceReader`: `watchRepo`, `fetchSource`, `feedText`. `JobRuns`: the SQL over
@@ -639,7 +639,7 @@ and owns `job_runs`, `job_state` and the `kv` keys of jobs; no route calls this 
 `askResearch`, `startClaude` and `dispatch` are not called by anything while no route exists (K8/H-027 will).
 
 Left out of K6: the HTTP side of the job pages and `/api/research` (routes, CSRF, JSON errors: K8), the chat permission for
-`research` (K7), the capped branch of a research task in `finish_round` (K2), the shell script `bin/homelab-inbox-task`
+`research` (K7), the end of a research task (`RoundFinisher.finishResearch`, K2; `JobResearch` is the K6 side of its `Research` hook), the shell script `bin/homelab-inbox-task`
 (read-only tools of a research run, stays as it is), the real `JobIo` (a later task), the job drafts via Claude (`make_draft`,
 a runner process since H-025 R2).
 
@@ -676,3 +676,46 @@ Already Java before K6, with their own tests: `test_inbox_jobs_writes`, `test_in
 (HTTP and shell): the route and page tests of `test_inbox_job_pages_api` (`test_pages_get_the_frontend_index`, `..._a_job_named_research...`,
 `..._without_a_build...`, `..._failed_posts_...`, `..._cancelling_a_draft...`), `test_inbox_research.Permissions` (greps
 `bin/homelab-inbox-task`) and `Finish.test_system_prompt_is_the_read_only_one` (`rounds.write_prompt`).
+
+## Core in shadow: finish_round, conflict rounds (H-026 K2)
+
+Still **nothing switched**: Python's `queue.finish_round` and `run_round` run the tasks; the Java ones are only called by tests
+and (once the scheduler is on, which needs real effects) by K7/H-027.
+
+- `RoundFinisher.finish` ports `finish_round` and `finish_research`: cancelled round, research report (mode and time on
+  top, `report check:` note), answer, question, refusal, capped (research: nothing pushed; others: the working copy stays
+  and the pushed branch is named), no commits = failed, PR opened or updated, brief tasks reviewed instead of notified,
+  skill proposal split off and kept only for a `KLAAR`/`ANTWOORD` that was not capped. A failing push or PR fails the task
+  with `afronden mislukt: ...`. Dutch notes and notification titles are exactly Python's.
+- `CatchUp.catchUp` ports `catch_up_main`: a task with a PR is left to GitHub polling (K5); otherwise main is merged into the
+  branch and the prompt says so, names the conflicted files, or hands over the `git fetch` command when the merge failed.
+- `RoundFlow.run` ports `run_round` (prepare, catch-up, prompt, `rounds+1`, Claude run, memory split, `finish`). The router and
+  planner (K3, K4) are behind `Sessions.route`/`plan`. One difference: a continued round without `pending_input` and without a
+  catch-up note gets an empty prompt in the log line; Python crashes there on `first_line(None)` and fails the task.
+- New effect interfaces in `Effects`: `TaskCommands` (prepare, behind, sync), `Pushes`, `PullRequests`, `Research`,
+  `AfterEffects` (PR review and skill proposal, run on the background executor), `MemorySteps`, `Repos`, `Sessions`;
+  `Notifier` got the `store` flag of `helpers.notify`. `ShadowEffects` implements all of them: it pushes nothing, opens no PR,
+  merges nothing and notifies nobody, and only records the call. `CoreConfig` wires `CatchUp`, `RoundFinisher` and `RoundFlow`
+  on those shadow effects.
+
+| Java test (`RoundFinishTest`) | Python test it ports |
+|---|---|
+| `aQuestionIsKeptInFullInTheConversationAndNotNotifiedTwice` | `test_inbox_events.test_questions_of_a_task_are_stored_in_full` |
+| `aCappedRoundKeepsItsWorkingCopyAndContinueCarriesOn` | `test_inbox_followups.test_capped_round_keeps_its_working_copy_for_continue` |
+| `aResearchReportGetsModeAndTimeAndNothingIsPushed`, `theReportIsHandedToDeliveryOnceAndWithTheTaskLink` | `test_inbox_research.Finish.test_report_has_mode_and_time_and_sources_and_stays_on_the_page`, `test_page_question_delivers_nothing_extra`, `test_discord_question_gets_its_report_in_the_conversation` (the delivery itself is `jobs.deliver_result`, K6) |
+| `nothingFoundIsAValidReportWithoutANote` | `test_inbox_research.Finish.test_nothing_found_is_delivered_as_the_report` |
+| `aReportWithoutSourcesIsFlaggedInTheNote` | `test_inbox_research.Finish.test_report_without_sources_is_flagged` |
+| `aResearchRunWithoutAReportFailsAndOpensNoPr` | `test_inbox_research.Finish.test_no_report_is_a_failure_not_a_pr` |
+| `aResearchRunAtItsLimitPushesNothing` | `test_inbox_research.Finish.test_a_run_that_hits_its_limit_pushes_nothing` |
+| `aPrIsLeftToTheGithubPoller` | `test_inbox_catch_up.CatchUpMain.test_a_pr_is_left_to_the_github_poller` |
+| `aBranchThatAlreadyHasMainIsNotTouched` | `CatchUpMain.test_a_branch_that_already_has_main_is_not_touched` |
+| `noWorkingCopyIsNotTouched` | `CatchUpMain.test_no_working_copy_is_not_touched` |
+| `aCleanMergeIsToldToTheTask` | `CatchUpMain.test_a_clean_merge_is_told_to_the_task` |
+| `conflictsNameTheFiles` | `CatchUpMain.test_conflicts_name_the_files` |
+| `aFailedMergeHandsOverTheCommand` | `CatchUpMain.test_a_failed_merge_hands_over_the_command` |
+| `aRetriedRoundMergesMainAndKeepsTheUsersNote` | `test_inbox_catch_up.RoundGetsMain.test_retried_round_merges_main_and_keeps_the_users_note` |
+| `theFirstRoundDoesNotSync` | `RoundGetsMain.test_first_round_does_not_sync` |
+| the other cases (answer, job answer, refusal, cancelled, no commits, PR opened, PR updated, brief review, brief hidden in PR body, failing push, skill proposal, denials note, round bookkeeping, failed prepare, unknown repo, router/planner, shadow no-effect) | none: written from `queue.finish_round` / `run_round` |
+
+Not ported because they test the git side, not Java: `test_inbox_catch_up.BehindSubcommand` (the `behind` and `sync` commands of
+`bin/homelab-inbox-task` against real git; unchanged and still run by Python), and `test_runner_contract`.

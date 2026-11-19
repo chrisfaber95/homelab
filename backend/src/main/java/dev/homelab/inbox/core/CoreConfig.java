@@ -2,7 +2,15 @@ package dev.homelab.inbox.core;
 
 import dev.homelab.inbox.conversation.ConversationDb;
 import dev.homelab.inbox.core.Effects.ConversationNotes;
-import dev.homelab.inbox.core.Effects.ConversationNotes;
+import dev.homelab.inbox.core.Effects.AfterEffects;
+import dev.homelab.inbox.core.Effects.MemorySteps;
+import dev.homelab.inbox.core.Effects.Notifier;
+import dev.homelab.inbox.core.Effects.PullRequests;
+import dev.homelab.inbox.core.Effects.Pushes;
+import dev.homelab.inbox.core.Effects.Repos;
+import dev.homelab.inbox.core.Effects.Research;
+import dev.homelab.inbox.core.Effects.Sessions;
+import dev.homelab.inbox.core.Effects.TaskCommands;
 import dev.homelab.inbox.core.Effects.Followups;
 import dev.homelab.inbox.core.Effects.JobIo;
 import dev.homelab.inbox.core.Effects.Notifier;
@@ -113,5 +121,31 @@ class CoreConfig {
     @Bean
     JobPages jobPages(JobEngine engine, JobRuns runs, JobSettings settings, Jobs jobs, AgentCatalogue catalogue, Clock clock) {
         return new JobPages(engine, runs, settings, jobs::load, catalogue, jobs, clock);
+    }
+
+    @Bean
+    CatchUp catchUp(TaskCommands commands, TaskLog log) {
+        return new CatchUp(commands, log);
+    }
+
+    @Bean
+    RoundFinisher roundFinisher(TaskStore store, WorkingCopies copies, Notifier notifier, ConversationNotes notes,
+                                Pushes pushes, PullRequests pullRequests, Research research, AfterEffects after,
+                                Repos repos, java.util.concurrent.ExecutorService coreExecutor, Clock clock,
+                                Settings conf) {
+        return new RoundFinisher(store, copies, notifier, notes, pushes, pullRequests, research, after, repos,
+                coreExecutor, clock, pageBase(conf));
+    }
+
+    @Bean
+    RoundFlow roundFlow(TaskStore store, Repos repos, MemorySteps memory, TaskCommands commands, WorkingCopies copies,
+                        Sessions sessions, CatchUp catchUp, RoundFinisher finisher, TaskLog log, Notifier notifier,
+                        Settings conf) {
+        return new RoundFlow(store, repos, memory, commands, copies, sessions, catchUp, finisher, log, notifier,
+                pageBase(conf));
+    }
+
+    private static String pageBase(Settings conf) {
+        return "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
     }
 }

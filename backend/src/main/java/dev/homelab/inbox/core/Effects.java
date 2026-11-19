@@ -145,4 +145,67 @@ public final class Effects {
         /** The text of Claude (memory blocks not yet split off), permission denials and the limit hit, or null. */
         record Outcome(String result, int permissionDenials, String capped) {}
     }
+
+    /** One file a {@code briefs} folder of the product repo's main, as read from the clone. */
+    public record ProductFile(String path, String text) {}
+
+    /** The product repo (briefs, roadmap): {@code briefs.refresh_cache("product")} and the commits to it (K4). */
+    public interface ProductRepo {
+        /** Update the clone and return the brief files of main (the {@code briefs} folders), sorted by path. */
+        java.util.List<ProductFile> briefFiles();
+
+        /** The text of a file on main, or null when it does not exist (the roadmap). */
+        String read(String path);
+
+        /** Commit one changed file straight to main of the product repo (approving or parking a draft). */
+        void commitToMain(String path, String text, String message);
+
+        /** Commit changed files on a branch cut from main and force-push it (the handoff branch); main is restored. */
+        void pushBranch(String branch, java.util.Map<String, String> files, String message);
+    }
+
+    /** A setup PR of the designer ({@code setup/<brief>}) as the GitHub API shows it. */
+    public record SetupPr(int number, String headRepo, java.util.List<String> files) {}
+
+    /** The GitHub calls of the briefs that {@link GitHubWrites} and {@link PullRequests} do not cover. */
+    public interface BriefGitHub {
+        java.util.List<SetupPr> setupPrs(String slug, String briefId);
+
+        void mergeSetupPr(String slug, int number, String title);
+
+        /** Comment on a PR (the brief review). */
+        void comment(String slug, int prNumber, String body);
+
+        /** Merge the handoff PR; throws {@link IllegalStateException} when GitHub refuses. */
+        void mergeHandoff(String slug, int number, String title);
+    }
+
+    /** The outcome of one Claude call without tools (planner, reviewer): ok, the text, or why not. */
+    public record ClaudeAnswer(boolean ok, String text, String detail) {}
+
+    /** The Claude calls of the briefs: the files in {@code share/} are written by the implementation, not by the core. */
+    public interface BriefClaude {
+        /** The planner ({@code task_cmd plan}) with its system prompt and prompt. */
+        ClaudeAnswer plan(long taskId, String system, String prompt);
+
+        /** The reviewer ({@code runner/review.py}). */
+        ClaudeAnswer review(long taskId, String system, String prompt);
+    }
+
+    /** The short descriptions of repos for the planner ({@code router.repo_profiles(repos, ci=True)}). */
+    public interface RepoProfiles {
+        String profiles(java.util.Map<String, String> repos, boolean ci);
+    }
+
+    /** The inbox's own list of repos of new projects ({@code new-repos.json}). */
+    public interface NewRepos {
+        void add(String name, String slug);
+    }
+
+    /** The diff of a task's pushed branch against main in the service's copy of the repo. */
+    public interface Diffs {
+        java.util.List<String> changedFiles(String cache, long taskId);
+
+        String diff(String cache, long taskId, java.util.List<String> paths);
+    }
 }

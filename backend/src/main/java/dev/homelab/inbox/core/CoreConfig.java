@@ -109,6 +109,26 @@ class CoreConfig {
                 pageBase(conf));
     }
 
+    @Bean
+    Briefs briefs(TaskStore store, Effects.ProductRepo product, Effects.BriefGitHub github, Repos repos,
+                  Effects.NewRepos newRepos, TaskLog log, Clock clock, Settings conf) {
+        Briefs.Settings s = new Briefs.Settings(conf.conf("PRODUCT_REPO", "chrisfaber95/product"),
+                conf.conf("OWNER_GITHUB", "chrisfaber95"), conf.confInt("PLAN_MAX_TASKS", 6),
+                conf.confInt("MAX_TURNS", 80), conf.confInt("MAX_MINUTES", 30), conf.confInt("REVIEW_MAX_DIFF", 60000),
+                conf.confInt("REVIEW_REWORK_ROUNDS", 1));
+        return new Briefs(store, product, github, repos, newRepos, log, s, clock);
+    }
+
+    /** Planner, reviewer and handoff of the briefs: not called by anything while the scheduler is off. */
+    @Bean
+    BriefRounds briefRounds(TaskStore store, Briefs briefs, Repos repos, Effects.RepoProfiles profiles,
+                            Effects.BriefClaude claude, Effects.Diffs diffs, Effects.BriefGitHub github,
+                            PullRequests pullRequests, Notifier notifier, ConversationNotes notes, TaskLog log,
+                            Cancellations cancellations, Settings conf) {
+        return new BriefRounds(store, briefs, repos, profiles, claude, diffs, github, pullRequests, notifier, notes, log,
+                cancellations, pageBase(conf));
+    }
+
     private static String pageBase(Settings conf) {
         return "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
     }

@@ -19,6 +19,7 @@ import dev.homelab.inbox.read.Jobs;
 import dev.homelab.inbox.read.Settings;
 import java.time.Clock;
 import java.util.concurrent.ExecutorService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -92,9 +93,15 @@ class DoorConfig {
         return new ChatDoor(chat, conversation, clients, door, json);
     }
 
-    /** The gate object only: it listens when {@code listen} is called, which nothing here does. */
+    /** The gate object: it listens only when {@link KittGateStarter} calls {@code listen}, i.e. with kitt.gate.enabled. */
     @Bean
-    KittGate kittGate(OwnerCheck owner, DoorSettings door) {
-        return new KittGate(owner, door.kittUpstream(), false);
+    KittGate kittGate(OwnerCheck owner, DoorSettings door, @Value("${kitt.gate.enabled:false}") boolean enabled) {
+        return new KittGate(owner, door.kittUpstream(), enabled);
+    }
+
+    @Bean
+    KittGateStarter kittGateStarter(KittGate gate, DoorSettings door,
+                                    @Value("${kitt.gate.enabled:false}") boolean enabled) {
+        return new KittGateStarter(gate, door.gateHost(), door.gatePort(), enabled, 30_000);
     }
 }

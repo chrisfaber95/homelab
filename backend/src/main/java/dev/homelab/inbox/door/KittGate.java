@@ -31,10 +31,11 @@ import org.slf4j.LoggerFactory;
  * loopback only. The gate puts the owner's identity on the forwarded request ({@code Tailscale-User-Login}) and removes
  * any such header the caller sent, so the adapter, and the inbox behind it, can trust it. Nothing here is stored.
  *
- * <p>Exposure: this class opens no socket until {@link #listen} is called, and nothing in the application calls it.
- * {@link #listen} refuses an empty or wildcard host like {@code gate.run()}, and, while {@code exposed} is false (the
- * shadow default), every host that is not loopback, so a shadow gate can never take the place of the Python gate on
- * the Tailscale address (port 8121). H-027 builds the exposed gate when the cut-over happens.
+ * <p>Exposure: this class opens no socket until {@link #listen} is called; {@link KittGateStarter} calls it only with
+ * {@code kitt.gate.enabled=true} (env {@code KITT_GATE_ENABLED}, off by default). {@link #listen} refuses an empty or
+ * wildcard host like {@code gate.run()}, and, while {@code exposed} is false (the default), every host that is not
+ * loopback, so a shadow gate can never take the place of the Python gate on the Tailscale address (port 8121). An
+ * exposed gate listens on loopback or on one address in the tailnet range ({@code 100.64.0.0/10}) only: never the LAN.
  */
 public class KittGate {
 
@@ -80,6 +81,10 @@ public class KittGate {
             LOG.warn("kitt gate: shadow gate refuses to listen on {}: only loopback until the cut-over (H-027)", host);
             return Optional.empty();
         }
+        if (exposed && !address.isLoopbackAddress() && !tailnet(address)) {
+            LOG.warn("kitt gate: {} is not in the tailnet range 100.64.0.0/10; the gate stays off", host);
+            return Optional.empty();
+        }
         if (server != null) {
             throw new IllegalStateException("the gate is already listening");
         }
@@ -90,6 +95,11 @@ public class KittGate {
         server = s;
         LOG.info("kitt gate on {}:{}, forwarding to {}", host, s.getAddress().getPort(), upstream);
         return Optional.of(s.getAddress().getPort());
+    }
+
+    private static boolean tailnet(InetAddress a) {
+        byte[] b = a.getAddress();
+        return b.length == 4 && (b[0] & 0xff) == 100 && (b[1] & 0xc0) == 0x40;
     }
 
     public synchronized void stop() {

@@ -889,7 +889,7 @@ the Python gate still listens on 8121.
 | `ChatDoor` | `server.py chat_door/chat_action` | `POST /api/chat/action`: loopback only, bearer token from `chat-<name>-token`, switches, forbidden actions. `entries` and `state` stay the conversation controller's. Over HTTP since H-028 W4a: `ChatDoorController` (`POST` and `GET /api/chat/action`); `FrontDoorFilter` and `FacadeSecretFilter` (front door on) let this one path through, because its checks are the door's own (peer address must be loopback, bearer token per client) and not the owner and CSRF checks. Tests: `ChatDoorHttpTest` |
 | `KittDoor` | `kitt.py`, `server.py kitt_door` | the peer check (`identify`: client header, socket owner = kitt's account, owner login from the gate) and all kitt routes. Over HTTP since H-028 W4b (front door on): `KittDoorFilter`, a servlet filter before `FrontDoorFilter`, answers every GET and POST that has an `X-Homelab-Client` header (a filter and not a controller, because `/api/jobs*` and `/api/log*` are also page routes); a call without the header goes on to the normal checks. Tests: `KittDoorHttpTest` (real `ProcPeers` on the kernel's table, another account, wrong owner, non-loopback addresses refused) |
 | `ProcPeers` | `peer_uid`, `account_uid` | owner of the loopback socket from `/proc/net/tcp(6)`, account from passwd; a non-loopback address has no peer uid, so the kitt door refuses it (403) |
-| `KittGate` | `gate.py` | owner check, identity headers set, forged ones dropped, 502 when kitt is down. `listen` refuses a wildcard host, and in shadow every non-loopback host |
+| `KittGate` | `gate.py` | owner check, identity headers set, forged ones dropped, 502 when kitt is down. `listen` refuses a wildcard host, and unless exposed (W5c) every non-loopback host; exposed, only loopback or `100.64.0.0/10` |
 | `TailscaleOwner` | `access.py Access` | `tailscale status/whois`, cached 5 min; no allow-all switch |
 | `ShadowPorts` | | briefs (K4), jobs and research (K6) and search are ports; the shadow versions start nothing |
 | `DoorHttp` | | loopback listener for tests only; not a bean |
@@ -1044,7 +1044,7 @@ and puts `frontend/dist` in the jar under `ui/dist/`; `web/` goes in under `ui/w
 jar (unpacked once to a temp directory; the unit has `PrivateTmp`).
 
 **Host and port** come from `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`), as before.
-The second tailnet connector is described below (W5b); the kitt gate is a later slice.
+The second tailnet connector is described below (W5b); the kitt gate is described under "Kitt gate connector (W5c)".
 
 **What a later slice needs on the box** (not done here: this change installs nothing):
 - build the jar with `-Pui` (`scripts/27-backend.sh` runs no npm today; add the npm step with the same throwaway-user
@@ -1071,3 +1071,13 @@ with `;params`, doubled or trailing slashes) and for any request with `X-Homelab
 doors also check the peer address themselves. Pick the port inside `8100:8199` (the ufw rule for `tailscale0`) and order
 the unit `After=tailscaled.service`. Tests: `PublicConnectorTest` (setting present, `lo` stands in for `tailscale0`) and
 `PublicConnectorOffTest` (setting absent: one connector, no guard).
+
+## Kitt gate connector (H-028 W5c)
+
+`KittGate` is a real connector now: `KittGateStarter` (a `SmartLifecycle`) calls `listen(KITT_GATE_HOST, KITT_GATE_PORT)` at
+start and forwards to `KITT_UPSTREAM`, with the same owner check, identity headers and 502 as `gate.py`. It is **off by
+default**: it starts only with `kitt.gate.enabled=true` (env `KITT_GATE_ENABLED`). Like `gate.run()` it retries every 30 s when
+the bind fails (tailscaled may come up later); an empty or wildcard host keeps it off. Unlike `gate.py` an exposed gate also
+refuses a host outside `100.64.0.0/10` (and non-loopback), so a wrong setting cannot put it on the LAN. The Python gate keeps
+8121 until the cut-over (X1b): do not enable both. Tests: `KittGateTest` (forwarding, refused devices, exposure rules, starter off
+by default) and `ShadowDoorTest`.

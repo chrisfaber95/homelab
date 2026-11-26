@@ -179,4 +179,42 @@ class KittGateTest {
     void listeningTwiceIsAnError() throws IOException {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> gate.listen("127.0.0.1", 0));
     }
+
+    @Test
+    void anExposedGateRefusesTheLanAndAnAddressOutsideTheTailnetRange() throws Exception {
+        KittGate exposed = new KittGate(owner, "http://127.0.0.1:1", true);
+        assertThat(exposed.listen("192.168.1.10", 0)).isEmpty();
+        assertThat(exposed.listen("100.128.0.1", 0)).isEmpty(); // just outside 100.64.0.0/10
+        assertThat(exposed.isListening()).isFalse();
+        assertThat(exposed.listen("127.0.0.1", 0)).isPresent(); // loopback is for tests
+        exposed.stop();
+    }
+
+    @Test
+    void theStarterIsOffByDefaultAndListensOnlyWhenEnabled() throws Exception {
+        KittGate g = new KittGate(owner, "http://127.0.0.1:1", true);
+        KittGateStarter off = new KittGateStarter(g, "127.0.0.1", 0, false, 50);
+        off.start();
+        Thread.sleep(150);
+        assertThat(g.isListening()).isFalse();
+        assertThat(off.isRunning()).isFalse();
+        KittGateStarter on = new KittGateStarter(g, "127.0.0.1", 0, true, 50);
+        on.start();
+        for (int i = 0; i < 50 && !g.isListening(); i++) {
+            Thread.sleep(50);
+        }
+        assertThat(g.isListening()).isTrue();
+        on.stop();
+        assertThat(g.isListening()).isFalse();
+    }
+
+    @Test
+    void theStarterKeepsTheGateOffForAWildcardHost() throws Exception {
+        KittGate g = new KittGate(owner, "http://127.0.0.1:1", true);
+        KittGateStarter on = new KittGateStarter(g, "0.0.0.0", 0, true, 50);
+        on.start();
+        Thread.sleep(150);
+        assertThat(g.isListening()).isFalse();
+        on.stop();
+    }
 }

@@ -11,7 +11,7 @@ import java.util.function.Function;
 /**
  * The data of the Briefs page ({@code overview.briefs_data}, {@code brief_data}, {@code brief_view}, {@code build_view};
  * H-026 K4), as the maps the JSON API shows. Pure: it reads the briefs and builds through {@link Briefs} and
- * {@link TaskStore}. No route uses it yet (the route stays in Python until H-027).
+ * {@link TaskStore}. {@link BriefController} serves it.
  */
 public class BriefPages {
 

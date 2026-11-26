@@ -256,6 +256,12 @@ class CoreConfig {
         }, settings, conf.tz().toString());
     }
 
+    /** The data of the Briefs pages (H-028 W2c). */
+    @Bean
+    BriefPages briefPages(Briefs briefs, TaskStore store, Settings conf) {
+        return new BriefPages(briefs, store, conf.tz().toString(), TaskActions.STATUS_NL::get);
+    }
+
     private static String pageBase(Settings conf) {
         return "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
     }

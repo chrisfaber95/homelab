@@ -101,6 +101,18 @@ Kinds of rows:
 | unknown task or action | `anUnknownTaskOrActionIsThe404Page` |
 | Origin and token on every mutating route | `everyMutatingTaskRouteRefusesARequestWithoutAToken` (403, also with a wrong token), `everyMutatingTaskRouteRefusesTheWrongOrNoOrigin`, `theApiReadsNeedNoTokenButOtherMethodsDo`; `FrontDoorTest.aPageFormStillUsesItsCsrfField` |
 
+### Brief routes (H-028 W2c): every route of `server.py` for briefs, in `BriefControllerTest` (real HTTP behind the front door)
+
+| Python route | Java test (`BriefControllerTest`) |
+|---|---|
+| `GET /api/briefs` | `theListGroupsBriefsByStatus`, `anUnreadableProductRepoIsA200WithAnError` |
+| `GET /api/briefs/{id}` | `oneBriefComesWithItsBody`, `anUnknownBriefIsAJson404` |
+| `GET /briefs`, `GET /briefs/{id}` | `thePagesAre503WithoutABuildAndTheIndexWithOne`, `anUnknownBriefOrAQueryStringWithoutABuildIsTheNotFoundPage` |
+| `POST /briefs/{id}/park` | `parkingADraftCommitsItAndGoesBackToTheList`, `parkingSomethingThatIsNotADraftIsA400` |
+| `POST /briefs/{id}/build` | `buildingAnApprovedBriefQueuesABuildAndGoesToItsPage`, `buildingADraftApprovesItFirstAndWithoutMeSetsUnattended`, `aBriefThatIsAlreadyBeingBuiltOrNotApprovedIsA400`, `aBuildWithAnUnreachableProductRepoIsA400` |
+| unknown action, query string or id | `anUnknownActionOrAQueryStringIsTheNotFoundPage` |
+| Origin and token on every mutating route | `everyMutatingBriefRouteRefusesARequestWithoutAToken` (403, also with a wrong token), `everyMutatingBriefRouteRefusesTheWrongOrNoOrigin`, `theApiReadsNeedNoTokenButOtherMethodsDo` |
+
 ### test_inbox_research (27), test_inbox_job_delivery (12), test_inbox_agents (14), test_inbox_job_pages_api (11), test_inbox_jobs_api (7)
 
 Mapped case by case in `docs/inbox-backend.md` ("Core in shadow: jobs and research (H-026 K6)"): `JobFileTest`,

@@ -979,3 +979,13 @@ build is missing. The controller does no check itself: Origin and the CSRF token
 (`frontdoor/FrontDoorFilter`, `inbox.front-door.enabled=true`) or, while Python faces the tailnet, its facade's. Through the
 effects, so with `core.effects=shadow` a cancel, answer or retry changes the row but starts and stops nothing. Nothing forwards
 to these routes yet (`BACKEND_ROUTES` stays empty); tests: `TaskControllerTest`, mapped in `docs/inbox-test-coverage.md`.
+
+## Brief routes in Java (H-028 W2c)
+
+`core/BriefController` serves what `server.py` serves for briefs: `GET /api/briefs`, `GET /api/briefs/{id}`, `GET /briefs`,
+`GET /briefs/{id}` and `POST /briefs/(id)/(build|park)`, with the same status codes, JSON and Dutch texts (`BriefPages` for the
+data, `Briefs` for the product repo and the builds). A page route answers the `frontend/dist` index, the 503 page while the
+build is missing, and the 404 page for an unknown brief or, without a build, a query string. A failed build or park (not a draft,
+not approved, already being built, product repo unreadable) is a 400 `{"error": ...}`. Origin and the CSRF token are the front
+door's, as for the task routes. Through the effects, so with `core.effects=shadow` a park or a build commits nothing to the
+product repo. Nothing forwards to these routes yet; tests: `BriefControllerTest`, mapped in `docs/inbox-test-coverage.md`.

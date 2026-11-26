@@ -236,4 +236,26 @@ public final class Effects {
 
         String diff(String cache, long taskId, java.util.List<String> paths);
     }
+
+    /** The outcome of the router's Claude run ({@code router.run_route}): the text, whether it failed, and stderr. */
+    public record RouteAnswer(String text, boolean error, String stderr) {}
+
+    /** The Claude call of the router ({@code runner/route.py}); the files in {@code share/r<id>} are written and removed
+     * by the implementation, not by the core. */
+    public interface RouteClaude {
+        RouteAnswer route(long taskId, String system, String prompt);
+    }
+
+    /** The history of a finished task ({@code memory.remember_task}); a failure is the caller's to log. */
+    public interface TaskHistory {
+        void remember(long taskId);
+    }
+
+    /** A PR as GitHub shows it (read only): {@code state} is open or closed. */
+    public record PrState(String state, boolean merged) {}
+
+    /** {@code gh GET /repos/<slug>/pulls/<n>} for the follow-up check; empty when GitHub gave nothing usable. */
+    public interface PrLookup {
+        java.util.Optional<PrState> get(String repoSlug, int number);
+    }
 }

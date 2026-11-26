@@ -83,11 +83,25 @@ class CoreConfig {
 
     @Bean
     TaskActions taskActions(TaskStore store, CoreSettings settings, Cancellations cancellations, RoundRunner runner,
-                            WorkingCopies copies, TaskLog log, ConversationNotes notes, Followups followups,
+                            WorkingCopies copies, TaskLog log, ConversationNotes notes, FollowupChain followups,
                             java.util.concurrent.ExecutorService coreExecutor, Clock clock, Settings conf) {
         String base = "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
         return new TaskActions(store, settings, cancellations, runner, copies, log, notes, followups, coreExecutor,
                 clock, base);
+    }
+
+    /** The follow-up chain and the router (K3): nothing calls them while the scheduler is off. */
+    @Bean
+    FollowupChain followupChain(TaskStore store, CoreSettings settings, WorkingCopies copies, TaskLog log,
+                                Notifier notifier, Effects.TaskHistory history, Settings conf) {
+        return new FollowupChain(store, settings, copies, log, notifier, history, pageBase(conf));
+    }
+
+    @Bean
+    Router router(TaskStore store, Repos repos, Effects.RepoProfiles profiles, Effects.RouteClaude claude,
+                  Notifier notifier, ConversationNotes notes, TaskLog log, Cancellations cancellations, Settings conf) {
+        return new Router(store, repos, profiles, claude, notifier, notes, log, cancellations,
+                conf.confInt("ROUTE_MAX_CHILDREN", 3), pageBase(conf));
     }
 
     @Bean

@@ -61,6 +61,7 @@ class ShadowModeTest {
         new Recovery(store, off, fakes, fakes).recover();
         new TaskActions(store, off, new Cancellations(), fakes, fakes, fakes, fakes, fakes, Runnable::run,
                 new CoreFixture.MutableClock("2026-11-18T10:00:00Z"), "http://h").sweepCapped();
+        new FollowupChain(store, off, fakes, fakes, fakes, fakes, "http://h").settleRouted(); // K3
         assertThat(snapshot()).isEqualTo(before);
         assertThat(fakes.calls()).isEmpty();
     }

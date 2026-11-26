@@ -641,7 +641,7 @@ start while the effects are the shadow ones, so until the real effects exist (K2
 error, not a way to run tasks. Limits come from the same `*.conf` keys as Python (`MAX_RUNNING`, `MAX_PER_REPO`, `MAX_TURNS`,
 `MAX_MINUTES`, `CAPPED_KEEP_DAYS`).
 
-Left for later tasks (K3 to K7): the router and the follow-up chain (`Followups` is only the hook),
+Left for later tasks (K4 to K7): (the router and follow-up chain are K3, below; `Followups` is the hook they implement),
 `settle_routed`/`settle_briefs`, the real effects, and the loop calling the K2+ pieces. K2 is below.
 
 ### Which Python test each Java test covers
@@ -865,3 +865,37 @@ header is the upstream's. Tests: `backend/src/test/java/dev/homelab/inbox/door/`
 what Python allows (`TailscaleOwnerTest`), and `ShadowDoorTest` (no round, merge or notification; no gate listener).
 Real briefs, jobs and search ports arrive with K4 and K6; a bean that replaces `ShadowPorts` must provide all three.
 `TailscaleOwner` overlaps the K8 `frontdoor` access check; unify them at the cut-over (H-027).
+
+## Core in shadow: router and follow-ups (H-026 K3)
+
+Still **nothing switched**: Python's `router.py` runs the router and the chain; nothing calls the Java ones (`RoundFlow` still
+goes through `Sessions.route`, whose real implementation, a `Router.routeTask` call, comes with H-027).
+
+- `Router` ports `ROUTE_SYSTEM`, `parse_route` and `route_task`: the message to `auto` goes to Claude without tools, the answer
+  is a question (also when there are more tasks than `ROUTE_MAX_CHILDREN`) or the child tasks (queued, with their
+  predecessor via `after`, the `Onderdeel van bericht #N` suffix and a fresh session). Dutch messages are Python's. The Claude run
+  is the new effect `RouteClaude` (`runner/route.py`, `router.run_route`), the repo list `Repos`, the descriptions `RepoProfiles`.
+  The children are inserted one by one, Python does it in one transaction.
+- `FollowupChain` ports `pre_fine`, `blocked_by`, `blocked_followups`, `revive_followups`, `accept_task` and `settle_routed`, and
+  implements the `Followups` hook that `TaskActions.retry` calls (wired in `CoreConfig`). `settleRouted` is the scheduler's pass:
+  off with the scheduler. It needs the new effect `TaskHistory` (`memory.remember_task`).
+- `ShadowEffects` implements `RouteClaude` (reports a failure, so a routed task fails and creates no child) and `TaskHistory`;
+  nothing starts a task, merges or notifies.
+
+| Java test | Python test it ports |
+|---|---|
+| `FollowupChainTest.anAutomaticReviveQueuesTheFollowupsInAChain...` | `test_inbox_followups.test_merged_pr_requeues_followups_in_a_chain` (the revive; the `check_blocking_pr` half is K5) |
+| `FollowupChainTest.aFollowupFromBeforeTheFeatureIsNotRestartedAutomatically` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (the `blocked_followups(t, True)` half; K5 for the poller) |
+| `FollowupChainTest.markAsFineQueuesTheFollowups...` | `test_mark_as_fine_requeues_followups_and_not_the_task` |
+| `FollowupChainTest.markAsFineNeedsABlockedFollowup` | `test_mark_as_fine_needs_a_blocked_followup` |
+| `FollowupChainTest.anUnmarkedTaskStillStopsItsFollowups` | `test_unmarked_task_still_stops_followups` |
+| `FollowupChainTest.aRetryClearsTheMark` | `test_retry_clears_the_mark` |
+| `FollowupChainTest.retryingTheTaskQueuesItsFollowupsAgain` | `test_retry_a_refused_task` (the follow-ups half; the rest is `TaskActionsTest`, K1) |
+| `FollowupChainTest.theColumnNoAutoReviveDefaultsToZero` | `test_migration_flags_only_existing_followups` (the SQLite `ALTER TABLE` is not Java's: V1 has the column with default 0) |
+| `FollowupChainTest.aFollowupThatRanBeforeResumes...` | none (from `revive_followups`; `test_retry_note_of_a_task_that_never_ran...` is `TaskActionsTest`, K1) |
+| `FollowupChainTest` settle cases (message closed, busy child, scheduler off, no routed parent) | none (from `settle_routed`; `test_inbox_builds` only reads its result) |
+| `RouterTest.theShadowClaudeNeverRoutesAnything` | `test_runner_route.RouterUsesRunner.test_run_route_without_a_result_line_is_an_error` (no answer is an error) |
+| other `RouterTest` cases (`parse_route`, `route_task`: children, question, limit, second round, failure, cancel) | none: written from `router.py` |
+| `ShadowModeTest` (extended with `settleRouted`) | the acceptance criterion |
+
+`tests/test_runner_route.py` (the `runner/route.py` process contract) stays Python's, like `test_runner_contract` in K2.

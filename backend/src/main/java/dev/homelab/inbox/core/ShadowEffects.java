@@ -2,6 +2,7 @@ package dev.homelab.inbox.core;
 
 import dev.homelab.inbox.core.Effects.ClaudeAnswer;
 import dev.homelab.inbox.core.Effects.ProductFile;
+import dev.homelab.inbox.core.Effects.RouteAnswer;
 import dev.homelab.inbox.core.Effects.ResearchRun;
 import dev.homelab.inbox.core.Effects.Result;
 import dev.homelab.inbox.core.Effects.SetupPr;
@@ -21,7 +22,7 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
         Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.ProductRepo, Effects.BriefGitHub, Effects.BriefClaude,
-        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs {
+        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -311,5 +312,16 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     public String diff(String cache, long taskId, List<String> paths) {
         record("diff " + taskId);
         return "";
+    }
+
+    @Override
+    public RouteAnswer route(long taskId, String system, String prompt) {
+        record("routeClaude " + taskId);
+        return new RouteAnswer("", true, "shadow: the router does not run");
+    }
+
+    @Override
+    public void remember(long taskId) {
+        record("remember " + taskId);
     }
 }

@@ -99,6 +99,9 @@ public final class Effects {
         ScriptResult runScript(String repo, String script, java.util.List<String> args, long runId)
                 throws java.io.IOException;
 
+        /** Stop the script of a local run ({@code homelab-inbox-task kill j<run>}); nothing by default. */
+        default void killScript(long runId) {}
+
         /** The local model summarises {@code text} following the job's instruction. */
         String summarize(String jobName, String instruction, String text) throws java.io.IOException;
     }

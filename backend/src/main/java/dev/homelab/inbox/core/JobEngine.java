@@ -324,6 +324,18 @@ public class JobEngine {
         }
     }
 
+    public String now() {
+        return tasks.now();
+    }
+
+    /** Stop a local run from the page: flag it, and kill the script of a {@code script} job in the background. */
+    public void cancelLocalRun(long runId, boolean script) {
+        cancelledRuns.request(runId);
+        if (script) {
+            background.execute(() -> io.killScript(runId));
+        }
+    }
+
     private void cancelled(String key, long runId) {
         log.line(key, "info", "geannuleerd");
         runs.updateRun(runId, TaskStore.fields("status", "cancelled", "ended", tasks.now(), "note",

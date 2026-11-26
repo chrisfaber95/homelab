@@ -114,6 +114,20 @@ public class JobRuns {
         return rows("SELECT * FROM drafts WHERE id=?", id).stream().findFirst();
     }
 
+    static final Set<String> DRAFT_COLUMNS = Set.of("status", "text", "base", "error", "request");
+
+    public void updateDraft(long id, Map<String, Object> fields) {
+        for (String column : fields.keySet()) {
+            if (!DRAFT_COLUMNS.contains(column)) {
+                throw new IllegalArgumentException("no such drafts column: " + column);
+            }
+        }
+        List<Object> args = new ArrayList<>(fields.values());
+        args.add(id);
+        exec("UPDATE drafts SET " + String.join(", ", fields.keySet().stream().map(k -> k + "=?").toList())
+                + " WHERE id=?", args.toArray());
+    }
+
     public long insertReadyDraft(String created, String request, String text) {
         return insert("INSERT INTO drafts (created, request, base, status, text) VALUES (?,?,?,?,?)", created, request, null,
                 "ready", text);

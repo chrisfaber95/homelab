@@ -168,6 +168,11 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     }
 
     @Override
+    public void killScript(long runId) {
+        record("killScript " + runId);
+    }
+
+    @Override
     public String summarize(String jobName, String instruction, String text) throws java.io.IOException {
         record("summarize " + jobName);
         return "";

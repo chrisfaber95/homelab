@@ -969,6 +969,16 @@ can never start the real Claude, `gh`, `git` or ntfy, even by mistake.
 The round flow, the router, the planner, the reviewer and the research lookups are beans of the core that call these
 effects; `LiveEffects` gets them late (`LiveEffects.Late`) to avoid a cycle.
 
+## Draft and run routes in Java (H-028 W2b)
+
+`core/DraftRunController` serves `GET /draft/{id}`, `GET /run/{id}` (the SPA index, only for a draft or run that exists),
+`GET /api/draft/{id}`, `GET /api/run/{id}` (`JobPages`), `POST /draft/{id}/(confirm|cancel)` and `POST /run/{id}/cancel`, with
+the status codes, JSON and Dutch texts of `server.py`. `/api/log/{t|r}{id}` was already Java's (`read/ReadController`, M1).
+Confirm checks the file with `Jobs.parse` and writes it with `JobsWriter.save`; a refusal is a 400 `{"error": text}` and the
+draft stays `ready`. Cancelling a running local run flags it (`JobEngine.cancelLocalRun`) and, for a script job, kills it
+through `JobIo.killScript` (`homelab-inbox-task kill j<run>`; recorded only, in shadow). Origin and CSRF are the front door's.
+Starting a draft (`POST /jobs/draft`) and the job routes are W3. Tests: `DraftRunControllerTest`.
+
 ## Task routes in Java (H-028 W2a)
 
 `core/TaskController` serves what `server.py` serves for tasks: `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /taken`,

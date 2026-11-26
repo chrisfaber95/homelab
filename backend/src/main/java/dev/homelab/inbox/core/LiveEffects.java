@@ -653,6 +653,11 @@ public class LiveEffects extends ShadowEffects implements LiveClaude.Runner {
     }
 
     @Override
+    public void killScript(long runId) {
+        taskCmd(KILL_TIMEOUT, "kill", "j" + runId);
+    }
+
+    @Override
     public Effects.ScriptResult runScript(String repo, String script, List<String> args, long runId) {
         try {
             return jobIo.runScript(repo, script, args, runId);

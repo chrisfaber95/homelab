@@ -938,3 +938,28 @@ goes through `Sessions.route`, whose real implementation, a `Router.routeTask` c
 | `ShadowModeTest` (extended with `settleRouted`) | the acceptance criterion |
 
 `tests/test_runner_route.py` cases that test the Python process itself (`test_runner_failure_codes`, `test_bad_arguments_exit_2_without_output`, `test_arguments_carry_only_the_task_id`) are the runner's contract and stay Python's, like `test_runner_contract` in K2; `RouteRunnerOutput` is the Java side that reads its output.
+
+## Real effects: `core.effects` and `LiveEffects` (H-028 W1)
+
+**The switch:** `core.effects` (env `CORE_EFFECTS`) is `shadow` (default) or `live`; any other value stops the start.
+`shadow` wires `ShadowEffects` (nothing leaves the process). `live` wires `LiveEffects`, a port of what `bin/homelab_inbox/`
+does outside the process. **The loops** (`SchedulerLoop`, `GitHubPollLoop`) start only with `core.effects=live` **and**
+`core.scheduler.enabled=true`; with shadow effects and the scheduler on, the start fails ("needs a real RoundRunner");
+with the scheduler off there is no loop in either mode. `EffectsSwitchTest` covers every combination.
+
+**Commands:** every external command goes through `CommandRunner` (`ProcessCommandRunner` is the real one; at the deadline
+SIGTERM, ten seconds later SIGKILL). Tests pass a fake (`LiveEffectsTest`): the suite never starts the real Claude, `gh`,
+`git` or ntfy.
+
+| Effect | How |
+|---|---|
+| Round | `python3 -I $RUNNER_DIR/round.py <id> <session> <new\|resume>` (env `TASK_CMD`), NDJSON read as `rounds.stream_claude`: turns, limits, cancel |
+| Working copies, `prepare`, `sync`, `has`, `cleanup`, `kill` | `homelab-inbox-task` (`TASK_CMD`) |
+| Push of `inbox/<id>` | bundle, `git fetch` and `git push --force origin refs/inbox/<id>:refs/heads/inbox/<id>`, never main |
+| PR open, merge, reads | `gh pr create`, `gh pr merge --merge --match-head-commit`, `gh api` (token from `/etc/homelab/inbox-github-token` as `GH_TOKEN`) |
+| Notifications | `curl` to ntfy (token through a curl config on stdin), conversation entry first; `NTFY_FAKE=1` only logs |
+| Task log | `logs/<key>.log`, secrets hidden |
+
+**Not ported yet (still shadow inside `LiveEffects`, so recorded and not executed):** briefs (product repo, planner,
+reviewer, handoff), jobs and research, the router, memory (also the memory part of the system prompt) and the skill
+proposals. Do not switch the scheduler on in production before those slices.

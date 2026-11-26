@@ -54,6 +54,20 @@ public class TaskStore {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    /** A skill proposal's PR ({@code skill_prs}), shown on the skills page. */
+    public void addSkillPr(String name, long taskId, String prUrl) {
+        try (Connection c = db.open(); PreparedStatement st = c.prepareStatement(
+                "INSERT INTO skill_prs (name, task_id, pr_url, created) VALUES (?,?,?,?)")) {
+            st.setString(1, name);
+            st.setLong(2, taskId);
+            st.setString(3, prUrl);
+            st.setString(4, now());
+            st.executeUpdate();
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
     /** Newest first, like {@code storage.tasks}. */
     public List<Task> tasks(int limit) {
         return query("SELECT * FROM tasks ORDER BY id DESC LIMIT ?", limit);

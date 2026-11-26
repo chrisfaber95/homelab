@@ -1,14 +1,13 @@
 package dev.homelab.inbox.core;
 
-import dev.homelab.inbox.conversation.ConversationStore;
 import dev.homelab.inbox.core.CommandRunner.Command;
 import dev.homelab.inbox.core.CommandRunner.Finished;
+import dev.homelab.inbox.read.Jobs.Job;
 import dev.homelab.inbox.read.Settings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -17,36 +16,41 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
+import dev.homelab.inbox.conversation.ConversationStore;
 
 /**
  * The real effects (H-028 W1), selected by {@code core.effects=live}: a port of what {@code bin/homelab_inbox/} does
- * outside the process. Every external command goes through the injected {@link CommandRunner}.
+ * outside the process. Every external command goes through the injected {@link CommandRunner}: the rounds (the runner
+ * {@code runner/round.py}) and the Claude calls of the router, planner and reviewer ({@code route.py}, {@code review.py},
+ * {@code homelab-inbox-task plan}), the working copies and pushes of {@code inbox/<id>}, the PRs ({@code gh pr create},
+ * {@code gh pr merge}, {@code gh api}), the product repo of the briefs, job input (overview, pages, GitHub, scripts, the
+ * local model), the memory steps, skill proposals, the task log files and ntfy.
  *
- * <p>Ported here: the rounds (the runner {@code runner/round.py}, {@code homelab-inbox-task}), the working copies, the
- * pushes of {@code inbox/<id>}, the repo list and the service's copies, the PRs ({@code gh pr create}, {@code gh pr
- * merge}, {@code gh api} for reads), the task log files and ntfy. It extends {@link ShadowEffects}: the effects of
- * briefs, jobs, research, memory, the router and the planner are not ported yet and stay shadow (recorded, nothing
- * sent); later slices override them.
+ * <p>It extends {@link ShadowEffects} only to inherit the interface list; every method is overridden here or in the
+ * helper it delegates to. The pieces that need a bean of the core (the round flow, the router, the planner, the research
+ * lookups) come late, through {@link Late}: they themselves depend on these effects.
  */
-public class LiveEffects extends ShadowEffects {
+public class LiveEffects extends ShadowEffects implements LiveClaude.Runner {
 
     private static final Logger log = LoggerFactory.getLogger(LiveEffects.class);
-    private static final ObjectMapper JSON = JsonMapper.builder().build();
-    private static final Pattern HTTP_CODE = Pattern.compile("HTTP (\\d{3})");
-    private static final Pattern REPO_NAME = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
-    private static final Pattern COMMIT_LINE = Pattern.compile("^[0-9a-f]{7,} .*");
     private static final String DEFAULT_TASK_CMD = "sudo -n -u inbox /usr/local/lib/homelab/bin/homelab-inbox-task";
     private static final Duration KILL_TIMEOUT = Duration.ofSeconds(30);
+    private static final java.util.regex.Pattern COMMIT_LINE = java.util.regex.Pattern.compile("^[0-9a-f]{7,} .*");
+
+    /** The beans of the core these effects call back into (looked up when used, not when wired). */
+    interface Late {
+        RoundFlow flow();
+
+        Router router();
+
+        BriefRounds briefRounds();
+
+        Effects.Research research();
+    }
 
     public static final String SYSTEM_PROMPT = """
             Je werkt voor de homelab-inbox: de gebruiker heeft vanaf zijn telefoon een taak gestuurd. Je zit in een
@@ -74,37 +78,71 @@ public class LiveEffects extends ShadowEffects {
               De inbox maakt er een PR van; de gebruiker beslist. Een bestaande skill verander je nooit zelf: een verbetering
               stel je op dezelfde manier voor, onder dezelfde naam.""";
 
+
+    // A research run (H-017) gets this instead of SYSTEM_PROMPT: it reads and reports, and changes nothing.
+    public static final String RESEARCH_SYSTEM_PROMPT = """
+            Je werkt voor de homelab-inbox aan een onderzoeksvraag (taak {id}); de gebruiker kijkt niet mee.
+            - Je leest en rapporteert. Je commit niets, maakt geen branch of PR, schrijft geen bestanden en doet geen machinewijziging
+              (ook geen `homelab-admin`); je tools laten dat ook niet toe.
+            - Je tools: Read, Grep, Glob, WebSearch, WebFetch en `homelab-search` in Bash. Niets anders.
+            - Volg de skill research-reports: eerst privé zoeken, dan het web; elke bewering een bron; niets gevonden zeggen en
+              opsommen wat je doorzocht, nooit gokken.
+            - Je laatste bericht begint met `ANTWOORD:` en bevat het rapport zoals de prompt het vraagt.""";
+
     private final CommandRunner commands;
     private final Settings conf;
     private final TaskStore store;
     private final Effects.ConversationNotes conversation;
-    private final Supplier<RoundFlow> flow;
+    private final Late late;
     private final Cancellations cancellations;
     private final CoreSettings core;
     private final Notifications notifications;
-    private final Map<String, ReentrantLock> repoLocks = new ConcurrentHashMap<>();
+    private final ServiceGit git;
+    private final Gh gh;
+    private final LiveClaude claude;
+    private final LiveBriefs briefs;
+    private final LiveJobIo jobIo;
+    private final LiveMemory memory;
+    private final LiveSkills skills;
 
-    public LiveEffects(CommandRunner commands, Settings conf, TaskStore store, Effects.ConversationNotes conversation,
-                       Supplier<RoundFlow> flow, Cancellations cancellations, CoreSettings core) {
+    LiveEffects(CommandRunner commands, Settings conf, TaskStore store, Effects.ConversationNotes conversation, Late late,
+                Cancellations cancellations, CoreSettings core, LiveMemory.Store memoryStore,
+                Supplier<Map<String, Job>> jobs) {
         this.commands = commands;
         this.conf = conf;
         this.store = store;
         this.conversation = conversation;
-        this.flow = flow;
+        this.late = late;
         this.cancellations = cancellations;
         this.core = core;
         this.notifications = new Notifications(this::note, this::push);
+        this.git = new ServiceGit(commands, conf);
+        this.gh = new Gh(commands, conf);
+        this.claude = new LiveClaude(commands, conf, this);
+        this.briefs = new LiveBriefs(git, gh, conf);
+        this.jobIo = new LiveJobIo(commands, conf, git, gh, this);
+        String pageBase = "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
+        this.memory = new LiveMemory(memoryStore, store, conf.runnerHome(), pageBase, conf.confInt("MEMORY_RECENT", 10), jobs);
+        this.skills = new LiveSkills(git, gh, conf, store, this, pageBase);
     }
 
-    // ---- helpers -------------------------------------------------------------------------------------------------
+    // ---- homelab-inbox-task and the runner scripts -----------------------------------------------------------------
 
-    private List<String> taskCmdBase() {
+    @Override
+    public List<String> taskCmdBase() {
         String c = conf.env("TASK_CMD");
         return List.of((c == null || c.isBlank() ? DEFAULT_TASK_CMD : c).strip().split("\\s+"));
     }
 
+    @Override
+    public Path runnerDir() {
+        String d = conf.env("RUNNER_DIR");
+        return Path.of(d == null || d.isBlank() ? "/usr/local/lib/homelab/runner" : d);
+    }
+
     /** {@code helpers.task_cmd}: runs {@code homelab-inbox-task} to the end; the output is stdout plus stderr, stripped. */
-    Effects.Result taskCmd(Duration timeout, Object... args) {
+    @Override
+    public Effects.Result taskCmd(Duration timeout, Object... args) {
         List<String> cmd = new ArrayList<>(taskCmdBase());
         for (Object a : args) {
             cmd.add(String.valueOf(a));
@@ -117,117 +155,38 @@ public class LiveEffects extends ShadowEffects {
         return taskCmd(Duration.ofMinutes(10), args);
     }
 
-    private ReentrantLock repoLock(String name) {
-        return repoLocks.computeIfAbsent(name, k -> new ReentrantLock());
-    }
-
-    private Path runnerDir() {
-        String d = conf.env("RUNNER_DIR");
-        return Path.of(d == null || d.isBlank() ? "/usr/local/lib/homelab/runner" : d);
-    }
-
     private Path taskHome() {
         String d = conf.env("INBOX_TASK_HOME");
         return Path.of(d == null || d.isBlank() ? conf.conf("TASK_HOME", "/var/lib/inbox") : d);
     }
 
-    private String token(Path file) {
-        try {
-            return Files.readString(file).strip();
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    private Map<String, String> ghEnv() {
-        String t = token(conf.ghTokenFile());
-        return t == null ? Map.of("GH_PROMPT_DISABLED", "1") : Map.of("GH_TOKEN", t, "GH_PROMPT_DISABLED", "1");
-    }
-
-    private String credentialHelper() {
-        return "!f() { test \"$1\" = get && echo username=x-access-token && echo \"password=$(cat "
-                + conf.ghTokenFile() + ")\"; }; f";
-    }
-
-    /** {@code helpers.git}: git in a copy of the service (never in a directory of Claude), the token through a helper. */
-    String git(Path dir, String... args) {
-        List<String> cmd = new ArrayList<>(List.of("git", "-c", "credential.helper=", "-c",
-                "credential.helper=" + credentialHelper(), "-C", dir.toString()));
-        cmd.addAll(List.of(args));
-        Finished o = commands.run(Command.of(cmd).withEnv(Map.of("GIT_TERMINAL_PROMPT", "0")));
-        if (o.code() != 0) {
-            String why = (o.stderr().isBlank() ? o.stdout() : o.stderr()).strip();
-            throw new IllegalStateException("git " + args[0] + ": "
-                    + (why.length() > 300 ? why.substring(why.length() - 300) : why));
-        }
-        return o.stdout();
-    }
-
-    private String remoteUrl(String name, String slug) {
-        String fake = conf.env("REMOTE_" + name.toUpperCase().replace('-', '_'));
-        return fake != null && !fake.isEmpty() ? fake : "https://github.com/" + slug + ".git";
-    }
-
-    // ---- Repos ---------------------------------------------------------------------------------------------------
+    // ---- Repos -----------------------------------------------------------------------------------------------------
 
     @Override
     public Map<String, String> list() {
-        Map<String, String> repos = new LinkedHashMap<>();
-        repos.put("homelab", conf.conf("HOMELAB_REPO", "chrisfaber95/homelab"));
-        try {
-            for (String line : Files.readAllLines(conf.reposConf())) {
-                int hash = line.indexOf('#');
-                String[] parts = (hash >= 0 ? line.substring(0, hash) : line).strip().split("\\s+");
-                if (parts.length == 3 && REPO_NAME.matcher(parts[0]).matches()) {
-                    repos.put(parts[0], parts[1]);
-                }
-            }
-        } catch (IOException e) {
-            // no list: only homelab, as Python
-        }
-        try {
-            JsonNode extra = JSON.readTree(Files.readString(conf.newReposFile()));
-            extra.properties().forEach(e -> repos.putIfAbsent(e.getKey(), e.getValue().asString()));
-        } catch (IOException | RuntimeException e) {
-            // no file, or not JSON: no new repos
-        }
-        return repos;
+        return git.repos();
     }
 
-    /** {@code helpers.refresh_cache}: the service's copy of a repo, on origin/main. */
     @Override
     public String refresh(String repo, String slug) {
-        ReentrantLock lock = repoLock(repo);
-        lock.lock();
-        try {
-            Path d = conf.runnerHome().resolve("repos").resolve(repo);
-            if (!Files.isDirectory(d.resolve(".git"))) {
-                try {
-                    Files.createDirectories(d.getParent());
-                } catch (IOException e) {
-                    throw new IllegalStateException("clone " + repo + ": " + e.getMessage(), e);
-                }
-                Finished o = commands.run(Command.of("git", "clone", "--quiet", remoteUrl(repo, slug), d.toString())
-                        .withEnv(Map.of("GIT_TERMINAL_PROMPT", "0", "GIT_CONFIG_COUNT", "2",
-                                "GIT_CONFIG_KEY_0", "credential.helper", "GIT_CONFIG_VALUE_0", "",
-                                "GIT_CONFIG_KEY_1", "credential.helper", "GIT_CONFIG_VALUE_1", credentialHelper())));
-                if (o.code() != 0) {
-                    throw new IllegalStateException("git clone: " + o.combined());
-                }
-            }
-            git(d, "fetch", "--quiet", "origin", "main");
-            git(d, "checkout", "--quiet", "-B", "main", "origin/main");
-            return d.toString();
-        } finally {
-            lock.unlock();
-        }
+        return git.refresh(repo, slug).toString();
     }
 
-    // ---- Rounds and the working copies of homelab-inbox-task -----------------------------------------------------
+    // ---- Rounds and the working copies of homelab-inbox-task -------------------------------------------------------
 
     @Override
     public void runRound(long taskId) {
-        flow.get().run(taskId);
+        late.flow().run(taskId);
+    }
+
+    @Override
+    public void reviewAgain(long taskId) {
+        late.briefRounds().reviewPr(taskId, refreshForReview(taskId));
+    }
+
+    private String refreshForReview(long taskId) {
+        Task t = store.get(taskId).orElseThrow();
+        return git.refresh(t.repo(), git.repos().get(t.repo())).toString();
     }
 
     @Override
@@ -248,7 +207,7 @@ public class LiveEffects extends ShadowEffects {
     @Override
     public boolean pushed(Task task) {
         try {
-            git(conf.runnerHome().resolve("repos").resolve(task.repo()), "rev-parse", "--verify", "--quiet",
+            git.git(conf.runnerHome().resolve("repos").resolve(task.repo()), "rev-parse", "--verify", "--quiet",
                     "refs/inbox/" + task.id());
             return true;
         } catch (RuntimeException e) {
@@ -258,7 +217,7 @@ public class LiveEffects extends ShadowEffects {
 
     @Override
     public Effects.Result prepare(long taskId, String repo) {
-        ReentrantLock lock = repoLock(repo);
+        var lock = git.lock(repo);
         lock.lock();
         try {
             return taskCmd("prepare", taskId, repo);
@@ -279,7 +238,13 @@ public class LiveEffects extends ShadowEffects {
 
     @Override
     public Effects.Result sync(long taskId) {
-        return taskCmd("sync", taskId);
+        var lock = git.lock(String.valueOf(store.get(taskId).map(Task::repo).orElse("")));
+        lock.lock();
+        try {
+            return taskCmd("sync", taskId);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /** {@code rounds.push_branch}: the commits of the task (a bundle, data only) into the service's copy, then to inbox/id. */
@@ -296,11 +261,11 @@ public class LiveEffects extends ShadowEffects {
         Path bundle = taskHome().resolve("out").resolve(taskId + ".bundle");
         String ref = "refs/heads/inbox/" + taskId;
         Path dir = Path.of(cache);
-        ReentrantLock lock = repoLock(dir.getFileName().toString());
+        var lock = git.lock(dir.getFileName().toString());
         lock.lock();
         try {
-            git(dir, "bundle", "verify", bundle.toString());
-            String[] heads = git(dir, "bundle", "list-heads", bundle.toString()).strip().split("\\s+");
+            git.git(dir, "bundle", "verify", bundle.toString());
+            String[] heads = git.git(dir, "bundle", "list-heads", bundle.toString()).strip().split("\\s+");
             List<String> refs = new ArrayList<>();
             for (int i = 1; i < heads.length; i += 2) {
                 refs.add(heads[i]);
@@ -308,9 +273,9 @@ public class LiveEffects extends ShadowEffects {
             if (!refs.equals(List.of(ref))) {
                 throw new IllegalStateException("de bundle bevat iets anders dan " + ref + ": " + refs);
             }
-            git(dir, "fetch", "--quiet", "--force", bundle.toString(), ref + ":refs/inbox/" + taskId);
+            git.git(dir, "fetch", "--quiet", "--force", bundle.toString(), ref + ":refs/inbox/" + taskId);
             // Only to inbox/<id>, never to main: the destination is fixed here.
-            git(dir, "push", "--quiet", "--force", "origin", "refs/inbox/" + taskId + ":" + ref);
+            git.git(dir, "push", "--quiet", "--force", "origin", "refs/inbox/" + taskId + ":" + ref);
         } finally {
             lock.unlock();
         }
@@ -323,31 +288,34 @@ public class LiveEffects extends ShadowEffects {
         return lines;
     }
 
-    // ---- The Claude round (runner/round.py) ----------------------------------------------------------------------
+    // ---- The Claude round (runner/round.py) ------------------------------------------------------------------------
 
     @Override
     public void writePrompt(Task task, String prompt) {
-        Path share = conf.runnerHome().resolve("share").resolve(String.valueOf(task.id()));
-        try {
-            Files.createDirectories(share);
-            Files.writeString(share.resolve("prompt.txt"), prompt == null ? "" : prompt);
-            // The memory part of the system prompt (memory_for) is not ported yet: the prompt is the fixed text only.
-            Files.writeString(share.resolve("system.txt"),
-                    SYSTEM_PROMPT.replace("{repo}", task.repo()).replace("{id}", String.valueOf(task.id())));
-            for (String f : List.of("prompt.txt", "system.txt")) {
-                Files.setPosixFilePermissions(share.resolve(f), PosixFilePermissions.fromString("rw-r-----"));
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("prompt schrijven mislukt: " + e.getMessage(), e);
-        }
+        Path dir = conf.runnerHome().resolve("share").resolve(String.valueOf(task.id()));
+        String system = (runOf(task).isPresent() ? RESEARCH_SYSTEM_PROMPT : SYSTEM_PROMPT)
+                .replace("{repo}", task.repo()).replace("{id}", String.valueOf(task.id()));
+        Share.write(dir, prompt, system + memory.memoryFor(task));
+    }
+
+    @Override
+    public void route(long taskId) {
+        late.router().routeTask(taskId);
+    }
+
+    @Override
+    public void plan(long taskId) {
+        late.briefRounds().planTask(taskId);
     }
 
     @Override
     public Outcome stream(long taskId, String mode) {
         Task t = store.get(taskId).orElseThrow(() -> new IllegalStateException("taak " + taskId + " bestaat niet"));
         Optional<Effects.ResearchRun> research = runOf(t);
-        int minutes = core.maxMinutes();
-        int maxTurns = core.maxTurns();
+        // research_limits: a quick research run has its own small limits, deep the limits of an inbox task
+        boolean quick = research.isPresent() && "quick".equals(research.get().mode());
+        int minutes = quick ? conf.confInt("RESEARCH_QUICK_MINUTES", 6) : core.maxMinutes();
+        int maxTurns = quick ? conf.confInt("RESEARCH_QUICK_TURNS", 25) : core.maxTurns();
         List<String> cmd = new ArrayList<>(List.of("python3", "-I", runnerDir().resolve("round.py").toString(),
                 String.valueOf(taskId), t.str("session"), mode));
         if (research.isPresent()) {
@@ -385,7 +353,7 @@ public class LiveEffects extends ShadowEffects {
                     .withTimeout(Duration.ofMinutes(minutes)).withOnLine(line -> {
                         JsonNode ev;
                         try {
-                            ev = JSON.readTree(line);
+                            ev = Gh.JSON.readTree(line);
                         } catch (RuntimeException e) {
                             return;
                         }
@@ -429,12 +397,20 @@ public class LiveEffects extends ShadowEffects {
         return new Outcome(raw == null ? null : text, raw == null ? 0 : raw.path("permission_denials").size(), capped[0]);
     }
 
-    private static String cut(String s, int n) {
-        return s.length() > n ? s.substring(0, n) : s;
-    }
-
     private void line(long taskId, String kind, String text) {
         line("t" + taskId, kind, text);
+    }
+
+    private String token(Path file) {
+        try {
+            return Files.readString(file).strip();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static String cut(String s, int n) {
+        return s.length() > n ? s.substring(0, n) : s;
     }
 
     // ---- The task log, the conversation and ntfy -------------------------------------------------------------------
@@ -451,7 +427,7 @@ public class LiveEffects extends ShadowEffects {
             o.put("at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString().replace("Z", "+00:00"));
             o.put("kind", kind);
             o.put("text", l.length() > 600 ? l.substring(0, 600) : l);
-            b.append(JSON.writeValueAsString(o)).append('\n');
+            b.append(Gh.JSON.writeValueAsString(o)).append('\n');
         }
         try {
             Files.createDirectories(conf.logsDir());
@@ -501,67 +477,192 @@ public class LiveEffects extends ShadowEffects {
         // The token goes through a curl config on stdin, not through the arguments (they are visible in ps).
         String cfg = "header = \"Authorization: Bearer " + ntfyToken + "\"\nheader = \"Content-Type: application/json\"\n";
         Finished o = commands.run(Command.of("curl", "-sS", "--fail", "-m", "10", "-X", "POST", "--config", "-",
-                "--data-binary", JSON.writeValueAsString(body), "http://127.0.0.1:" + conf.conf("NTFY_PORT", "8102") + "/")
+                "--data-binary", Gh.JSON.writeValueAsString(body), "http://127.0.0.1:" + conf.conf("NTFY_PORT", "8102") + "/")
                 .withStdin(cfg));
         if (o.code() != 0) {
             throw new IOException(o.combined());
         }
     }
 
-    // ---- GitHub through gh ----------------------------------------------------------------------------------------
-
-    private static int httpCode(String text, int fallback) {
-        Matcher m = HTTP_CODE.matcher(text);
-        return m.find() ? Integer.parseInt(m.group(1)) : fallback;
-    }
+    // ---- GitHub through gh -----------------------------------------------------------------------------------------
 
     /** {@code gh api <path>}: read only; a failure is a {@link Effects.GitHubHttpException} with the status gh reports. */
     @Override
     public JsonNode get(String path) {
-        Finished o = commands.run(Command.of("gh", "api", path).withEnv(ghEnv()).withTimeout(Duration.ofSeconds(30)));
-        if (o.code() != 0) {
-            throw new Effects.GitHubHttpException(httpCode(o.combined(), 500), "https://api.github.com" + path, o.combined());
-        }
-        String out = o.stdout().strip();
-        return out.isEmpty() ? tools.jackson.databind.node.MissingNode.getInstance() : JSON.readTree(out);
+        return gh.get(path);
     }
 
     @Override
     public Optional<Effects.PrState> get(String repoSlug, int number) {
-        JsonNode pr = get("/repos/" + repoSlug + "/pulls/" + number);
+        JsonNode pr = gh.get("/repos/" + repoSlug + "/pulls/" + number);
         if (!pr.isObject()) {
             return Optional.empty();
         }
         return Optional.of(new Effects.PrState(pr.path("state").asString(""), pr.path("merged").asBoolean(false)));
     }
 
-    /** A merge commit, only for the head the caller checked ({@code gh pr merge --merge --match-head-commit}). */
     @Override
     public void merge(String repoSlug, int prNumber, String sha, String commitTitle) {
-        List<String> cmd = new ArrayList<>(List.of("gh", "pr", "merge", String.valueOf(prNumber), "--repo", repoSlug,
-                "--merge", "--subject", commitTitle));
-        if (sha != null && !sha.isEmpty()) {
-            cmd.addAll(List.of("--match-head-commit", sha));
-        }
-        Finished o = commands.run(Command.of(cmd).withEnv(ghEnv()).withTimeout(Duration.ofSeconds(60)));
-        if (o.code() != 0) {
-            throw new Effects.GitHubHttpException(httpCode(o.combined(), 405),
-                    "https://api.github.com/repos/" + repoSlug + "/pulls/" + prNumber + "/merge", o.combined());
-        }
+        gh.merge(repoSlug, prNumber, sha, commitTitle);
     }
 
     @Override
     public Opened open(String repoSlug, String title, String head, String base, String body) {
-        Finished o = commands.run(Command.of("gh", "pr", "create", "--repo", repoSlug, "--title", title, "--head", head,
-                "--base", base, "--body", body).withEnv(ghEnv()).withTimeout(Duration.ofSeconds(60)));
-        if (o.code() != 0) {
-            throw new IllegalStateException("gh pr create: " + o.combined());
+        return gh.createPr(repoSlug, title, head, base, body);
+    }
+
+    // ---- Research, memory, skills -------------------------------------------------------------------------------------
+
+    @Override
+    public Optional<Effects.ResearchRun> runOf(Task task) {
+        return late.research().runOf(task);
+    }
+
+    @Override
+    public void deliver(Task task, String text, String link) {
+        late.research().deliver(task, text, link);
+    }
+
+    @Override
+    public String jobInstruction(String job) {
+        return late.research().jobInstruction(job);
+    }
+
+    @Override
+    public void reviewPr(long taskId, String cache) {
+        late.briefRounds().reviewPr(taskId, cache);
+    }
+
+    @Override
+    public void proposeSkill(Task task, String name, String description, String body) {
+        skills.propose(task, name, description, body);
+    }
+
+    @Override
+    public void load() {
+        memory.load();
+    }
+
+    @Override
+    public MemorySplit split(String text) {
+        return memory.split(text);
+    }
+
+    @Override
+    public void afterRound(long taskId, List<String> blocks) {
+        memory.afterRound(taskId, blocks);
+    }
+
+    @Override
+    public void remember(long taskId) {
+        memory.remember(taskId);
+    }
+
+    // ---- The briefs: product repo, GitHub, diffs, profiles ---------------------------------------------------------
+
+    @Override
+    public List<Effects.ProductFile> briefFiles() {
+        return briefs.briefFiles();
+    }
+
+    @Override
+    public String read(String path) {
+        return briefs.read(path);
+    }
+
+    @Override
+    public void commitToMain(String path, String text, String message) {
+        briefs.commitToMain(path, text, message);
+    }
+
+    @Override
+    public void pushBranch(String branch, Map<String, String> files, String message) {
+        briefs.pushBranch(branch, files, message);
+    }
+
+    @Override
+    public List<Effects.SetupPr> setupPrs(String slug, String briefId) {
+        return briefs.setupPrs(slug, briefId);
+    }
+
+    @Override
+    public void mergeSetupPr(String slug, int number, String title) {
+        briefs.mergeSetupPr(slug, number, title);
+    }
+
+    @Override
+    public void comment(String slug, int prNumber, String body) {
+        briefs.comment(slug, prNumber, body);
+    }
+
+    @Override
+    public void mergeHandoff(String slug, int number, String title) {
+        briefs.mergeHandoff(slug, number, title);
+    }
+
+    @Override
+    public List<String> changedFiles(String cache, long taskId) {
+        return briefs.changedFiles(cache, taskId);
+    }
+
+    @Override
+    public String diff(String cache, long taskId, List<String> paths) {
+        return briefs.diff(cache, taskId, paths);
+    }
+
+    @Override
+    public String profiles(Map<String, String> repos, boolean ci) {
+        return briefs.profiles(repos, ci);
+    }
+
+    @Override
+    public void add(String name, String slug) {
+        briefs.add(name, slug);
+    }
+
+    @Override
+    public Effects.ClaudeAnswer plan(long taskId, String system, String prompt) {
+        return claude.plan(taskId, system, prompt);
+    }
+
+    @Override
+    public Effects.ClaudeAnswer review(long taskId, String system, String prompt) {
+        return claude.review(taskId, system, prompt);
+    }
+
+    @Override
+    public Effects.RouteAnswer route(long taskId, String system, String prompt) {
+        return claude.route(taskId, system, prompt);
+    }
+
+    // ---- Jobs --------------------------------------------------------------------------------------------------------
+
+    @Override
+    public String boxOverview() throws IOException {
+        return jobIo.boxOverview();
+    }
+
+    @Override
+    public String fetchPage(String url) throws IOException {
+        return jobIo.fetchPage(url);
+    }
+
+    @Override
+    public Object github(String path) throws IOException {
+        return jobIo.github(path);
+    }
+
+    @Override
+    public Effects.ScriptResult runScript(String repo, String script, List<String> args, long runId) {
+        try {
+            return jobIo.runScript(repo, script, args, runId);
+        } catch (IOException e) { // the runs of JobEngine fail with this message either way
+            throw new java.io.UncheckedIOException(e);
         }
-        String url = o.stdout().strip().lines().reduce((a, b) -> b).orElse("");
-        Matcher m = Pattern.compile("/pull/(\\d+)$").matcher(url);
-        if (!m.find()) {
-            throw new IllegalStateException("gh pr create gave no PR url: " + o.combined());
-        }
-        return new Opened(Integer.parseInt(m.group(1)), url);
+    }
+
+    @Override
+    public String summarize(String jobName, String instruction, String text) throws IOException {
+        return jobIo.summarize(jobName, instruction, text);
     }
 }

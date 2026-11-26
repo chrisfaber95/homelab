@@ -18,8 +18,14 @@ public class ProcessCommandRunner implements CommandRunner {
 
     private static final long KILL_AFTER_SECONDS = 10;
 
+    /** Set by the Maven test run: the suite must never start a real process through this class. */
+    public static final String DENY_PROPERTY = "inbox.commands.deny";
+
     @Override
     public Finished run(Command c) {
+        if (Boolean.getBoolean(DENY_PROPERTY)) {
+            throw new IllegalStateException("real commands are not allowed in tests: " + c.args().get(0));
+        }
         Path err = null;
         try {
             err = Files.createTempFile("inbox-cmd", ".err");

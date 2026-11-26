@@ -64,16 +64,46 @@ class CoreConfig {
         return new ProcessCommandRunner();
     }
 
-    /** The real effects: only with {@code core.effects=live}. The round flow is looked up late (it needs these effects). */
+    /** The real effects: only with {@code core.effects=live}. The beans these effects call back into are looked up late. */
     @Bean
     @ConditionalOnProperty(name = "core.effects", havingValue = "live")
     LiveEffects liveEffects(CommandRunner commands, Settings conf, TaskStore store,
                             dev.homelab.inbox.conversation.ConversationStore conversation,
                             org.springframework.beans.factory.ObjectProvider<RoundFlow> flow,
-                            Cancellations cancellations, CoreSettings settings) {
+                            org.springframework.beans.factory.ObjectProvider<Router> router,
+                            org.springframework.beans.factory.ObjectProvider<BriefRounds> briefRounds,
+                            org.springframework.beans.factory.ObjectProvider<JobEngine> engine, Jobs jobs,
+                            dev.homelab.inbox.memory.MemoryRepo memoryRepo, dev.homelab.inbox.memory.MemoryWriter memoryWriter,
+                            dev.homelab.inbox.read.MemoryReader memoryReader, Cancellations cancellations,
+                            CoreSettings settings) {
+        Effects.Research[] research = new Effects.Research[1];
+        LiveEffects.Late late = new LiveEffects.Late() {
+            @Override
+            public RoundFlow flow() {
+                return flow.getObject();
+            }
+
+            @Override
+            public Router router() {
+                return router.getObject();
+            }
+
+            @Override
+            public BriefRounds briefRounds() {
+                return briefRounds.getObject();
+            }
+
+            @Override
+            public Effects.Research research() {
+                if (research[0] == null) {
+                    research[0] = new JobResearch(engine.getObject(), jobs::load);
+                }
+                return research[0];
+            }
+        };
         return new LiveEffects(commands, conf, store,
-                (author, client, kind, text, link, ref) -> conversation.append(author, client, kind, text, link, ref),
-                flow::getObject, cancellations, settings);
+                (author, client, kind, text, link, ref) -> conversation.append(author, client, kind, text, link, ref), late,
+                cancellations, settings, new MemoryDoor(memoryRepo, memoryWriter, memoryReader), jobs::load);
     }
 
     @Bean

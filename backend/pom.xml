@@ -72,6 +72,16 @@
   </dependencies>
 
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <!-- H-028 W5a: the stylesheet and fonts the inbox serves under /static/, inside the jar (ui/web/). -->
+        <directory>../web</directory>
+        <targetPath>ui/web</targetPath>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>
@@ -90,4 +100,55 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <!-- H-028 W5a: ONE build of the backend together with the UI: `./mvnw -Pui package` runs `npm ci` and `npm run build`
+           in ../frontend and puts frontend/dist in the jar under ui/dist/. Without -Pui (CI, tests) there is no npm step. -->
+      <id>ui</id>
+      <build>
+        <resources>
+          <resource>
+            <directory>src/main/resources</directory>
+          </resource>
+          <resource>
+            <directory>../web</directory>
+            <targetPath>ui/web</targetPath>
+          </resource>
+          <resource>
+            <directory>../frontend/dist</directory>
+            <targetPath>ui/dist</targetPath>
+          </resource>
+        </resources>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>npm-ci</id>
+                <phase>generate-resources</phase>
+                <goals><goal>exec</goal></goals>
+                <configuration>
+                  <executable>npm</executable>
+                  <workingDirectory>../frontend</workingDirectory>
+                  <arguments><argument>ci</argument><argument>--ignore-scripts</argument></arguments>
+                </configuration>
+              </execution>
+              <execution>
+                <id>npm-build</id>
+                <phase>generate-resources</phase>
+                <goals><goal>exec</goal></goals>
+                <configuration>
+                  <executable>npm</executable>
+                  <workingDirectory>../frontend</workingDirectory>
+                  <arguments><argument>run</argument><argument>build</argument></arguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

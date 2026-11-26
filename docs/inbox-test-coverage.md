@@ -198,3 +198,12 @@ exit 2, no prompt or token in the command line, fixtures, `test_runner_contract`
   `RouteRunnerOutput`, `DraftRunnerOutput`, `Notifications`).
 - The Python tests that compare both servers (`test_parity`, `test_inbox_m*_parity`) need a running Java backend; they are
   not run by CI.
+
+## Built UI and static files (H-028 W5a)
+
+| Python route (`server.py`) | Java test (`core/UiControllerTest`) |
+|---|---|
+| `/`, `/memory`, `/search`, `/skills`, `/ssh` (`ported_index`; 503 without a build) | `thePagesAreTheBuiltIndex`, `thePagesAre503WithoutABuild` |
+| `/memory/e/{id}` (only for an entry that exists) | `aMemoryEntryHasItsPageOnlyWhenItExists` |
+| `/app/*` (`dist_asset`, never leaves `frontend/dist`) | `builtAssetsComeFromDistAndNeverLeaveIt` |
+| `/static/*` (`web/`: css, js, woff2) | `staticFilesAreTheStylesheetAndFontsOfWeb`, `theStylesheetAlsoComesFromTheJarWhenNoDirectoryHasIt` |

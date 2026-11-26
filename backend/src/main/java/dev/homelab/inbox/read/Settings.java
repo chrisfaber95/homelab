@@ -138,10 +138,30 @@ public class Settings {
         return runnerHome().resolve("repos").resolve("homelab").resolve("skills");
     }
 
-    /** {@code FRONTEND_DIST}: the built frontend, by default {@code frontend/dist} next to the installed config directory. */
+    /**
+     * {@code FRONTEND_DIST}: the built frontend. Without it: {@code frontend/dist} next to the installed config
+     * directory when that has a build, else the build inside the jar ({@code -Pui}), else that default path.
+     */
     public Path frontendDist() {
+        return dir("FRONTEND_DIST", "frontend/dist", "index.html", EmbeddedUi::dist);
+    }
+
+    /** {@code WEB_DIR}: the stylesheet and fonts served under {@code /static/} (default {@code web/}, else the jar's copy). */
+    public Path webDir() {
+        return dir("WEB_DIR", "web", "app.css", EmbeddedUi::web);
+    }
+
+    private Path dir(String variable, String relative, String marker, java.util.function.Supplier<Path> embedded) {
+        if (env.containsKey(variable)) {
+            return Path.of(env.get(variable));
+        }
         Path root = configDir.toAbsolutePath().getParent();
-        return Path.of(env.getOrDefault("FRONTEND_DIST", (root == null ? Path.of("/") : root).resolve("frontend").resolve("dist").toString()));
+        Path installed = (root == null ? Path.of("/") : root).resolve(relative);
+        if (Files.isRegularFile(installed.resolve(marker))) {
+            return installed;
+        }
+        Path inJar = embedded.get();
+        return inJar != null ? inJar : installed;
     }
 
     public Path newReposFile() {

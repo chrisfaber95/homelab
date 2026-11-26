@@ -291,6 +291,15 @@ public final class Effects {
         RouteAnswer route(long taskId, String system, String prompt);
     }
 
+    /** The outcome of the Claude run of a job draft ({@code jobs.make_draft}): the job file, or why there is none. */
+    public record DraftAnswer(String text, String error) {}
+
+    /** The Claude call of a job draft ({@code runner/draft.py}); the files in {@code share/d<id>} are written and removed
+     * by the implementation. Never throws: a failure is the answer's {@code error}. */
+    public interface DraftClaude {
+        DraftAnswer draft(long draftId, String system, String prompt);
+    }
+
     /** The history of a finished task ({@code memory.remember_task}); a failure is the caller's to log. */
     public interface TaskHistory {
         void remember(long taskId);

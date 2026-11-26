@@ -192,6 +192,12 @@ class CoreConfig {
     }
 
     @Bean
+    Drafts drafts(JobRuns runs, TaskStore store, Jobs jobs, JobSettings settings, Effects.DraftClaude claude,
+                  java.util.concurrent.ExecutorService coreExecutor) {
+        return new Drafts(runs, store, jobs, settings, claude, coreExecutor);
+    }
+
+    @Bean
     AgentCatalogue agentCatalogue(Settings conf, Jobs jobs, JobRuns runs, TaskStore store) {
         return new AgentCatalogue(conf.skillsDir().resolveSibling("agents"), jobs, runs, store);
     }

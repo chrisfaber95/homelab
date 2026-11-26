@@ -299,6 +299,33 @@ class LiveEffectsTest {
     }
 
     @Test
+    void aJobDraftStartsDraftPyWithItsDraftIdAndReturnsTheJobFile() {
+        String result = "{\"event\":\"result\",\"is_error\":false,\"text\":\"```job\\n---\\nname: x\\n---\\nDoe iets.\\n```\"}";
+        boolean[] filesThere = {false};
+        runner.answer = c -> {
+            filesThere[0] = Files.exists(tmp.resolve("share/d7/prompt.txt")) && Files.exists(tmp.resolve("share/d7/system.txt"));
+            return new Finished(0, result + "\n", "", false);
+        };
+        Effects.DraftAnswer a = fx.draft(7, "systeem", "prompt");
+        assertThat(filesThere[0]).isTrue();
+        assertThat(a).isEqualTo(new Effects.DraftAnswer("---\nname: x\n---\nDoe iets.\n", null));
+        assertThat(runner.joined()).containsExactly("python3 -I /r/draft.py d7");
+        assertThat(runner.commands.get(0).env()).containsEntry("TASK_CMD", "fake-task-cmd");
+        assertThat(runner.commands.get(0).timeout()).isEqualTo(java.time.Duration.ofSeconds(300));
+        assertThat(tmp.resolve("share/d7")).doesNotExist();
+    }
+
+    @Test
+    void aJobDraftThatFailsOrTimesOutAnswersWithAnError() {
+        runner.answer = c -> new Finished(143, "", "", true);
+        assertThat(fx.draft(7, "s", "p").text()).isNull();
+        assertThat(fx.draft(7, "s", "p").error()).contains("300");
+        runner.answer = c -> new Finished(0, "{\"event\":\"result\",\"is_error\":false,\"text\":\"geen blok\"}\n", "", false);
+        assertThat(fx.draft(7, "s", "p").error()).isEqualTo("Claude gaf geen job-bestand terug");
+        assertThat(tmp.resolve("share/d7")).doesNotExist();
+    }
+
+    @Test
     void thePlannerRunsThePlanActionAndReadsTheFirstJsonObjectDespiteAWarningLine() {
         runner.answer = c -> new Finished(0, "{\"is_error\":false,\"result\":\"```plan\\n{}\\n```\"}\n[claude-code:unrecognized_model]\n", "", false);
         Effects.ClaudeAnswer a = fx.plan(22, "systeem", "prompt");

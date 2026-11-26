@@ -63,20 +63,20 @@ public class TaskController {
 
     // ---- answers
 
-    private ResponseEntity<String> api(int status, Object body) {
+    ResponseEntity<String> api(int status, Object body) {
         return ResponseEntity.status(status).header("Content-Type", JSON_UTF8).header("Cache-Control", "no-store")
                 .body(json.writeValueAsString(body));
     }
 
-    private static ResponseEntity<String> html(int status, String body) {
+    static ResponseEntity<String> html(int status, String body) {
         return ResponseEntity.status(status).header("Content-Type", HTML_UTF8).header("Cache-Control", "no-store").body(body);
     }
 
-    private static ResponseEntity<String> notFoundPage() {
+    static ResponseEntity<String> notFoundPage() {
         return html(404, ErrorPage.html("niet gevonden", "<p>Niet gevonden.</p>"));
     }
 
-    private static ResponseEntity<String> redirect(String location) {
+    static ResponseEntity<String> redirect(String location) {
         return ResponseEntity.status(303).header("Content-Type", HTML_UTF8).header("Cache-Control", "no-store")
                 .header("Location", location).body("");
     }
@@ -119,7 +119,7 @@ public class TaskController {
         return request.getQueryString() == null && task(id).isPresent() ? index() : notFoundPage();
     }
 
-    private ResponseEntity<String> index() {
+    ResponseEntity<String> index() {
         Path index = conf.frontendDist().resolve("index.html");
         try {
             if (Files.isRegularFile(index)) {
@@ -194,12 +194,12 @@ public class TaskController {
     }
 
     /** The first value of a form field; a blank or missing one is the empty string ({@code parse_qs}). */
-    private static String param(HttpServletRequest request, String name) {
+    static String param(HttpServletRequest request, String name) {
         String v = request.getParameter(name);
         return v == null ? "" : v;
     }
 
-    private static String who(HttpServletRequest request) {
+    static String who(HttpServletRequest request) {
         Object who = request.getAttribute(FrontDoorFilter.WHO);
         if (who != null) {
             return who.toString();

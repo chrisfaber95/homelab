@@ -113,6 +113,19 @@ Kinds of rows:
 | unknown action, query string or id | `anUnknownActionOrAQueryStringIsTheNotFoundPage` |
 | Origin and token on every mutating route | `everyMutatingBriefRouteRefusesARequestWithoutAToken` (403, also with a wrong token), `everyMutatingBriefRouteRefusesTheWrongOrNoOrigin`, `theApiReadsNeedNoTokenButOtherMethodsDo` |
 
+### Draft and run routes (H-028 W2b): in `DraftRunControllerTest` (real HTTP behind the front door)
+
+| Python route | Java test (`DraftRunControllerTest`) |
+|---|---|
+| `GET /api/draft/{id}` | `apiDraftGivesTheDraftWithItsFacts`, `apiDraftOfABadFileSaysWhyAndADraftingOneRefreshes`, `apiDraftUnknownIs404WithAJsonError` |
+| `GET /api/run/{id}` | `apiRunGivesTheRun`, `apiRunUnknownIs404WithAJsonError` |
+| `GET /api/log/{t\|r}{id}` | `apiLogReadsATaskAndARunLog` |
+| `GET /draft/{id}`, `GET /run/{id}` | `thePagesExistOnlyForADraftOrRunThatExists` |
+| `POST /draft/{id}/cancel` | `cancellingADraftRedirectsToJobs` |
+| `POST /draft/{id}/confirm` | `confirmingADraftSavesTheJobAndRedirectsToIt`, `confirmingAChangeKeepsTheNameOfTheJob`, `confirmingARefusedFileIs400AndTheDraftStaysReady`, `aDraftThatIsNotReadyOrUnknownIsThe404Page` |
+| `POST /run/{id}/cancel` | `cancellingARunningLocalRunStopsItAndRedirectsToIt`, `cancellingARunThatIsNotRunningChangesNothing`, `cancellingAClaudeRunSendsYouToItsTask`, `cancellingAnUnknownRunIsThe404Page`, `inShadowACancelledScriptRunKillsNothingForReal` |
+| Origin and token on every mutating route | `everyMutatingDraftAndRunRouteRefusesARequestWithoutAToken` (403 without or with a wrong token, and a wrong Origin) |
+
 ### test_inbox_research (27), test_inbox_job_delivery (12), test_inbox_agents (14), test_inbox_job_pages_api (11), test_inbox_jobs_api (7)
 
 Mapped case by case in `docs/inbox-backend.md` ("Core in shadow: jobs and research (H-026 K6)"): `JobFileTest`,

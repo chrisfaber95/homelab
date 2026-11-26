@@ -4,6 +4,19 @@ Installed as `~/.claude/CLAUDE.md` by `scripts/18-claude.sh` from `claude/CLAUDE
 there (via a PR), not here: the next run of the script overwrites this file. Repo-level `CLAUDE.md` files still apply
 on top of this one.
 
+## Criteria: check every one separately
+
+Chris's working agreement (2026-11-26), for all projects: when a task or brief has criteria, each one must be
+individually checkable and tickable.
+
+- Writing a brief or task: one criterion per checkbox (`- [ ]`), each stating something you can observe or run. Split
+  a criterion that bundles several checks. Mark one only Chris can check (hardware, taste) as such.
+- Doing a task: a task is done only when every given criterion has been checked. Before you report, go through the
+  list one by one and run the check; don't judge the whole at once.
+- Reporting (final message, PR description): list every criterion with its result (✅ met, ❌ not met, ❔ not
+  checked or only Chris can check) and, per criterion, how you checked it. A criterion you didn't meet is stated
+  plainly, never left out. Don't call the task done while one is ❌.
+
 ## Second brain: project knowledge
 
 `/srv/obsidian/second-brain` is an Obsidian vault with an LLM-maintained wiki about Chris's projects: one page per

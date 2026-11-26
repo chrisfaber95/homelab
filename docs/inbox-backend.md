@@ -979,7 +979,17 @@ JSON and Dutch texts of `server.py`. Run now goes through `JobEngine.dispatch`, 
 `core/Drafts` (`start_draft` and `make_draft`): the row is `drafting` at once and a background thread asks Claude through
 the new effect `Effects.DraftClaude` (`runner/draft.py d<id>` in `LiveClaude`; in shadow it records `draftClaude <id>` and
 the draft ends `failed`, so nothing runs). Origin and CSRF are the front door's. The research routes and
-`/agents/{name}/on` are the next slice. Tests: `JobControllerTest`, `LiveEffectsTest` (the draft runner).
+`/agents/{name}/on` are W3b (below). Tests: `JobControllerTest`, `LiveEffectsTest` (the draft runner).
+
+## Research, agent and Discord-switch routes in Java (H-028 W3b)
+
+`core/ResearchController` serves `GET /api/research` (`JobPages.researchData`), `GET /research` (the SPA index; a real job
+called `research` takes the name, then it is the 404 page), `POST /research/ask` (`JobEngine.askResearch`: 303 to
+`/research`, or `{"error": text}` with 400 or, at the daily cap, 429), `POST /agents/{name}/on` (`AgentCatalogue.switchOn`
+makes a ready draft and redirects to it; an unknown or broken agent is the 404 page "Onbekende of kapotte agent.") and
+`POST /discord/(discord|discord_approvals|kitt)/(on|off)` (`ConversationStore.setSwitch`, 303 to `/#discord` or `/#kitt`).
+A question starts Claude through `JobEngine`, so in shadow nothing runs. Origin and CSRF are the front door's. Tests:
+`JobControllerTest`.
 
 ## Draft and run routes in Java (H-028 W2b)
 

@@ -141,6 +141,17 @@ Kinds of rows:
 | unknown job, query string | `anUnknownJobOrAQueryStringIsThe404Page` |
 | Origin and token on every mutating route | `everyMutatingJobRouteRefusesARequestWithoutAToken` (403 without or with a wrong token, and a wrong Origin) |
 
+### Research, agent and Discord-switch routes (H-028 W3b): in `JobControllerTest` (real HTTP behind the front door)
+
+| Python route | Java test (`JobControllerTest`) |
+|---|---|
+| `GET /api/research` | `apiResearchGivesTheCounterTheModesAndTheLatestQuestions` |
+| `GET /research` | `theResearchPageComesFromTheFrontendBuild` |
+| `POST /research/ask` | `aQuestionQueuesOneRunAndRedirectsToTheResearchPage`, `aQuestionWithoutAModeIsAQuickOne`, `anEmptyQuestionOrAnUnknownModeIs400WithTheReason`, `aQuestionQueryStringIsThe404Page` |
+| `POST /agents/{name}/on` | `switchingAnAgentOnMakesAReadyDraftAndRedirectsToIt` (also the unknown, broken and query-string 404s) |
+| `POST /discord/(discord\|discord_approvals\|kitt)/(on\|off)` | `theDiscordSwitchesAreSetAndRedirectToTheirCard` |
+| Origin and token on every mutating route | `everyMutatingResearchAgentAndSwitchRouteRefusesARequestWithoutAToken` |
+
 ### test_inbox_research (27), test_inbox_job_delivery (12), test_inbox_agents (14), test_inbox_job_pages_api (11), test_inbox_jobs_api (7)
 
 Mapped case by case in `docs/inbox-backend.md` ("Core in shadow: jobs and research (H-026 K6)"): `JobFileTest`,

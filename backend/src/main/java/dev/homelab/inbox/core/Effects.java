@@ -137,6 +137,9 @@ public final class Effects {
         /** Make the working copy of a task: a fresh one, or one rebuilt from the pushed branch. */
         Result prepare(long taskId, String repo);
 
+        /** 0: the Claude session of the task has a transcript to resume; anything else: it never got going. */
+        Result session(long taskId, String sessionId);
+
         /** 0: main has commits the branch lacks; 1: it has them; 2: no working copy. */
         Result behind(long taskId);
 

@@ -1,6 +1,7 @@
 package dev.homelab.inbox.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -80,5 +81,32 @@ class RoundLimitsTest {
         l.onTurn(1);
         l.watch(START.plusSeconds(31 * 60), false);
         assertThat(l.capped(false)).isEqualTo("30 minuten");
+    }
+
+    /** test_inbox_dead_session.EmptyRound.test_error_result_without_turns_raises */
+    @Test
+    void anErrorResultWithoutTurnsFailsTheRoundSayingWhatClaudeSaid() {
+        RoundLimits l = limits(2, 80, 30);
+        assertThatThrownBy(() -> l.checkEnded("No conversation found with session ID", true, "", false))
+                .isInstanceOf(IllegalStateException.class).hasMessageMatching("(?s).*0 beurten.*No conversation.*");
+    }
+
+    /** test_inbox_dead_session.EmptyRound.test_empty_result_without_turns_raises */
+    @Test
+    void anEmptyResultWithoutTurnsFailsTheRound() {
+        RoundLimits l = limits(2, 80, 30);
+        assertThatThrownBy(() -> l.checkEnded("", false, "", false)).isInstanceOf(IllegalStateException.class);
+    }
+
+    /** rounds.stream_claude: a round that made turns, was capped or was cancelled is not a failure; no result at all is */
+    @Test
+    void aRoundWithTurnsOrACapEndsFineAndNoResultIsAFailure() {
+        RoundLimits l = limits(2, 80, 30);
+        l.onTurn(1);
+        l.checkEnded("", true, "", false); // turns were made: finish_round reads the answer
+        RoundLimits capped = limits(0, 80, 30);
+        capped.checkEnded(null, false, "", true); // cancelled
+        assertThatThrownBy(() -> limits(0, 80, 30).checkEnded(null, false, "boom", false))
+                .hasMessage("Claude stopte zonder resultaat: boom");
     }
 }

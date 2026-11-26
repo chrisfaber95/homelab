@@ -73,4 +73,24 @@ public class RoundLimits {
         }
         return capped;
     }
+
+    /**
+     * The end checks of {@code rounds.stream_claude}: a round that ends without a result, or without a single turn
+     * (a resume that found no session, a refused start), is a failure of the round and not an answer without KLAAR.
+     *
+     * @param result the text of Claude's result, or null when there was no result event
+     * @param isError the result is flagged as an error
+     * @param stderr the last 300 characters of what the runner wrote on stderr
+     * @throws IllegalStateException with the messages of Python (the task then fails with that note)
+     */
+    public void checkEnded(String result, boolean isError, String stderr, boolean cancelled) {
+        String capped = capped(cancelled);
+        if (result == null && capped == null) {
+            throw new IllegalStateException("Claude stopte zonder resultaat: " + stderr);
+        }
+        if (capped == null && turns == baseTurns && (isError || result == null || result.isBlank())) {
+            String said = result == null ? "" : result.substring(0, Math.min(200, result.length()));
+            throw new IllegalStateException(("Claude deed niets (0 beurten): " + said + " " + stderr).strip());
+        }
+    }
 }

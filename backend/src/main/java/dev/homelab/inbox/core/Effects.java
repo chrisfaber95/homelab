@@ -250,4 +250,12 @@ public final class Effects {
     public interface TaskHistory {
         void remember(long taskId);
     }
+
+    /** A PR as GitHub shows it (read only): {@code state} is open or closed. */
+    public record PrState(String state, boolean merged) {}
+
+    /** {@code gh GET /repos/<slug>/pulls/<n>} for the follow-up check; empty when GitHub gave nothing usable. */
+    public interface PrLookup {
+        java.util.Optional<PrState> get(String repoSlug, int number);
+    }
 }

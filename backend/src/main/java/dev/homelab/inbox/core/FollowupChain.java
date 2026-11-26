@@ -2,6 +2,8 @@ package dev.homelab.inbox.core;
 
 import dev.homelab.inbox.core.Effects.Followups;
 import dev.homelab.inbox.core.Effects.Notifier;
+import dev.homelab.inbox.core.Effects.PrLookup;
+import dev.homelab.inbox.core.Effects.Repos;
 import dev.homelab.inbox.core.Effects.TaskHistory;
 import dev.homelab.inbox.core.Effects.TaskLog;
 import dev.homelab.inbox.core.Effects.WorkingCopies;
@@ -121,6 +123,36 @@ public class FollowupChain implements Followups {
         }
         store.update(parent.get().id(), TaskStore.fields("ended", null)); // the build or message isn't finished any more
         return revived.size() - 1;
+    }
+
+    /** Statuses whose merged PR still counts ({@code MERGE_WATCHED} of {@code github.py}). */
+    static final Set<String> MERGE_WATCHED = Set.of("refused", "failed", "capped", "cancelled");
+
+    /**
+     * Ports {@code check_blocking_pr}: a task that ended badly but whose PR the user merged anyway is fine, so its
+     * follow-ups go back in the queue (not those from before the feature). Does nothing for a PR that is open or closed
+     * unmerged. The poll loop that calls it for every watched task is K5.
+     */
+    public void checkBlockingPr(Task t, Repos repos, PrLookup prs) {
+        String slug = repos.list().get(t.repo());
+        if (slug == null || !t.has("pr_number")) {
+            return;
+        }
+        Optional<Effects.PrState> pr = prs.get(slug, t.num("pr_number"));
+        if (pr.isEmpty() || !pr.get().state().equals("closed") || !pr.get().merged()) {
+            return;
+        }
+        store.update(t.id(), TaskStore.fields("status", "merged", "ended", store.now()));
+        copies.cleanup(t.id());
+        try {
+            history.remember(t.id());
+        } catch (RuntimeException e) {
+            log.warn("taak {}: geschiedenis: {}", t.id(), e.toString());
+        }
+        int n = reviveFollowups(store.get(t.id()).orElseThrow(), true);
+        taskLog.line("t" + t.id(), "info", "PR #" + t.num("pr_number") + " merged: " + n + " follow-up(s) back in the queue");
+        notifier.notify(TaskActions.label(t) + ": PR #" + t.num("pr_number") + " merged",
+                n + " follow-up(s) back in the queue", pageBase + "/task/" + t.id());
     }
 
     /** The user says this task is fine: it isn't run again, and its follow-ups go back in the queue. */

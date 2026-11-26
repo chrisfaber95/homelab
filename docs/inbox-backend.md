@@ -884,8 +884,11 @@ goes through `Sessions.route`, whose real implementation, a `Router.routeTask` c
 
 | Java test | Python test it ports |
 |---|---|
-| `FollowupChainTest.anAutomaticReviveQueuesTheFollowupsInAChain...` | `test_inbox_followups.test_merged_pr_requeues_followups_in_a_chain` (the revive; the `check_blocking_pr` half is K5) |
-| `FollowupChainTest.aFollowupFromBeforeTheFeatureIsNotRestartedAutomatically` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (the `blocked_followups(t, True)` half; K5 for the poller) |
+| `FollowupChainTest.anAutomaticReviveQueuesTheFollowupsInAChain...` | `test_inbox_followups.test_merged_pr_requeues_followups_in_a_chain` (the revive step alone) |
+| `FollowupChainTest.aFollowupFromBeforeTheFeatureIsNotRestartedAutomatically` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (the `blocked_followups(t, True)` step alone) |
+| `FollowupChainTest.aMergedPrMarksTheTaskMergedAndQueuesTheFollowupsInAChain` | `test_merged_pr_requeues_followups_in_a_chain` (whole: `check_blocking_pr` is `FollowupChain.checkBlockingPr` over the `PrLookup` effect; the poll loop that calls it is K5) |
+| `FollowupChainTest.anOpenOrUnmergedClosedPrChangesNothing` | `test_open_or_closed_pr_changes_nothing` |
+| `FollowupChainTest.aMergedPrDoesNotRestartAFollowupFromBeforeTheFeature` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (whole) |
 | `FollowupChainTest.markAsFineQueuesTheFollowups...` | `test_mark_as_fine_requeues_followups_and_not_the_task` |
 | `FollowupChainTest.markAsFineNeedsABlockedFollowup` | `test_mark_as_fine_needs_a_blocked_followup` |
 | `FollowupChainTest.anUnmarkedTaskStillStopsItsFollowups` | `test_unmarked_task_still_stops_followups` |
@@ -894,8 +897,9 @@ goes through `Sessions.route`, whose real implementation, a `Router.routeTask` c
 | `FollowupChainTest.theColumnNoAutoReviveDefaultsToZero` | `test_migration_flags_only_existing_followups` (the SQLite `ALTER TABLE` is not Java's: V1 has the column with default 0) |
 | `FollowupChainTest.aFollowupThatRanBeforeResumes...` | none (from `revive_followups`; `test_retry_note_of_a_task_that_never_ran...` is `TaskActionsTest`, K1) |
 | `FollowupChainTest` settle cases (message closed, busy child, scheduler off, no routed parent) | none (from `settle_routed`; `test_inbox_builds` only reads its result) |
-| `RouterTest.theShadowClaudeNeverRoutesAnything` | `test_runner_route.RouterUsesRunner.test_run_route_without_a_result_line_is_an_error` (no answer is an error) |
+| `RouteRunnerOutputTest` (5 cases: result line, error flag, skipped lines, no result line with stderr, timeout) | `test_runner_route.RouterUsesRunner.test_run_route_returns_the_runner_result`, `test_run_route_without_a_result_line_is_an_error`, and the reading-side cases of `Route` (`test_recorded_route_gives_one_result_line`, `test_exit_code_passes_through_and_marks_an_error`, `test_warning_line_after_the_json_does_not_break_the_parse`, `test_no_json_is_an_error_with_stderr`) |
+| `RouterTest.theShadowClaudeNeverRoutesAnything` | `RouterUsesRunner.test_run_route_without_a_result_line_is_an_error` (no answer fails the task) |
 | other `RouterTest` cases (`parse_route`, `route_task`: children, question, limit, second round, failure, cancel) | none: written from `router.py` |
 | `ShadowModeTest` (extended with `settleRouted`) | the acceptance criterion |
 
-`tests/test_runner_route.py` (the `runner/route.py` process contract) stays Python's, like `test_runner_contract` in K2.
+`tests/test_runner_route.py` cases that test the Python process itself (`test_runner_failure_codes`, `test_bad_arguments_exit_2_without_output`, `test_arguments_carry_only_the_task_id`) are the runner's contract and stay Python's, like `test_runner_contract` in K2; `RouteRunnerOutput` is the Java side that reads its output.

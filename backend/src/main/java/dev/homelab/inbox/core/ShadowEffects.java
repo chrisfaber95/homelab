@@ -22,7 +22,7 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
         Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.ProductRepo, Effects.BriefGitHub, Effects.BriefClaude,
-        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory {
+        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory, Effects.PrLookup {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -323,5 +323,11 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     @Override
     public void remember(long taskId) {
         record("remember " + taskId);
+    }
+
+    @Override
+    public Optional<Effects.PrState> get(String repoSlug, int number) {
+        record("prState " + repoSlug + "#" + number);
+        return Optional.empty();
     }
 }

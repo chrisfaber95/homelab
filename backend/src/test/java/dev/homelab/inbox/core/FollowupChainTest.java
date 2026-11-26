@@ -58,6 +58,45 @@ class FollowupChainTest {
         assertThat(task(75).has("note") || task(75).has("ended")).isFalse();
     }
 
+    private void checkBlocking(String state, boolean merged) {
+        chain(false).checkBlockingPr(task(74), new Effects.Repos() {
+            public java.util.Map<String, String> list() {
+                return java.util.Map.of("homelab", "o/homelab");
+            }
+
+            public String refresh(String repo, String slug) {
+                return "";
+            }
+        }, (slug, n) -> java.util.Optional.of(new Effects.PrState(state, merged)));
+    }
+
+    /** test_merged_pr_requeues_followups_in_a_chain (the whole of it: the PR check, then the revive) */
+    @Test
+    void aMergedPrMarksTheTaskMergedAndQueuesTheFollowupsInAChain() {
+        checkBlocking("closed", true);
+        assertThat(statuses(74, 75, 76)).containsExactly("merged", "queued", "queued");
+        assertThat(task(70).has("ended")).isFalse();
+        assertThat(fakes.calls()).contains("cleanup 74", "remember 74", "notify Inbox 74: PR #68 merged",
+                "log t74 info PR #68 merged: 2 follow-up(s) back in the queue");
+    }
+
+    /** test_open_or_closed_pr_changes_nothing */
+    @Test
+    void anOpenOrUnmergedClosedPrChangesNothing() {
+        checkBlocking("open", false);
+        checkBlocking("closed", false);
+        assertThat(statuses(74, 75)).containsExactly("refused", "cancelled");
+        assertThat(fakes.calls()).isEmpty();
+    }
+
+    /** test_merge_does_not_restart_a_followup_from_before_this_feature (the whole of it: the PR is merged, 75 stays) */
+    @Test
+    void aMergedPrDoesNotRestartAFollowupFromBeforeTheFeature() {
+        store.update(75, TaskStore.fields("no_auto_revive", 1));
+        checkBlocking("closed", true);
+        assertThat(statuses(74, 75)).containsExactly("merged", "cancelled");
+    }
+
     /** test_merge_does_not_restart_a_followup_from_before_this_feature (the router half: blocked_followups(t, True)) */
     @Test
     void aFollowupFromBeforeTheFeatureIsNotRestartedAutomatically() {

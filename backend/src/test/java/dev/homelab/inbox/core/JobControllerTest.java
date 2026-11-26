@@ -150,6 +150,17 @@ class JobControllerTest {
         CoreFixture.clear(db);
         try (Connection c = db.open(); var st = c.createStatement()) {
             st.execute("TRUNCATE drafts, job_runs RESTART IDENTITY");
+            st.execute("DELETE FROM kv WHERE key LIKE 'switch:%'");
+            st.execute("INSERT INTO kv (key, value) VALUES ('" + dev.homelab.inbox.conversation.ConversationStore.MARKER
+                    + "', 'imported') ON CONFLICT (key) DO NOTHING"); // the conversation store is imported
+        }
+        Path agents = DIR.resolve("home/repos/homelab/agents");
+        if (Files.isDirectory(agents)) {
+            try (var files = Files.list(agents)) {
+                for (Path p : files.toList()) {
+                    Files.delete(p);
+                }
+            }
         }
         SAVED.clear();
         saveFails = null;
@@ -465,6 +476,111 @@ class JobControllerTest {
         }
         assertThat(scalar("SELECT count(*) FROM job_runs")).isEqualTo("0");
         assertThat(SAVED).isEmpty();
+    }
+
+    // ---- research, agents and the Discord switches (W3b)
+
+    @Test
+    void apiResearchGivesTheCounterTheModesAndTheLatestQuestions() throws Exception {
+        JsonNode d = ok("/api/research");
+        assertThat(d.get("modes").toString()).isEqualTo("[\"quick\",\"deep\"]");
+        assertThat(d.get("claude_runs_today").asInt()).isZero();
+        assertThat(d.get("runs")).isEmpty();
+        assertThat(d.get("refresh").asBoolean()).isFalse();
+    }
+
+    @Test
+    void theResearchPageComesFromTheFrontendBuild() throws Exception {
+        assertThat(get("/research").status()).isEqualTo(503);
+        Path dist = DIR.resolve("frontend/dist");
+        Files.createDirectories(dist);
+        Files.writeString(dist.resolve("index.html"), "<!doctype html>spa");
+        assertThat(get("/research").body()).isEqualTo("<!doctype html>spa");
+        assertThat(get("/research?x=1").status()).isEqualTo(200);
+    }
+
+    @Test
+    void aQuestionQueuesOneRunAndRedirectsToTheResearchPage() throws Exception {
+        assertRedirect(post("/research/ask", form("question", "Waarom is de lucht blauw?") + "&mode=deep"), "/research");
+        assertThat(scalar("SELECT count(*) FROM job_runs WHERE job = 'research' AND kind = 'research'")).isEqualTo("1");
+        assertThat(scalar("SELECT mode FROM job_runs")).isEqualTo("deep");
+        assertThat(scalar("SELECT deliver FROM job_runs")).isEqualTo("page");
+        assertThat(ok("/api/research").get("runs")).hasSize(1);
+    }
+
+    @Test
+    void aQuestionWithoutAModeIsAQuickOne() throws Exception {
+        assertRedirect(post("/research/ask", form("question", "Hoe laat is het?")), "/research");
+        assertThat(scalar("SELECT mode FROM job_runs")).isEqualTo("quick");
+    }
+
+    @Test
+    void anEmptyQuestionOrAnUnknownModeIs400WithTheReason() throws Exception {
+        for (String body : List.of("question=", form("question", "  "), form("question", "x") + "&mode=slow")) {
+            Reply r = post("/research/ask", body);
+            assertThat(r.status()).as(body).isEqualTo(400);
+            assertThat(r.header("Content-Type")).isEqualTo(JSON_UTF8);
+            assertThat(json.readTree(r.body()).get("error").asString()).isEqualTo("give a question and a mode: quick or deep");
+        }
+        assertThat(scalar("SELECT count(*) FROM job_runs")).isEqualTo("0");
+    }
+
+    @Test
+    void aQuestionQueryStringIsThe404Page() throws Exception {
+        assertNotFoundPage(post("/research/ask?x=1", form("question", "x")), "/research/ask?x=1");
+        assertThat(scalar("SELECT count(*) FROM job_runs")).isEqualTo("0");
+    }
+
+    @Test
+    void switchingAnAgentOnMakesAReadyDraftAndRedirectsToIt() throws Exception {
+        Path agents = DIR.resolve("home/repos/homelab/agents");
+        Files.createDirectories(agents);
+        Files.writeString(agents.resolve("pulse-agent.md"),
+                "---\nname: pulse-agent\nkind: box-report\nmodel: local\nschedule: 0 7 * * *\n---\nVat het samen.");
+        Files.writeString(agents.resolve("kapot.md"), "geen kop");
+        Reply r = post("/agents/pulse-agent/on", "");
+        assertThat(r.status()).as(r.body()).isEqualTo(303);
+        String id = r.header("Location").substring("/draft/".length());
+        assertThat(scalar("SELECT status FROM drafts WHERE id = ?", Long.parseLong(id))).isEqualTo("ready");
+        assertThat(scalar("SELECT request FROM drafts WHERE id = ?", Long.parseLong(id))).isEqualTo("Agent aanzetten: pulse-agent");
+        assertThat(scalar("SELECT text FROM drafts WHERE id = ?", Long.parseLong(id))).contains("name: pulse-agent");
+        assertThat(SAVED).isEmpty(); // nothing is saved until the draft is confirmed
+        assertThat(scalar("SELECT count(*) FROM job_runs")).isEqualTo("0");
+        for (String path : List.of("/agents/nope/on", "/agents/kapot/on", "/agents/pulse-agent/off", "/agents/pulse-agent/on?x=1")) {
+            Reply bad = post(path, "");
+            assertThat(bad.status()).as(path).isEqualTo(404);
+            assertThat(bad.body()).as(path).contains("Onbekende of kapotte agent.");
+        }
+        assertThat(scalar("SELECT count(*) FROM drafts")).isEqualTo("1");
+    }
+
+    @Test
+    void theDiscordSwitchesAreSetAndRedirectToTheirCard() throws Exception {
+        for (String name : List.of("discord", "discord_approvals", "kitt")) {
+            String card = name.equals("kitt") ? "/#kitt" : "/#discord";
+            assertRedirect(post("/discord/" + name + "/off", ""), card);
+            assertThat(scalar("SELECT value FROM kv WHERE key = 'switch:" + name + "'")).isEqualTo("off");
+            assertRedirect(post("/discord/" + name + "/on", ""), card);
+            assertThat(scalar("SELECT value FROM kv WHERE key = 'switch:" + name + "'")).isEqualTo("on");
+        }
+        assertNotFoundPage(post("/discord/nope/on", ""), "/discord/nope/on");
+        assertNotFoundPage(post("/discord/kitt/on?x=1", ""), "/discord/kitt/on?x=1");
+    }
+
+    @Test
+    void everyMutatingResearchAgentAndSwitchRouteRefusesARequestWithoutAToken() throws Exception {
+        List<String> paths = List.of("/research/ask", "/agents/pulse-agent/on", "/discord/discord/off",
+                "/discord/discord_approvals/off", "/discord/kitt/off");
+        for (String path : paths) {
+            Reply none = send("POST", path, "question=x", true, false);
+            assertThat(none.status()).as(path).isEqualTo(403);
+            assertThat(none.body()).as(path).contains("Verlopen formulier; ververs de pagina.");
+            Reply origin = send("POST", path, "question=x", false, true);
+            assertThat(origin.status()).as(path + " origin").isEqualTo(403);
+            assertThat(origin.body()).as(path).contains("Verkeerde herkomst.");
+        }
+        assertThat(scalar("SELECT count(*) FROM job_runs")).isEqualTo("0");
+        assertThat(scalar("SELECT count(*) FROM kv WHERE key LIKE 'switch:%'")).isEqualTo("0");
     }
 
     // ---- CSRF: every mutating job route is behind the front door

@@ -123,6 +123,14 @@ def record():
         add("has-no", ["has", "596"])
         add("cleanup", ["cleanup", "501"])
 
+        # session: does Claude have a transcript of this session?
+        sid = "0b1c2d3e-0000-4000-8000-000000000001"
+        (s.task_home / ".claude/projects/-demo").mkdir(parents=True)
+        (s.task_home / ".claude/projects/-demo" / f"{sid}.jsonl").write_text("{}\n")
+        add("session-yes", ["session", "501", sid])
+        add("session-no", ["session", "501", "0b1c2d3e-0000-4000-8000-000000000002"])
+        add("session-bad-id", ["session", "501", "nope"])
+
         # bundle
         s.run(["prepare", "503", "demo"])
         add("bundle-nothing-new", ["bundle", "503"])

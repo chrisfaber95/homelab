@@ -10,7 +10,7 @@
 #                                files: the merge stays in progress for Claude to resolve)
 #   behind <id>                  exit 0 if inbox/<id> does not contain the latest main of the service's copy yet
 #   has <id>                     exit 0 if the task still has its working copy
-#   session <id> <sessie>        exit 0 if Claude has a transcript of that session (so `resume` can work)
+#   session <id> <sessie>        exit 0 if Claude has a transcript of that session (so `resume` can work); TASK_HOME is Claude's HOME
 #   kill <id>                    de lopende Claude van deze taak stoppen
 #   cleanup <id>                 werkkopie en bundle weg
 # Voor de jobs (F-022), met een id j<run> of d<concept>:
@@ -109,7 +109,7 @@ case $action in
   session)
     sid=${3:-}
     [[ $sid =~ ^[0-9a-f-]{36}$ ]] || { echo "ongeldige sessie" >&2; exit 2; }
-    compgen -G "$HOME/.claude/projects/*/$sid.jsonl" >/dev/null
+    compgen -G "$TASK_HOME/.claude/projects/*/$sid.jsonl" >/dev/null
     ;;
   bundle)
     cd "$work/repo"

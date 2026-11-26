@@ -79,6 +79,12 @@ Exit: 0 the branch is behind (a `sync` would change something); 1 it already con
 
 Whether `work/<id>/repo` exists. stdout and stderr: empty. Exit: 0 yes; 1 no.
 
+### `session <id> <session>`
+
+Whether Claude has a transcript of this session (`TASK_HOME/.claude/projects/*/<session>.jsonl`), so `run ... resume` has
+something to resume. The service asks before a retry round and starts a new session when it is missing (inbox 235).
+stdout: empty. Exit: 0 yes; 1 no; 2 `ongeldige sessie` (not a uuid-shaped id).
+
 ### `kill <id>`
 
 Stops the Claude of this task: SIGTERM to its children and to the pid in `work/<id>/pid`, 3 s wait, then SIGKILL, then
@@ -129,6 +135,7 @@ code is that of the command the script ran and can be any value.
 | sync | 4 | Merge conflict: stdout lists the conflicted files and the merge stays in progress. |
 | behind | 1 | Not behind: the branch already contains main. |
 | has | 1 | No working copy. |
+| session | 1 | No transcript of that session. |
 | script | 1 | Own: the exit code of the job script (any value except the reserved ones). |
 | script | 65 | The script did not run: unknown repo, bad path, or the path is not in the repo. |
 | script | 124 | The script was stopped by the timeout (stdout ends with `[gestopt na N minuten]`). |

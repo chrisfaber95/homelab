@@ -25,7 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
  * </ul>
  * Errors are {@code {"error": "..."}} on {@code /api/*} and a small HTML page elsewhere. Not active until H-027
  * ({@link FrontDoorEnabled}). {@code /api/chat/action} is the chat door's (loopback and bearer token, H-028 W4a) and skips the owner and CSRF
- * checks. The kitt door and the gate on 8121 are K7.
+ * checks. The kitt door answers before this filter (`KittDoorFilter`, H-028 W4b); the gate on 8121 is W5.
  */
 @Component
 @FrontDoorEnabled

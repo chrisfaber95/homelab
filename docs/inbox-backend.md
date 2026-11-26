@@ -1021,3 +1021,36 @@ build is missing, and the 404 page for an unknown brief or, without a build, a q
 not approved, already being built, product repo unreadable) is a 400 `{"error": ...}`. Origin and the CSRF token are the front
 door's, as for the task routes. Through the effects, so with `core.effects=shadow` a park or a build commits nothing to the
 product repo. Nothing forwards to these routes yet; tests: `BriefControllerTest`, mapped in `docs/inbox-test-coverage.md`.
+
+## The built UI in Java (H-028 W5a)
+
+`UiController` serves what `ported_index`, `dist_asset` and the `/static/` route of `server.py` serve:
+
+| Route | Answer |
+|---|---|
+| `/`, `/memory`, `/search`, `/skills`, `/ssh` | `frontend/dist/index.html`, or the 503 page "De frontend is niet gebouwd" without a build |
+| `/memory/e/{id}` | the same index, only for an entry that exists (else the 404 page) |
+| `/app/*` | a built asset of `frontend/dist` (Vite `base` is `/app/`), `Cache-Control: private, max-age=3600`; never outside `dist` |
+| `/static/{name}.(css\|js\|woff2)`, `/static/fonts/{name}.(css\|js\|woff2)` | the stylesheet and fonts of `web/`, `max-age=86400` |
+
+`/taken`, `/task/{id}`, `/jobs`, `/job/*`, `/draft/*`, `/run/*`, `/research` and `/briefs*` were already Java's
+(W2, W3) and use the same index. All pages sit behind the front door like every route.
+
+**One build.** `cd backend && ./mvnw -Pui package` runs `npm ci --ignore-scripts` and `npm run build` in `frontend/`
+and puts `frontend/dist` in the jar under `ui/dist/`; `web/` goes in under `ui/web/` in every build. Without `-Pui`
+(CI, `verify`, the tests) there is no npm step and no `ui/dist/`. At run time the directories are, in this order:
+`FRONTEND_DIST` / `WEB_DIR` (env), else `frontend/dist` / `web` next to the installed config directory
+(`/usr/local/lib/homelab/`, where `scripts/21-inbox.sh` installs them) when they have a build, else the copy inside the
+jar (unpacked once to a temp directory; the unit has `PrivateTmp`).
+
+**Host and port** come from `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`), as before.
+The second tailnet connector (`inbox.public.port`) and the kitt gate are the next slice (W5b).
+
+**What a later slice needs on the box** (not done here: this change installs nothing):
+- build the jar with `-Pui` (`scripts/27-backend.sh` runs no npm today; add the npm step with the same throwaway-user
+  rules, or keep installing `frontend/dist` through `21-inbox.sh`: both work, the directory wins over the jar);
+- a unit for staging or the cut-over: `BACKEND_HOST=100.85.70.34` (the tailnet address) with `BACKEND_PORT=<port>` (8105 at the
+  cut-over), `INBOX_FRONT_DOOR_ENABLED=true` (`inbox.front-door.enabled`), `CORE_EFFECTS` and `CORE_SCHEDULER_ENABLED`; `FRONTEND_DIST`/`WEB_DIR` only when not
+  using the jar's copy; the existing ufw rule for `8100:8199` on `tailscale0` covers a port in that range;
+- until the second connector exists, Java listens on one address: loopback keeps the doors (chat, kitt) reachable and the tailnet
+  address would not, so the cut-over needs W5b first.

@@ -1,0 +1,13 @@
+{
+  "action": "session",
+  "args": [
+    "session",
+    "501",
+    "0b1c2d3e-0000-4000-8000-000000000001"
+  ],
+  "env": {},
+  "exit_code": 0,
+  "name": "session-yes",
+  "stderr": "",
+  "stdout": ""
+}

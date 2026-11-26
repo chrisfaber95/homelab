@@ -94,7 +94,7 @@ class RoundGetsMain(unittest.TestCase):
 
     def test_retried_round_merges_main_and_keeps_the_users_note(self):
         queue.run_round(119)
-        self.assertEqual(self.synced, ["behind", "sync"])
+        self.assertEqual(self.synced, ["behind", "sync", "session"])
         self.assertTrue(self.prompt.startswith("Retried by the user."))
         self.assertIn("merged into your branch", self.prompt)
 

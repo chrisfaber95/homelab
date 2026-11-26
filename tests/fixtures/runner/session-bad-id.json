@@ -1,0 +1,13 @@
+{
+  "action": "session",
+  "args": [
+    "session",
+    "501",
+    "nope"
+  ],
+  "env": {},
+  "exit_code": 2,
+  "name": "session-bad-id",
+  "stderr": "ongeldige sessie\n",
+  "stdout": ""
+}

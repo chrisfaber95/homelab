@@ -72,6 +72,7 @@ def run_round(task_id):
                 code, out = task_cmd("prepare", task_id, t["repo"])
             if code != 0:
                 raise RuntimeError(f"werkkopie maken mislukt: {out[-300:]}")
+        mode = "new" if first else "resume"
         if first:
             prompt = f"Taak voor de repo {t['repo']}:\n\n{t['text']}"
         else:
@@ -79,13 +80,20 @@ def run_round(task_id):
             extra = catch_up_main(t)
             if extra:
                 prompt = (prompt or "") + extra
+            if task_cmd("session", task_id, t["session"])[0] != 0:
+                # No transcript to resume: an earlier round was cut off before Claude made its session (a restart
+                # of the inbox, inbox 235). Resuming it would end at once with 0 turns, so start it afresh.
+                mode = "new"
+                prompt = (f"Taak voor de repo {t['repo']}:\n\n{t['text']}\n\n"
+                          "(An earlier round of this task never got going, so this is a fresh session.)\n\n"
+                          + (prompt or ""))
         write_prompt(t, prompt)
         update(task_id, status="running", started=t["started"] or now(), rounds=t["rounds"] + 1, pending_input=None,
                reprepare=0)
         _round_started[task_id] = now()
         log_line(f"t{task_id}", "info", f"ronde {t['rounds'] + 1} gestart" + (
             "" if first else ": " + first_line(prompt)))
-        result, turns, capped = stream_claude(task_id, "new" if first else "resume")
+        result, turns, capped = stream_claude(task_id, mode)
     except Exception as e:
         log(f"taak {task_id}: {e}")
         update(task_id, status="failed", ended=now(), note=str(e)[:500])

@@ -128,6 +128,12 @@ public class JobRuns {
                 + " WHERE id=?", args.toArray());
     }
 
+    /** {@code start_draft}: a draft that Claude is still writing. */
+    public long insertDrafting(String created, String request, String base) {
+        return insert("INSERT INTO drafts (created, request, base, status) VALUES (?,?,?,?)", created, request, base,
+                "drafting");
+    }
+
     public long insertReadyDraft(String created, String request, String text) {
         return insert("INSERT INTO drafts (created, request, base, status, text) VALUES (?,?,?,?,?)", created, request, null,
                 "ready", text);

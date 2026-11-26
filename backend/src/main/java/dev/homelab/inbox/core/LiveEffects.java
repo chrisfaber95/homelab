@@ -635,6 +635,11 @@ public class LiveEffects extends ShadowEffects implements LiveClaude.Runner {
         return claude.route(taskId, system, prompt);
     }
 
+    @Override
+    public Effects.DraftAnswer draft(long draftId, String system, String prompt) {
+        return claude.draft(draftId, system, prompt);
+    }
+
     // ---- Jobs --------------------------------------------------------------------------------------------------------
 
     @Override

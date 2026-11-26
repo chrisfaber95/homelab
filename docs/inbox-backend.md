@@ -969,6 +969,18 @@ can never start the real Claude, `gh`, `git` or ntfy, even by mistake.
 The round flow, the router, the planner, the reviewer and the research lookups are beans of the core that call these
 effects; `LiveEffects` gets them late (`LiveEffects.Late`) to avoid a cycle.
 
+## Job routes in Java (H-028 W3a)
+
+`core/JobController` serves `GET /api/jobs-page`, `GET /api/job/{name}` (`JobPages`, the file text from `Jobs.fileText`),
+`GET /jobs`, `GET /job/{name}` (the SPA index, only for a job that exists; `/job/research` is the research page unless a
+job has that name), `POST /jobs/draft` and `POST /job/{name}/(run|pause|resume|delete|save|change)`, with the status codes,
+JSON and Dutch texts of `server.py`. Run now goes through `JobEngine.dispatch`, pause, resume, save and delete through
+`JobsWriter` (a refusal or a failed store is a 400 `{"error": text}`), and a new or changed job starts a draft through
+`core/Drafts` (`start_draft` and `make_draft`): the row is `drafting` at once and a background thread asks Claude through
+the new effect `Effects.DraftClaude` (`runner/draft.py d<id>` in `LiveClaude`; in shadow it records `draftClaude <id>` and
+the draft ends `failed`, so nothing runs). Origin and CSRF are the front door's. The research routes and
+`/agents/{name}/on` are the next slice. Tests: `JobControllerTest`, `LiveEffectsTest` (the draft runner).
+
 ## Draft and run routes in Java (H-028 W2b)
 
 `core/DraftRunController` serves `GET /draft/{id}`, `GET /run/{id}` (the SPA index, only for a draft or run that exists),
@@ -977,7 +989,7 @@ the status codes, JSON and Dutch texts of `server.py`. `/api/log/{t|r}{id}` was 
 Confirm checks the file with `Jobs.parse` and writes it with `JobsWriter.save`; a refusal is a 400 `{"error": text}` and the
 draft stays `ready`. Cancelling a running local run flags it (`JobEngine.cancelLocalRun`) and, for a script job, kills it
 through `JobIo.killScript` (`homelab-inbox-task kill j<run>`; recorded only, in shadow). Origin and CSRF are the front door's.
-Starting a draft (`POST /jobs/draft`) and the job routes are W3. Tests: `DraftRunControllerTest`.
+Starting a draft (`POST /jobs/draft`) and the job routes are W3a (below). Tests: `DraftRunControllerTest`.
 
 ## Task routes in Java (H-028 W2a)
 

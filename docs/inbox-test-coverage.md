@@ -126,6 +126,21 @@ Kinds of rows:
 | `POST /run/{id}/cancel` | `cancellingARunningLocalRunStopsItAndRedirectsToIt`, `cancellingARunThatIsNotRunningChangesNothing`, `cancellingAClaudeRunSendsYouToItsTask`, `cancellingAnUnknownRunIsThe404Page`, `inShadowACancelledScriptRunKillsNothingForReal` |
 | Origin and token on every mutating route | `everyMutatingDraftAndRunRouteRefusesARequestWithoutAToken` (403 without or with a wrong token, and a wrong Origin) |
 
+### Job routes (H-028 W3a): in `JobControllerTest` (real HTTP behind the front door)
+
+| Python route | Java test (`JobControllerTest`) |
+|---|---|
+| `GET /api/jobs-page` | `apiJobsPageListsTheJobs` |
+| `GET /api/job/{name}` | `apiJobGivesTheJobWithItsFileAndFacts`, `apiJobOfABrokenFileSaysWhatIsWrong`, `apiJobUnknownIs404WithAJsonError` |
+| `GET /jobs`, `GET /job/{name}` | `theJobPagesComeFromTheFrontendBuild` |
+| `POST /jobs/draft` | `aDescriptionStartsADraftAndRedirectsToIt`, `aDraftRequestIsCutAt4000Characters`, `aDraftWithoutATextIsThe404Page`; the Claude run: `LiveEffectsTest.aJobDraftStartsDraftPyWithItsDraftIdAndReturnsTheJobFile`, `aJobDraftThatFailsOrTimesOutAnswersWithAnError` |
+| `POST /job/{name}/run` | `runNowQueuesAManualRunAndRedirectsToTheJob`, `runNowOfABrokenJobDoesNothing` |
+| `POST /job/{name}/(pause\|resume)` | `pausingAndResumingGoThroughTheJobStore`, `pausingABrokenJobDoesNothing` |
+| `POST /job/{name}/save`, `/delete` | `savingAnEditedFileGoesThroughTheJobStore`, `savingWithoutATextChangesNothing`, `deletingRemovesTheJobAndRedirectsToJobs`, `aRefusedWriteIs400WithTheReason` |
+| `POST /job/{name}/change` | `changeStartsADraftOfTheJobAndRedirectsToIt` |
+| unknown job, query string | `anUnknownJobOrAQueryStringIsThe404Page` |
+| Origin and token on every mutating route | `everyMutatingJobRouteRefusesARequestWithoutAToken` (403 without or with a wrong token, and a wrong Origin) |
+
 ### test_inbox_research (27), test_inbox_job_delivery (12), test_inbox_agents (14), test_inbox_job_pages_api (11), test_inbox_jobs_api (7)
 
 Mapped case by case in `docs/inbox-backend.md` ("Core in shadow: jobs and research (H-026 K6)"): `JobFileTest`,

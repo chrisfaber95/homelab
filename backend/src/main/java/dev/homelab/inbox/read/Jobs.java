@@ -123,6 +123,15 @@ public class Jobs {
         return found;
     }
 
+    /** The raw text of {@code jobs/<name>.md}, as {@code JOBS[name]["text"]}; empty when there is no such file. */
+    public java.util.Optional<String> fileText(String name) {
+        try {
+            return java.util.Optional.of(Files.readString(settings.jobsDir().resolve(name + ".md")));
+        } catch (IOException | RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     /** helpers.repo_list: homelab, the lines of repos.conf and new-repos.json. */
     public Set<String> repoNames() {
         Set<String> names = new TreeSet<>();

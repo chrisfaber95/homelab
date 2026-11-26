@@ -18,11 +18,12 @@ import tools.jackson.databind.JsonNode;
  * and the brief reviewer ({@code runner/review.py}). Each writes {@code share/r<id>} or {@code share/v<id>} and removes it
  * afterwards, as the Python {@code route_task}, {@code plan_task} and {@code review_pr} do.
  */
-final class LiveClaude implements RouteClaude, BriefClaude {
+final class LiveClaude implements RouteClaude, BriefClaude, Effects.DraftClaude {
 
     private static final Duration ROUTE_TIMEOUT = Duration.ofSeconds(300);
     private static final Duration PLAN_TIMEOUT = Duration.ofSeconds(900);
     private static final Duration REVIEW_TIMEOUT = Duration.ofSeconds(900);
+    private static final Duration DRAFT_TIMEOUT = Duration.ofSeconds(300);
 
     private final CommandRunner commands;
     private final Settings conf;
@@ -64,7 +65,11 @@ final class LiveClaude implements RouteClaude, BriefClaude {
     }
 
     private Finished runScript(String script, long taskId, Duration timeout) {
-        return commands.run(Command.of("python3", "-I", runner.runnerDir().resolve(script).toString(), String.valueOf(taskId))
+        return runScript(script, String.valueOf(taskId), timeout);
+    }
+
+    private Finished runScript(String script, String arg, Duration timeout) {
+        return commands.run(Command.of("python3", "-I", runner.runnerDir().resolve(script).toString(), arg)
                 .withEnv(Map.of("TASK_CMD", String.join(" ", runner.taskCmdBase()))).withTimeout(timeout));
     }
 
@@ -85,6 +90,24 @@ final class LiveClaude implements RouteClaude, BriefClaude {
             String stderr = ev.path("stderr").asString("");
             return new RouteAnswer(ev.path("text").asString(""), ev.path("is_error").asBoolean(true),
                     stderr.isEmpty() ? o.stderr().strip() : stderr);
+        } finally {
+            Share.remove(dir);
+        }
+    }
+
+    /** {@code jobs.make_draft}: {@code runner/draft.py d<id>}; the job file out of its result, or the failure text. */
+    @Override
+    public Effects.DraftAnswer draft(long draftId, String system, String prompt) {
+        Path dir = share("d" + draftId);
+        try {
+            Share.write(dir, prompt, system);
+            Finished o = runScript("draft.py", "d" + draftId, DRAFT_TIMEOUT);
+            if (o.timedOut()) {
+                return new Effects.DraftAnswer(null, "timed out after " + DRAFT_TIMEOUT.toSeconds() + " seconds");
+            }
+            return new Effects.DraftAnswer(DraftRunnerOutput.jobFile(o.stdout(), o.code(), o.stderr()), null);
+        } catch (RuntimeException e) {
+            return new Effects.DraftAnswer(null, String.valueOf(e.getMessage()));
         } finally {
             Share.remove(dir);
         }

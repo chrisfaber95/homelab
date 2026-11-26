@@ -23,7 +23,7 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
         Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.ProductRepo, Effects.BriefGitHub, Effects.BriefClaude,
         Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory, Effects.PrLookup,
-        Effects.GitHubReads {
+        Effects.GitHubReads, Effects.DraftClaude {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -338,6 +338,12 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     public RouteAnswer route(long taskId, String system, String prompt) {
         record("routeClaude " + taskId);
         return new RouteAnswer("", true, "shadow: the router does not run");
+    }
+
+    @Override
+    public Effects.DraftAnswer draft(long draftId, String system, String prompt) {
+        record("draftClaude " + draftId);
+        return new Effects.DraftAnswer(null, "shadow: the draft does not run");
     }
 
     @Override

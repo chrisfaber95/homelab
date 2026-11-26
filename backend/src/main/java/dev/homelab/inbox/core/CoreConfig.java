@@ -36,13 +36,22 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 class CoreConfig {
 
+    /**
+     * core.effects chooses the Effects wired in: shadow (default) or live; anything else is a configuration error. Checked
+     * before any bean is made, so the error is this one whatever bean the container happens to create first.
+     */
     @Bean
-    CoreSettings coreSettings(Settings conf, @Value("${core.scheduler.enabled:false}") boolean enabled,
-                              @Value("${core.effects:shadow}") String effects) {
-        // core.effects chooses the Effects wired in: shadow (default) or live; anything else is a configuration error.
-        if (!"shadow".equals(effects) && !"live".equals(effects)) {
-            throw new IllegalStateException("core.effects must be shadow or live, not '" + effects + "'");
-        }
+    static org.springframework.beans.factory.config.BeanFactoryPostProcessor effectsValueCheck() {
+        return beanFactory -> {
+            String effects = beanFactory.resolveEmbeddedValue("${core.effects:shadow}");
+            if (!"shadow".equals(effects) && !"live".equals(effects)) {
+                throw new IllegalStateException("core.effects must be shadow or live, not '" + effects + "'");
+            }
+        };
+    }
+
+    @Bean
+    CoreSettings coreSettings(Settings conf, @Value("${core.scheduler.enabled:false}") boolean enabled) {
         return new CoreSettings(enabled, conf.confInt("MAX_RUNNING", 4), conf.confInt("MAX_PER_REPO", 3),
                 conf.confInt("MAX_TURNS", 80), conf.confInt("MAX_MINUTES", 30), conf.confInt("CAPPED_KEEP_DAYS", 7), 2);
     }

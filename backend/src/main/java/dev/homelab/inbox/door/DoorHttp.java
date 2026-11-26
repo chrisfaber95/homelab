@@ -43,7 +43,7 @@ public final class DoorHttp implements AutoCloseable {
         return server.getAddress().getPort();
     }
 
-    private static Map<String, String> query(String raw) {
+    static Map<String, String> query(String raw) {
         Map<String, String> q = new LinkedHashMap<>();
         if (raw != null) {
             for (String pair : raw.split("&")) {

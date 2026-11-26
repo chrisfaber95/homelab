@@ -138,6 +138,12 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     }
 
     @Override
+    public Result session(long taskId, String sessionId) {
+        record("session " + taskId);
+        return new Result(0, "");
+    }
+
+    @Override
     public Result behind(long taskId) {
         record("behind " + taskId);
         return new Result(1, "");

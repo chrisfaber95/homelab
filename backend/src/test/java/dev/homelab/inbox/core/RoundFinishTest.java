@@ -87,6 +87,12 @@ class RoundFinishTest {
         }
 
         @Override
+        public Result session(long taskId, String sessionId) {
+            super.session(taskId, sessionId);
+            return answers.getOrDefault("session", new Result(0, ""));
+        }
+
+        @Override
         public Result prepare(long taskId, String repo) {
             super.prepare(taskId, repo);
             return answers.getOrDefault("prepare", new Result(0, ""));
@@ -503,6 +509,28 @@ class RoundFinishTest {
         assertThat(t.str("note")).isEqualTo("1 actie(s) geweigerd door auto mode");
         assertThat(afterRounds).containsExactly("119:[block]");
         assertThat(fx.calls()).contains("stream 119 resume");
+    }
+
+    /** test_inbox_dead_session.RoundMode.test_existing_session_is_resumed */
+    @Test
+    void anExistingSessionIsResumed() throws Exception {
+        retried();
+        fx.outcome = new Effects.Sessions.Outcome("KLAAR: x", 0, null);
+        flow.run(119);
+        assertThat(fx.calls()).contains("session 119", "stream 119 resume");
+        assertThat(fx.prompts.get(0)).startsWith("Retried by the user.");
+    }
+
+    /** test_inbox_dead_session.RoundMode.test_missing_session_starts_a_new_one_with_the_task_text */
+    @Test
+    void aMissingSessionStartsANewOneWithTheTaskText() throws Exception {
+        retried();
+        fx.answers.put("session", new Result(1, ""));
+        fx.outcome = new Effects.Sessions.Outcome("KLAAR: x", 0, null);
+        flow.run(119);
+        assertThat(fx.calls()).contains("stream 119 new").doesNotContain("stream 119 resume");
+        assertThat(fx.prompts.get(0)).contains("scaffold it").contains("Retried by the user.")
+                .contains("fresh session");
     }
 
     @Test

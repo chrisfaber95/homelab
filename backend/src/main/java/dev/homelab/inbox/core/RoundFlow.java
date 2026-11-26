@@ -94,13 +94,22 @@ public class RoundFlow {
                     prompt = (prompt == null ? "" : prompt) + extra;
                 }
             }
+            String mode = first ? "new" : "resume";
+            if (!first && commands.session(taskId, t.str("session")).code() != 0) {
+                // No transcript to resume: an earlier round was cut off before Claude made its session (a restart of
+                // the inbox, inbox 235). Resuming it would end at once with 0 turns, so start it afresh.
+                mode = "new";
+                prompt = "Taak voor de repo " + t.repo() + ":\n\n" + t.str("text") + "\n\n"
+                        + "(An earlier round of this task never got going, so this is a fresh session.)\n\n"
+                        + (prompt == null ? "" : prompt);
+            }
             sessions.writePrompt(t, prompt);
             store.update(taskId, TaskStore.fields("status", "running", "started",
                     t.has("started") ? t.str("started") : store.now(), "rounds", t.num("rounds") + 1,
                     "pending_input", null, "reprepare", 0));
             taskLog.line("t" + taskId, "info", "ronde " + (t.num("rounds") + 1) + " gestart"
                     + (first ? "" : ": " + RoundFinisher.firstLine(prompt)));
-            outcome = sessions.stream(taskId, first ? "new" : "resume");
+            outcome = sessions.stream(taskId, mode);
         } catch (RuntimeException e) {
             log.warn("task {}: {}", taskId, e.toString());
             String why = String.valueOf(e.getMessage());

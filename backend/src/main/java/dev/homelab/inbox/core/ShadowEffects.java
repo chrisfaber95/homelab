@@ -22,7 +22,8 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
         Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.ProductRepo, Effects.BriefGitHub, Effects.BriefClaude,
-        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory, Effects.PrLookup {
+        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory, Effects.PrLookup,
+        Effects.GitHubReads {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -80,8 +81,15 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     }
 
     @Override
-    public void merge(String repoSlug, int prNumber) {
+    public void merge(String repoSlug, int prNumber, String sha, String commitTitle) {
         record("merge " + repoSlug + "#" + prNumber);
+    }
+
+    /** Shadow: GitHub is not asked at all; the answer is "nothing" (Python's fake GitHub does the same). */
+    @Override
+    public tools.jackson.databind.JsonNode get(String path) {
+        record("github GET " + path);
+        return tools.jackson.databind.node.MissingNode.getInstance();
     }
 
     @Override
@@ -98,6 +106,7 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     public void revive(Task task) {
         record("revive " + task.id());
     }
+
 
     @Override
     public void notify(String title, String body, String url, int limit) {

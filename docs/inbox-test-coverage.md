@@ -167,7 +167,7 @@ page cases (`test_pages_get_the_frontend_index`, `..._research_wins_over_the_res
 |---|---|
 | `StartTask` (6), `Answer` (2), `Lists` (2) | `ChatActionsTest` (`aTaskIsQueuedLikeAPageTask...`, `autoAndUnknownRepo`, `startingATaskNeedsThePermission`, `theDailyCapRefusesClearly...`, `theCapDefaultComesFromConfig`, `switchingDiscordOffStopsTasks`, `anAnswerContinuesTheTaskLikeThePage`, `notWaitingUnknownAndForbidden`, `stateListsRunningWaitingAndQueued`, `jobsAreListedAndRunNow`) |
 | `Approval` (10), `Forbidden` (2) | `ChatActionsTest` (`aRequestAloneApprovesNothing` ... `theCapAppliesAtConfirm`, `theConfigCannotGrantTheForbiddenActions`, `notEvenWithEveryPermissionListed`) |
-| `Door` (5) | `ChatDoorTest` |
+| `Door` (5) | `ChatDoorTest`, and over real HTTP (valid, missing and wrong token, non-loopback refused) `ChatDoorHttpTest` |
 | kitt `Door` (5), `Approvals` (4), `Conversation` (3), `JobsAndLogs` (3) | `KittDoorTest` (`onlyKittsAccountActingForChris`, `theRealPeerUidIsTheOwnerOfTheConnection`, `unknownPathsAndNoForbiddenRoutes`, `theStateFollowsThePermissionListAndTheSwitch`, `theBellListsAndApprovesAsKitt`, ..., `healthChecksAreSortedAndWordsMapped`), `ProcPeersTest` |
 | kitt `Gate` (5) | `KittGateTest` |
 | kitt `Page.test_switch_form_and_route` | `KittDoorTest.theKittSwitchIsOnThePageAndOffStopsTheApp` (the form is frontend) |

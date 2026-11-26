@@ -24,7 +24,8 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>Any other method: 501.</li>
  * </ul>
  * Errors are {@code {"error": "..."}} on {@code /api/*} and a small HTML page elsewhere. Not active until H-027
- * ({@link FrontDoorEnabled}). The chat and kitt doors and the gate on 8121 are K7.
+ * ({@link FrontDoorEnabled}). {@code /api/chat/action} is the chat door's (loopback and bearer token, H-028 W4a) and skips the owner and CSRF
+ * checks. The kitt door and the gate on 8121 are K7.
  */
 @Component
 @FrontDoorEnabled
@@ -49,6 +50,10 @@ public class FrontDoorFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         SecurityHeaders.apply(response);
         String method = request.getMethod();
+        if (isChatDoor(request)) { // its own checks: loopback, bearer token per client (ChatDoor)
+            chain.doFilter(request, response);
+            return;
+        }
         boolean api = request.getRequestURI().startsWith("/api/");
         if (!method.equals("GET") && !method.equals("POST") && !(api && isOtherMutating(method))) {
             plain(response, 501, "Unsupported method ('" + method + "')");
@@ -75,6 +80,11 @@ public class FrontDoorFilter extends OncePerRequestFilter {
             }
         }
         chain.doFilter(request, response);
+    }
+
+    private static boolean isChatDoor(HttpServletRequest request) {
+        String method = request.getMethod();
+        return request.getRequestURI().equals("/api/chat/action") && (method.equals("GET") || method.equals("POST"));
     }
 
     private static boolean isOtherMutating(String method) {

@@ -284,8 +284,9 @@ class M4Parity(unittest.TestCase):
         self.assertEqual(self.java("GET", "/api/chat/entries", "nobody")[1], {"error": "refused: no permission 'read'"})
 
     def test_zz_java_answers_503_for_nothing_it_can_do_and_keeps_the_paths(self):
-        self.assertEqual(self.java("GET", "/api/chat/action", "discord")[0], 404)  # not moved: Python's until K7
-        self.assertEqual(self.java("POST", "/api/chat/action", "discord", {"action": "state"})[0], 404)
+        # /api/chat/action is Java's too since H-028 W4a, with its own bearer token (ChatDoorHttpTest): no token, no entry
+        self.assertEqual(self.java("GET", "/api/chat/action", "discord")[0], 401)
+        self.assertEqual(self.java("POST", "/api/chat/action", "discord", {"action": "state"})[0], 401)
 
 
 if __name__ == "__main__":

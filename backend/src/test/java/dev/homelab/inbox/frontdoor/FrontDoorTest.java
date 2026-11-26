@@ -358,7 +358,8 @@ class FrontDoorTest {
     void aPageFormStillUsesItsCsrfField() throws Exception {
         Map<String, String> form = Map.of("Content-Type", "application/x-www-form-urlencoded");
         Reply ok = call("POST", "/tasks", form, "csrf=" + token() + "&repo=nope&text=", true);
-        assertThat(ok.status()).isEqualTo(404);  // through the door; this backend has no /tasks page yet (H-027)
+        assertThat(ok.status()).isEqualTo(400);  // through the door: the task route answers its "choose a repo" page (H-028 W2a)
+        assertThat(ok.body()).contains("Kies een repo uit de lijst");
         Reply bad = call("POST", "/tasks", form, "repo=x", true);
         assertThat(bad.status()).isEqualTo(403);
         assertThat(bad.header("Content-Type")).contains("text/html");

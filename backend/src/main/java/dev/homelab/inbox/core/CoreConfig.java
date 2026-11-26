@@ -246,6 +246,16 @@ class CoreConfig {
                 pageBase(conf));
     }
 
+    /** The data of the task pages (H-028 W2a): read through the store, the follow-up chain and the briefs. */
+    @Bean
+    TaskPages taskPages(TaskStore store, FollowupChain chain, Briefs briefs, Settings conf, CoreSettings settings, Jobs jobs,
+                        tools.jackson.databind.json.JsonMapper json) {
+        return new TaskPages(store, chain, briefs, new TaskLogs(conf, json), name -> {
+            Jobs.Job job = jobs.load().get(name);
+            return job == null ? null : job.kind();
+        }, settings, conf.tz().toString());
+    }
+
     private static String pageBase(Settings conf) {
         return "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
     }

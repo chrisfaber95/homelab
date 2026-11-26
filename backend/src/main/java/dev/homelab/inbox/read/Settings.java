@@ -138,6 +138,12 @@ public class Settings {
         return runnerHome().resolve("repos").resolve("homelab").resolve("skills");
     }
 
+    /** {@code FRONTEND_DIST}: the built frontend, by default {@code frontend/dist} next to the installed config directory. */
+    public Path frontendDist() {
+        Path root = configDir.toAbsolutePath().getParent();
+        return Path.of(env.getOrDefault("FRONTEND_DIST", (root == null ? Path.of("/") : root).resolve("frontend").resolve("dist").toString()));
+    }
+
     public Path newReposFile() {
         return runnerHome().resolve("new-repos.json");
     }

@@ -49,6 +49,17 @@ final class CoreFixture {
         };
     }
 
+    /** The JDBC url and user of the database {@link #db()} started, for a Spring test that needs the same one. */
+    static synchronized String url() throws Exception {
+        db();
+        return url;
+    }
+
+    static synchronized String user() throws Exception {
+        db();
+        return user;
+    }
+
     static void clear(ConnectionSource db) throws Exception {
         try (Connection c = db.open(); Statement s = c.createStatement()) {
             s.execute("TRUNCATE tasks RESTART IDENTITY");

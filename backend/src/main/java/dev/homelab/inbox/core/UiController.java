@@ -80,7 +80,7 @@ public class UiController {
                 type += "; charset=utf-8";
             }
             return ResponseEntity.ok().header("Content-Type", type).header("Cache-Control", cache).body(Files.readAllBytes(f));
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) { // unreadable or a malformed path (NUL byte): no such file
             return missing();
         }
     }

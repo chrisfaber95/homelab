@@ -1044,7 +1044,7 @@ and puts `frontend/dist` in the jar under `ui/dist/`; `web/` goes in under `ui/w
 jar (unpacked once to a temp directory; the unit has `PrivateTmp`).
 
 **Host and port** come from `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`), as before.
-The second tailnet connector (`inbox.public.port`) and the kitt gate are the next slice (W5b).
+The second tailnet connector is described below (W5b); the kitt gate is a later slice.
 
 **What a later slice needs on the box** (not done here: this change installs nothing):
 - build the jar with `-Pui` (`scripts/27-backend.sh` runs no npm today; add the npm step with the same throwaway-user
@@ -1052,5 +1052,22 @@ The second tailnet connector (`inbox.public.port`) and the kitt gate are the nex
 - a unit for staging or the cut-over: `BACKEND_HOST=100.85.70.34` (the tailnet address) with `BACKEND_PORT=<port>` (8105 at the
   cut-over), `INBOX_FRONT_DOOR_ENABLED=true` (`inbox.front-door.enabled`), `CORE_EFFECTS` and `CORE_SCHEDULER_ENABLED`; `FRONTEND_DIST`/`WEB_DIR` only when not
   using the jar's copy; the existing ufw rule for `8100:8199` on `tailscale0` covers a port in that range;
-- until the second connector exists, Java listens on one address: loopback keeps the doors (chat, kitt) reachable and the tailnet
-  address would not, so the cut-over needs W5b first.
+- the tailnet address is the second connector's job (below): `BACKEND_HOST` stays loopback, so the doors (chat, kitt) stay
+  reachable on loopback only.
+
+## The tailnet connector (H-028 W5b)
+
+`frontdoor/PublicConnector` adds a second Tomcat connector when `inbox.public.port` (env `INBOX_PUBLIC_PORT`) has a
+value. It binds only the first IPv4 address of `inbox.public.interface` (env `INBOX_PUBLIC_INTERFACE`, default
+`tailscale0`), never a wildcard. With no value (the default) there is no second connector and no `PublicPortGuard`.
+
+It fails the start, and falls back to nothing wider, when: the port is not 1-65535 or equals `server.port`; the front door
+is off (`inbox.front-door.enabled`, so owner check and CSRF always guard this port); the interface or its IPv4 address is
+missing; or the address is outside `inbox.public.cidr` (env `INBOX_PUBLIC_CIDR`, default the tailnet range
+`100.64.0.0/10`), so a wrong interface name can never bind a LAN address.
+
+The loopback-only doors stay refused on it: `PublicPortGuard` answers 403 `loopback only` for `/api/chat/action` (also
+with `;params`, doubled or trailing slashes) and for any request with `X-Homelab-Client`, by the port it came in on; the
+doors also check the peer address themselves. Pick the port inside `8100:8199` (the ufw rule for `tailscale0`) and order
+the unit `After=tailscaled.service`. Tests: `PublicConnectorTest` (setting present, `lo` stands in for `tailscale0`) and
+`PublicConnectorOffTest` (setting absent: one connector, no guard).

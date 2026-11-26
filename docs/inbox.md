@@ -164,3 +164,34 @@ H-025 R2: `jobs.make_draft` no longer calls `homelab-inbox-task draft` itself: i
 H-025 R2 part 1: `router.run_route` starts `python3 -I runner/route.py <task id>` the same way and reads its one `result` line; the runner owns the Claude call (`route r<id>` through the same sudoers line) and the parsing of Claude's JSON, `router.py` keeps when and with what. No prompt or token in the arguments. Contract: "Runner `route.py`" in `runner/SCHEMA.md`. Rollback: revert the PR.
 
 A retry never resumes a session that does not exist (inbox 235): if a round was cut off before Claude made its session (a restart of the inbox seconds after the start), `run_round` asks `homelab-inbox-task session <id> <session>` (exit 0 when `$TASK_HOME/.claude/projects/*/<session>.jsonl` exists) and, when it is missing, starts a new session with the task text plus the retry note. A round that ends with 0 turns and an error or empty result now fails with Claude's own message (`Claude deed niets (0 beurten): ...`, also in the task log) instead of "no commits". Tests: `tests/test_inbox_dead_session.py`. Rollback: revert the PR.
+
+## Cut-over to the Java backend: the data step (H-027 X1a)
+
+`scripts/inbox_cutover.py` moves the last data of the old Python inbox (`inbox.db`) to PostgreSQL right before the switch.
+It does not switch anything: no port, no unit is enabled, disabled or changed (another task does that). Run it as root from
+root's clone, only when H-023 to H-026 are merged and installed:
+
+```sh
+sudo python3 /var/lib/homelab/repo/scripts/inbox_cutover.py
+```
+
+In this order:
+
+1. **Guard.** Any task with status `running` in `inbox.db` means: exit 1 with `REFUSED ... task(s) running`, nothing changed.
+   Wait for the task or cancel it, then run again. The check is repeated after step 2 (a task that started in between).
+2. **Stop** `homelab-inbox`, so nothing writes `inbox.db` any more.
+3. **Final import**: a consistent snapshot of `inbox.db` (SQLite backup API, WAL included), then `import-sqlite` of the jar
+   (`backend/README.md`, "One-off import") as `inbox-runner`.
+4. **Row counts** per table, snapshot against PostgreSQL: `tasks`, `job_runs`, `job_state`, `drafts`, `skill_prs`. (`conversation`,
+   `conversation_refusals`, `approvals` and the `switch:*` keys are Java's since H-024 M4, so they are not compared.) Any
+   difference: exit 1, and `homelab-inbox` is started again if it was running: the old inbox stays in place.
+5. **Keep the copies** in `/var/backups/homelab/inbox-cutover-<YYYY-MM-DD>/` (0700): `inbox.db` (the final copy) and
+   `inbox.dump` (a fresh `pg_dump --format=custom` of `inbox`). Both paths are printed. Keep them for one release; X2 removes
+   them. `homelab-backup` does not prune this directory. To roll back after the switch, restore from them (Q9: data written
+   since the switch is lost).
+
+On success `homelab-inbox` stays stopped, ready for the switch. Safe to rerun: the import refuses a non-empty database, so a
+marker `cutover-import.json` next to `inbox.db` records the hash of the imported snapshot; the same `inbox.db` skips the import
+and only compares and backs up again. A changed `inbox.db` with already filled tables aborts: empty the tables first
+(`backend/README.md`). Options (flags or `CUTOVER_*` environment variables): `--inbox-db`, `--jar`, `--java`, `--backup-root`,
+`--runner`, `--pg-run`, `--unit`, `--database`. Tests: `python3 -m unittest tests.test_inbox_cutover`.

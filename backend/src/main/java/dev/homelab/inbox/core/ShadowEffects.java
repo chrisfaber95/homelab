@@ -1,7 +1,11 @@
 package dev.homelab.inbox.core;
 
+import dev.homelab.inbox.core.Effects.ClaudeAnswer;
+import dev.homelab.inbox.core.Effects.ProductFile;
+import dev.homelab.inbox.core.Effects.RouteAnswer;
 import dev.homelab.inbox.core.Effects.ResearchRun;
 import dev.homelab.inbox.core.Effects.Result;
+import dev.homelab.inbox.core.Effects.SetupPr;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,7 +21,9 @@ import org.slf4j.LoggerFactory;
 public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies, Effects.Notifier,
         Effects.GitHubWrites, Effects.TaskLog, Effects.ConversationNotes, Effects.Followups, Effects.TaskCommands,
         Effects.Pushes, Effects.PullRequests, Effects.Research, Effects.AfterEffects, Effects.MemorySteps,
-        Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.GitHubReads {
+        Effects.Repos, Effects.Sessions, Effects.JobIo, Effects.ProductRepo, Effects.BriefGitHub, Effects.BriefClaude,
+        Effects.RepoProfiles, Effects.NewRepos, Effects.Diffs, Effects.RouteClaude, Effects.TaskHistory, Effects.PrLookup,
+        Effects.GitHubReads {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowEffects.class);
     private static final int KEEP = 1000;
@@ -101,22 +107,6 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
         record("revive " + task.id());
     }
 
-    @Override
-    public List<Task> blocked(Task task, boolean automatic) {
-        record("blocked " + task.id());
-        return List.of();
-    }
-
-    @Override
-    public int reviveAfterMerge(Task task) {
-        record("reviveAfterMerge " + task.id());
-        return 0;
-    }
-
-    @Override
-    public void remember(long taskId) {
-        record("remember " + taskId);
-    }
 
     @Override
     public void notify(String title, String body, String url, int limit) {
@@ -253,5 +243,100 @@ public class ShadowEffects implements Effects.RoundRunner, Effects.WorkingCopies
     @Override
     public void plan(long taskId) {
         record("plan " + taskId);
+    }
+
+    @Override
+    public List<ProductFile> briefFiles() {
+        record("briefFiles");
+        return List.of();
+    }
+
+    @Override
+    public String read(String path) {
+        record("read " + path);
+        return null;
+    }
+
+    @Override
+    public void commitToMain(String path, String text, String message) {
+        record("commitToMain " + path + " " + message);
+    }
+
+    @Override
+    public void pushBranch(String branch, Map<String, String> files, String message) {
+        record("pushBranch " + branch);
+    }
+
+    @Override
+    public List<SetupPr> setupPrs(String slug, String briefId) {
+        record("setupPrs " + slug + " " + briefId);
+        return List.of();
+    }
+
+    @Override
+    public void mergeSetupPr(String slug, int number, String title) {
+        record("mergeSetupPr " + slug + "#" + number);
+    }
+
+    @Override
+    public void comment(String slug, int prNumber, String body) {
+        record("comment " + slug + "#" + prNumber);
+    }
+
+    @Override
+    public void mergeHandoff(String slug, int number, String title) {
+        record("mergeHandoff " + slug + "#" + number);
+    }
+
+    @Override
+    public ClaudeAnswer plan(long taskId, String system, String prompt) {
+        record("claude plan " + taskId);
+        return new ClaudeAnswer(false, "", "shadow: no Claude");
+    }
+
+    @Override
+    public ClaudeAnswer review(long taskId, String system, String prompt) {
+        record("claude review " + taskId);
+        return new ClaudeAnswer(false, "", "shadow: no Claude");
+    }
+
+    @Override
+    public String profiles(Map<String, String> repos, boolean ci) {
+        record("profiles");
+        return "";
+    }
+
+    @Override
+    public void add(String name, String slug) {
+        record("newRepo " + name);
+    }
+
+    @Override
+    public List<String> changedFiles(String cache, long taskId) {
+        record("changedFiles " + taskId);
+        return List.of();
+    }
+
+    @Override
+    public String diff(String cache, long taskId, List<String> paths) {
+        record("diff " + taskId);
+        return "";
+    }
+
+    @Override
+    public RouteAnswer route(long taskId, String system, String prompt) {
+        record("routeClaude " + taskId);
+        return new RouteAnswer("", true, "shadow: the router does not run");
+    }
+
+    @Override
+    public void remember(long taskId) {
+        record("remember " + taskId);
+    }
+
+    @Override
+    public Optional<Effects.PrState> get(String repoSlug, int number) {
+        record("prState " + repoSlug + "#" + number);
+        return Optional.empty();
     }
 }

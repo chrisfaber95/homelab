@@ -55,6 +55,12 @@ final class CoreFixture {
         }
     }
 
+    static void clearBuilds(ConnectionSource db) throws Exception {
+        try (Connection c = db.open(); Statement s = c.createStatement()) {
+            s.execute("DELETE FROM tasks WHERE repo='brief'");
+        }
+    }
+
     /** Insert a task with explicit id and fields (status etc.), like the follow-up tests do with SQL. */
     static void insert(ConnectionSource db, long id, String repo, String status, String... columnValues) throws Exception {
         StringBuilder cols = new StringBuilder("id,repo,text,status,created,session");
@@ -76,7 +82,7 @@ final class CoreFixture {
                 String col = columnValues[i * 2];
                 String v = values.get(i);
                 boolean number = List.of("rounds", "restarts", "parent", "after_task", "pr_number", "reprepare", "turns",
-                        "accepted", "no_auto_revive", "run_id", "review_ok", "unattended", "conflicts").contains(col);
+                        "accepted", "no_auto_revive", "run_id", "unattended", "reviews", "review_ok", "conflicts").contains(col);
                 if (v == null) {
                     st.setObject(7 + i, null);
                 } else if (number) {

@@ -115,6 +115,11 @@ def stream_claude(task_id, mode):
     errfile.close()
     if result is None and capped is None:
         raise RuntimeError(f"Claude stopte zonder resultaat: {err}")
+    if capped is None and turns == base_turns and (result.get("is_error") or not str(result.get("result") or "").strip()):
+        # Claude ended without a single turn (a resume that found no session, a refused start): that is a failure
+        # of the round, not an answer without KLAAR. Say what Claude said instead of "no commits".
+        log_line(f"t{task_id}", "error", f"ronde zonder beurten: {str(result.get('result') or '')[:200]} {err}".strip())
+        raise RuntimeError(f"Claude deed niets (0 beurten): {str(result.get('result') or '')[:200]} {err}".strip())
     return result, turns, capped
 
 

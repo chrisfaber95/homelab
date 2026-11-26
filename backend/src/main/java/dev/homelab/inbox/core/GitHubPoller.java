@@ -6,8 +6,8 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.homelab.inbox.core.Effects.GitHubHttpException;
 import dev.homelab.inbox.core.Effects.GitHubReads;
 import dev.homelab.inbox.core.Effects.GitHubWrites;
-import dev.homelab.inbox.core.Effects.Followups;
-import dev.homelab.inbox.core.Effects.MemorySteps;
+import dev.homelab.inbox.core.Effects.PrState;
+import dev.homelab.inbox.core.Effects.TaskHistory;
 import dev.homelab.inbox.core.Effects.Notifier;
 import dev.homelab.inbox.core.Effects.Pushes;
 import dev.homelab.inbox.core.Effects.Repos;
@@ -61,8 +61,8 @@ public class GitHubPoller {
     private final Notifier notifier;
     private final TaskLog taskLog;
     private final WorkingCopies copies;
-    private final MemorySteps memory;
-    private final Followups followups;
+    private final TaskHistory history;
+    private final FollowupChain followups;
     private final Repos repos;
     private final TaskCommands commands;
     private final Pushes pushes;
@@ -73,7 +73,7 @@ public class GitHubPoller {
 
     public GitHubPoller(TaskStore store, CoreSettings settings, GitHubSettings github, GitHubReads reads,
                         GitHubWrites writes, Notifier notifier, TaskLog taskLog, WorkingCopies copies,
-                        MemorySteps memory, Followups followups, Repos repos, TaskCommands commands, Pushes pushes,
+                        TaskHistory history, FollowupChain followups, Repos repos, TaskCommands commands, Pushes pushes,
                         Research research, Clock clock, String pageBase) {
         this.store = store;
         this.settings = settings;
@@ -83,7 +83,7 @@ public class GitHubPoller {
         this.notifier = notifier;
         this.taskLog = taskLog;
         this.copies = copies;
-        this.memory = memory;
+        this.history = history;
         this.followups = followups;
         this.repos = repos;
         this.commands = commands;
@@ -109,7 +109,7 @@ public class GitHubPoller {
             }
         }
         for (Task t : store.tasks(WINDOW)) {
-            if (MERGE_WATCHED.contains(t.status()) && t.has("pr_number") && !followups.blocked(t, true).isEmpty()) {
+            if (MERGE_WATCHED.contains(t.status()) && t.has("pr_number") && !followups.blockedFollowups(t, true).isEmpty()) {
                 try {
                     checkBlockingPr(t);
                 } catch (RuntimeException e) {
@@ -195,21 +195,16 @@ public class GitHubPoller {
     private void prClosed(Task t, boolean merged) {
         store.update(t.id(), TaskStore.fields("status", merged ? "merged" : "closed", "ended", store.now()));
         copies.cleanup(t.id());
-        memory.remember(t.id());
+        history.remember(t.id());
     }
 
-    /** A task that ended badly but whose PR the user merged anyway is fine: its follow-ups go back in the queue. */
+    /** A task that ended badly but whose PR the user merged anyway is fine: {@link FollowupChain#checkBlockingPr}. */
     void checkBlockingPr(Task t) {
-        String slug = repos.list().get(t.repo());
-        JsonNode pr = slug == null ? null : reads.get("/repos/" + slug + "/pulls/" + t.num("pr_number"));
-        if (pr == null || !pr.isObject() || !"closed".equals(text(pr, "state")) || !pr.path("merged").asBoolean(false)) {
-            return;
-        }
-        prClosed(t, true);
-        int n = followups.reviveAfterMerge(store.get(t.id()).orElseThrow());
-        taskLog.line("t" + t.id(), "info", "PR #" + t.num("pr_number") + " merged: " + n + " follow-up(s) back in the queue");
-        notifier.notify(label(t) + ": PR #" + t.num("pr_number") + " merged", n + " follow-up(s) back in the queue",
-                pageBase + "/task/" + t.id());
+        followups.checkBlockingPr(t, repos, (slug, number) -> {
+            JsonNode pr = reads.get("/repos/" + slug + "/pulls/" + number);
+            return pr == null || !pr.isObject() ? java.util.Optional.<PrState>empty()
+                    : java.util.Optional.of(new PrState(text(pr, "state"), pr.path("merged").asBoolean(false)));
+        });
     }
 
     private static String label(Task t) {

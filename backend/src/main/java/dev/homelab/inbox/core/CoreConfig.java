@@ -83,11 +83,25 @@ class CoreConfig {
 
     @Bean
     TaskActions taskActions(TaskStore store, CoreSettings settings, Cancellations cancellations, RoundRunner runner,
-                            WorkingCopies copies, TaskLog log, ConversationNotes notes, Followups followups,
+                            WorkingCopies copies, TaskLog log, ConversationNotes notes, FollowupChain followups,
                             java.util.concurrent.ExecutorService coreExecutor, Clock clock, Settings conf) {
         String base = "http://" + conf.conf("TAILNET_NAME", "homelab") + ":" + conf.conf("INBOX_PORT", "8105");
         return new TaskActions(store, settings, cancellations, runner, copies, log, notes, followups, coreExecutor,
                 clock, base);
+    }
+
+    /** The follow-up chain and the router (K3): nothing calls them while the scheduler is off. */
+    @Bean
+    FollowupChain followupChain(TaskStore store, CoreSettings settings, WorkingCopies copies, TaskLog log,
+                                Notifier notifier, Effects.TaskHistory history, Settings conf) {
+        return new FollowupChain(store, settings, copies, log, notifier, history, pageBase(conf));
+    }
+
+    @Bean
+    Router router(TaskStore store, Repos repos, Effects.RepoProfiles profiles, Effects.RouteClaude claude,
+                  Notifier notifier, ConversationNotes notes, TaskLog log, Cancellations cancellations, Settings conf) {
+        return new Router(store, repos, profiles, claude, notifier, notes, log, cancellations,
+                conf.confInt("ROUTE_MAX_CHILDREN", 3), pageBase(conf));
     }
 
     @Bean
@@ -146,14 +160,34 @@ class CoreConfig {
     }
 
     @Bean
+    Briefs briefs(TaskStore store, Effects.ProductRepo product, Effects.BriefGitHub github, Repos repos,
+                  Effects.NewRepos newRepos, TaskLog log, Clock clock, Settings conf) {
+        Briefs.Settings s = new Briefs.Settings(conf.conf("PRODUCT_REPO", "chrisfaber95/product"),
+                conf.conf("OWNER_GITHUB", "chrisfaber95"), conf.confInt("PLAN_MAX_TASKS", 6),
+                conf.confInt("MAX_TURNS", 80), conf.confInt("MAX_MINUTES", 30), conf.confInt("REVIEW_MAX_DIFF", 60000),
+                conf.confInt("REVIEW_REWORK_ROUNDS", 1));
+        return new Briefs(store, product, github, repos, newRepos, log, s, clock);
+    }
+
+    /** Planner, reviewer and handoff of the briefs: not called by anything while the scheduler is off. */
+    @Bean
+    BriefRounds briefRounds(TaskStore store, Briefs briefs, Repos repos, Effects.RepoProfiles profiles,
+                            Effects.BriefClaude claude, Effects.Diffs diffs, Effects.BriefGitHub github,
+                            PullRequests pullRequests, Notifier notifier, ConversationNotes notes, TaskLog log,
+                            Cancellations cancellations, Settings conf) {
+        return new BriefRounds(store, briefs, repos, profiles, claude, diffs, github, pullRequests, notifier, notes, log,
+                cancellations, pageBase(conf));
+    }
+
+    @Bean
     GitHubPoller gitHubPoller(TaskStore store, CoreSettings settings, Effects.GitHubReads reads,
                               Effects.GitHubWrites writes, Notifier notifier, TaskLog log, WorkingCopies copies,
-                              MemorySteps memory, Followups followups, Repos repos, TaskCommands commands,
-                              Pushes pushes, Research research, Clock clock, Settings conf) {
+                              Effects.TaskHistory history, FollowupChain followups, Repos repos,
+                              TaskCommands commands, Pushes pushes, Research research, Clock clock, Settings conf) {
         String owner = System.getenv("OWNER_LOGIN") != null ? System.getenv("OWNER_LOGIN")
                 : conf.conf("OWNER_GITHUB", "chrisfaber95");
         return new GitHubPoller(store, settings, new GitHubPoller.GitHubSettings(owner, conf.confInt("CONFLICT_ROUNDS", 2)),
-                reads, writes, notifier, log, copies, memory, followups, repos, commands, pushes, research, clock,
+                reads, writes, notifier, log, copies, history, followups, repos, commands, pushes, research, clock,
                 pageBase(conf));
     }
 

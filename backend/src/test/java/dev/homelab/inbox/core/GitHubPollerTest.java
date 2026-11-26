@@ -119,7 +119,12 @@ class GitHubPollerTest {
     private GitHubPoller poller(boolean schedulerOn) {
         CoreSettings s = CoreSettings.shadowDefaults().withSchedulerEnabled(schedulerOn);
         return new GitHubPoller(store, s, new GitHubPoller.GitHubSettings("chris", 2), hub, hub, hub, hub, hub, hub,
-                new FollowupChain(store, hub), hub, hub, hub, hub, clock, "http://h");
+                chain(), hub, hub, hub, hub, clock, "http://h");
+    }
+
+    private FollowupChain chain() {
+        return new FollowupChain(store, CoreSettings.shadowDefaults().withSchedulerEnabled(true), hub, hub, hub, hub,
+                "http://h");
     }
 
     private void check(long id) {
@@ -234,7 +239,7 @@ class GitHubPollerTest {
     void aMergeDoesNotRestartAFollowupFromBeforeThisFeature() throws Exception {
         followupFixture();
         set(75, "no_auto_revive", 1);
-        assertThat(new FollowupChain(store, hub).blocked(t(74), true)).isEmpty();
+        assertThat(chain().blockedFollowups(t(74), true)).isEmpty();
         poller(true).checkBlockingPr(t(74));
         assertThat(statuses(74, 75)).containsExactly("merged", "cancelled");
     }
@@ -538,7 +543,7 @@ class GitHubPollerTest {
         shadow.merge("o/r", 1, "abc", "t");
         assertThat(shadow.calls()).containsExactly("github GET /repos/o/r/pulls/1", "merge o/r#1");
         GitHubPoller p = new GitHubPoller(store, CoreSettings.shadowDefaults().withSchedulerEnabled(true),
-                new GitHubPoller.GitHubSettings("chris", 2), shadow, shadow, shadow, shadow, shadow, shadow, shadow,
+                new GitHubPoller.GitHubSettings("chris", 2), shadow, shadow, shadow, shadow, shadow, shadow, chain(),
                 hub, shadow, shadow, shadow, clock, "http://h");
         p.poll(); // the shadow repo list is the Hub's; every answer of GitHub is "nothing": nothing is merged
         assertThat(shadow.calls()).noneMatch(c -> c.startsWith("merge o/r#13") || c.startsWith("notify"));

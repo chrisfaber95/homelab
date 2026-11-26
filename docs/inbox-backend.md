@@ -641,7 +641,7 @@ start while the effects are the shadow ones, so until the real effects exist (K2
 error, not a way to run tasks. Limits come from the same `*.conf` keys as Python (`MAX_RUNNING`, `MAX_PER_REPO`, `MAX_TURNS`,
 `MAX_MINUTES`, `CAPPED_KEEP_DAYS`).
 
-Left for later tasks (K3 to K7): the router and the follow-up chain (`Followups` is only the hook),
+Left for later tasks (K4 to K7): (the router and follow-up chain are K3, below; `Followups` is the hook they implement),
 `settle_routed`/`settle_briefs`, the real effects, and the loop calling the K2+ pieces. K2 is below.
 
 ### Which Python test each Java test covers
@@ -800,9 +800,8 @@ Still **nothing switched**: Python's `github.py` polls and merges; `GitHubPoller
 - **Read-only in shadow.** `Effects.GitHubReads` has a `get` and nothing else; the only write is `Effects.GitHubWrites.merge`.
   `ShadowEffects` answers every read with "nothing" and only records a merge. With the scheduler off `poll()` returns before
   reading anything; `GitHubPollLoop` does not exist then, and it refuses to start on shadow reads or writes.
-- `FollowupChain` ports `blocked_followups` and `revive_followups` (K3 wires it and ports the rest of the router);
-  `TaskStore.children`, `MemorySteps.remember` (default no-op) are new. `GitHubWrites.merge` now takes the head sha and the
-  commit title.
+- `FollowupChain` (K3) does the follow-ups and `check_blocking_pr`; the poller feeds it `GitHubReads` through `PrLookup`
+  and uses `TaskHistory.remember` after a merge or close. `GitHubWrites.merge` now takes the head sha and the commit title.
 - Not done: a real `GitHubReads`/`GitHubWrites` over HTTP with the token (`/etc/homelab`). It comes with the cut-over (H-027),
   because until then nothing may merge from Java.
 
@@ -820,6 +819,63 @@ Still **nothing switched**: Python's `github.py` polls and merges; `GitHubPoller
 
 Not ported: `test_inbox_followups.test_mark_as_fine_*` and `test_unmarked_task_still_stops_followups` (`accept_task`,
 `settle_routed`: K3); the `merges_itself` patch in `test_runner_review` (the brief review, K4).
+
+## Core in shadow: briefs (H-026 K4)
+
+The briefs of `bin/homelab_inbox/briefs.py` exist in Java with the same behaviour, in `backend/.../core/`:
+
+| Class | Python | What |
+|---|---|---|
+| `BriefParsing` | `split_frontmatter`, `load_briefs` (one file), `task_limit`, `parse_plan`, `parse_review`, `REVIEW_SKIP`, the status edits of `set_brief_status` and `handoff` | Pure text and JSON handling, no I/O |
+| `Briefs` | `load_briefs`, `builds`, `build_left_nothing`, `live_build`, `set_brief_status`, `start_build`, `add_new_repo`, `merge_setup_pr`, `helpers.merges_itself` | Brief intake and the builds |
+| `BriefRounds` | `plan_task`, `review_pr`, `review_diff`, `handoff`, `settle_briefs` | Planning into tasks or a question back to the user, the PR review with one rework round, the handoff PR |
+| `BriefPages` | `overview.briefs_data`, `brief_data`, `brief_view`, `build_view` | The data of the Briefs page; no route uses it |
+
+Everything outside the task store goes through new interfaces in `Effects` (`ProductRepo`, `BriefGitHub`, `BriefClaude`,
+`RepoProfiles`, `NewRepos`, `Diffs`), plus the existing `Notifier`, `ConversationNotes`, `PullRequests` and `Repos`. The
+`ShadowEffects` implement all of them and do nothing: no Claude run, commit, comment, PR, merge or notification (the shadow
+test `withTheShadowEffectsNothingLeavesTheCore` checks this). `Sessions.plan` and `AfterEffects.reviewPr` are still the shadow
+ones: wiring them to `BriefRounds.planTask` and `reviewPr` is part of the cut-over (H-027), together with the real effects.
+No route is switched. `TaskStore` got `children`, `builds`, `buildsToHandOff`, `newBuild` and `newChild`.
+
+Differences from Python, on purpose: the planner and reviewer get Claude's answer as a `ClaudeAnswer` (the runner owns the
+parsing of Claude's JSON, Q7), so `helpers.claude_result` stays in Python; the criteria of a child task are written with
+Jackson (non-ASCII is not escaped, as `json.dumps` does by default).
+
+### Which Python test each Java test covers
+
+All Java tests are in `BriefsTest`; "new" marks behaviour of `briefs.py` that no Python test covers.
+
+| Java test | Python test |
+|---|---|
+| `aCancelledBuildDoesNotBlockANewOne` | `test_inbox_builds.Builds.test_a_cancelled_build_does_not_block_a_new_one` |
+| `aPlannedBuildWhoseTasksWereAllCancelledCanBeStartedAgain` | `...test_a_planned_build_whose_tasks_were_all_cancelled_can_be_started_again` |
+| `aBuildWithAMergedTaskStaysLive` | `...test_a_build_with_a_merged_task_stays_live` |
+| `aBuildThatIsStillRunningStaysLive` | `...test_a_build_that_is_still_running_stays_live` |
+| `aBuildWithoutTasksYetStaysLive` | `...test_a_build_without_tasks_yet_stays_live` |
+| `aCancelledBuildDoesNotHideAnEarlierOneWithMergedWork` | `...test_a_cancelled_build_does_not_hide_an_earlier_one_with_merged_work` |
+| `theSettingAppliesWhenTheBriefSaysNothing` | `test_inbox_builds.TaskLimit.test_the_setting_applies_when_the_brief_says_nothing` |
+| `theBriefSetsItsOwnLimit` | `...test_the_brief_sets_its_own_limit` |
+| `aPlanOverTheLimitIsRefused` | `...test_a_plan_over_the_limit_is_refused` |
+| `limitZeroTakesAnyNumberOfTasks` | `...test_limit_zero_takes_any_number_of_tasks` |
+| `theListGroupsBriefsByStatusWithTheirActions` | `test_inbox_briefs_api.BriefsApi.test_list` |
+| `anUnreadableProductRepoGivesAnErrorAndEmptyLists` | `...test_unreadable_product_repo` |
+| `oneBriefComesWithItsBodyPathAndZone` | `...test_one_brief`, `...test_times_come_with_their_zone` |
+| `anUnknownBriefIsNotFound` | `...test_unknown_brief` (the 404 itself is the route's) |
+| `aBuildThatCannotStartSaysWhy` | `...test_a_failed_build_is_400_with_the_reason` (the 400 itself is the route's) |
+| `parkingADraftCommitsTheNewStatusAndKeepsTheComment` | `...test_park_redirects_to_the_briefs_page` (the redirect is the route's) |
+| `theReviewReadsTheRunnersResult` | `test_runner_review.InboxUsesRunner.test_review_pr_reads_the_runner_result` |
+| `withTheShadowEffectsNothingLeavesTheCore` | acceptance criterion 2 (no Python counterpart) |
+
+Not ported, because they test Python-only parts: `test_inbox_builds.ClaudeResult` (`helpers.claude_result`), and the
+runner process tests of `test_runner_review.Review` (`runner/review.py` stays Python; `RunnerServiceTest` covers the Java
+side of the contract). The brief parts of `test_inbox_followups`, `test_inbox_auto_merge` and `test_inbox_tasks_api` belong
+to K3 (follow-ups), K5 (auto merge) and the routes (K8). The other Java tests are new and cover the planner
+(`thePlannerMakesChildTasks`, `aQuestionFromThePlannerWaits`, `theAnswerGoesBackToThePlanner`,
+`whatGoesWrongFailsTheBuildWithTheReason`, `aCancelledPlannerMakesNoTasks`, `thePlanIsChecked`), the review
+(`aPassedReviewIsCommentedAndNotified`, `aMissSendsTheTaskBackOnce`, `aBuildWithoutMeMergesProductRepoPrsItself`,
+`mergesItselfNeedsEveryCondition`, `theReviewerDiffLeavesOutLockfilesAndPutsDocsLast`, `theReviewIsChecked`), the setup PR,
+`start_build` and the handoff.
 
 ## Chat actions, approvals, kitt door and gate in shadow (H-026 K7)
 
@@ -844,3 +900,41 @@ header is the upstream's. Tests: `backend/src/test/java/dev/homelab/inbox/door/`
 what Python allows (`TailscaleOwnerTest`), and `ShadowDoorTest` (no round, merge or notification; no gate listener).
 Real briefs, jobs and search ports arrive with K4 and K6; a bean that replaces `ShadowPorts` must provide all three.
 `TailscaleOwner` overlaps the K8 `frontdoor` access check; unify them at the cut-over (H-027).
+
+## Core in shadow: router and follow-ups (H-026 K3)
+
+Still **nothing switched**: Python's `router.py` runs the router and the chain; nothing calls the Java ones (`RoundFlow` still
+goes through `Sessions.route`, whose real implementation, a `Router.routeTask` call, comes with H-027).
+
+- `Router` ports `ROUTE_SYSTEM`, `parse_route` and `route_task`: the message to `auto` goes to Claude without tools, the answer
+  is a question (also when there are more tasks than `ROUTE_MAX_CHILDREN`) or the child tasks (queued, with their
+  predecessor via `after`, the `Onderdeel van bericht #N` suffix and a fresh session). Dutch messages are Python's. The Claude run
+  is the new effect `RouteClaude` (`runner/route.py`, `router.run_route`), the repo list `Repos`, the descriptions `RepoProfiles`.
+  The children are inserted one by one, Python does it in one transaction.
+- `FollowupChain` ports `pre_fine`, `blocked_by`, `blocked_followups`, `revive_followups`, `accept_task` and `settle_routed`, and
+  implements the `Followups` hook that `TaskActions.retry` calls (wired in `CoreConfig`). `settleRouted` is the scheduler's pass:
+  off with the scheduler. It needs the new effect `TaskHistory` (`memory.remember_task`).
+- `ShadowEffects` implements `RouteClaude` (reports a failure, so a routed task fails and creates no child) and `TaskHistory`;
+  nothing starts a task, merges or notifies.
+
+| Java test | Python test it ports |
+|---|---|
+| `FollowupChainTest.anAutomaticReviveQueuesTheFollowupsInAChain...` | `test_inbox_followups.test_merged_pr_requeues_followups_in_a_chain` (the revive step alone) |
+| `FollowupChainTest.aFollowupFromBeforeTheFeatureIsNotRestartedAutomatically` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (the `blocked_followups(t, True)` step alone) |
+| `FollowupChainTest.aMergedPrMarksTheTaskMergedAndQueuesTheFollowupsInAChain` | `test_merged_pr_requeues_followups_in_a_chain` (whole: `check_blocking_pr` is `FollowupChain.checkBlockingPr` over the `PrLookup` effect; the poll loop that calls it is K5) |
+| `FollowupChainTest.anOpenOrUnmergedClosedPrChangesNothing` | `test_open_or_closed_pr_changes_nothing` |
+| `FollowupChainTest.aMergedPrDoesNotRestartAFollowupFromBeforeTheFeature` | `test_merge_does_not_restart_a_followup_from_before_this_feature` (whole) |
+| `FollowupChainTest.markAsFineQueuesTheFollowups...` | `test_mark_as_fine_requeues_followups_and_not_the_task` |
+| `FollowupChainTest.markAsFineNeedsABlockedFollowup` | `test_mark_as_fine_needs_a_blocked_followup` |
+| `FollowupChainTest.anUnmarkedTaskStillStopsItsFollowups` | `test_unmarked_task_still_stops_followups` |
+| `FollowupChainTest.aRetryClearsTheMark` | `test_retry_clears_the_mark` |
+| `FollowupChainTest.retryingTheTaskQueuesItsFollowupsAgain` | `test_retry_a_refused_task` (the follow-ups half; the rest is `TaskActionsTest`, K1) |
+| `FollowupChainTest.theColumnNoAutoReviveDefaultsToZero` | `test_migration_flags_only_existing_followups` (the SQLite `ALTER TABLE` is not Java's: V1 has the column with default 0) |
+| `FollowupChainTest.aFollowupThatRanBeforeResumes...` | none (from `revive_followups`; `test_retry_note_of_a_task_that_never_ran...` is `TaskActionsTest`, K1) |
+| `FollowupChainTest` settle cases (message closed, busy child, scheduler off, no routed parent) | none (from `settle_routed`; `test_inbox_builds` only reads its result) |
+| `RouteRunnerOutputTest` (5 cases: result line, error flag, skipped lines, no result line with stderr, timeout) | `test_runner_route.RouterUsesRunner.test_run_route_returns_the_runner_result`, `test_run_route_without_a_result_line_is_an_error`, and the reading-side cases of `Route` (`test_recorded_route_gives_one_result_line`, `test_exit_code_passes_through_and_marks_an_error`, `test_warning_line_after_the_json_does_not_break_the_parse`, `test_no_json_is_an_error_with_stderr`) |
+| `RouterTest.theShadowClaudeNeverRoutesAnything` | `RouterUsesRunner.test_run_route_without_a_result_line_is_an_error` (no answer fails the task) |
+| other `RouterTest` cases (`parse_route`, `route_task`: children, question, limit, second round, failure, cancel) | none: written from `router.py` |
+| `ShadowModeTest` (extended with `settleRouted`) | the acceptance criterion |
+
+`tests/test_runner_route.py` cases that test the Python process itself (`test_runner_failure_codes`, `test_bad_arguments_exit_2_without_output`, `test_arguments_carry_only_the_task_id`) are the runner's contract and stay Python's, like `test_runner_contract` in K2; `RouteRunnerOutput` is the Java side that reads its output.

@@ -127,12 +127,6 @@ public final class Effects {
     /** Brings the follow-ups of a task back in the queue after a retry (K3). */
     public interface Followups {
         void revive(Task task);
-
-        /** The follow-ups cancelled because this task did not end well; {@code automatic}: only those a merge may restart. */
-        java.util.List<Task> blocked(Task task, boolean automatic);
-
-        /** {@code revive_followups(t, automatic=True)}: back in the queue after a merge. Returns how many. */
-        int reviveAfterMerge(Task task);
     }
 
     /** The outcome of a command of {@code homelab-inbox-task}: exit code and output. */
@@ -193,9 +187,6 @@ public final class Effects {
 
         void afterRound(long taskId, java.util.List<String> blocks);
 
-        /** {@code remember_task}: the history of a finished task (K5: after its PR was merged or closed). */
-        default void remember(long taskId) {}
-
         record MemorySplit(String text, java.util.List<String> blocks) {}
     }
 
@@ -220,5 +211,90 @@ public final class Effects {
 
         /** The text of Claude (memory blocks not yet split off), permission denials and the limit hit, or null. */
         record Outcome(String result, int permissionDenials, String capped) {}
+    }
+
+    /** One file a {@code briefs} folder of the product repo's main, as read from the clone. */
+    public record ProductFile(String path, String text) {}
+
+    /** The product repo (briefs, roadmap): {@code briefs.refresh_cache("product")} and the commits to it (K4). */
+    public interface ProductRepo {
+        /** Update the clone and return the brief files of main (the {@code briefs} folders), sorted by path. */
+        java.util.List<ProductFile> briefFiles();
+
+        /** The text of a file on main, or null when it does not exist (the roadmap). */
+        String read(String path);
+
+        /** Commit one changed file straight to main of the product repo (approving or parking a draft). */
+        void commitToMain(String path, String text, String message);
+
+        /** Commit changed files on a branch cut from main and force-push it (the handoff branch); main is restored. */
+        void pushBranch(String branch, java.util.Map<String, String> files, String message);
+    }
+
+    /** A setup PR of the designer ({@code setup/<brief>}) as the GitHub API shows it. */
+    public record SetupPr(int number, String headRepo, java.util.List<String> files) {}
+
+    /** The GitHub calls of the briefs that {@link GitHubWrites} and {@link PullRequests} do not cover. */
+    public interface BriefGitHub {
+        java.util.List<SetupPr> setupPrs(String slug, String briefId);
+
+        void mergeSetupPr(String slug, int number, String title);
+
+        /** Comment on a PR (the brief review). */
+        void comment(String slug, int prNumber, String body);
+
+        /** Merge the handoff PR; throws {@link IllegalStateException} when GitHub refuses. */
+        void mergeHandoff(String slug, int number, String title);
+    }
+
+    /** The outcome of one Claude call without tools (planner, reviewer): ok, the text, or why not. */
+    public record ClaudeAnswer(boolean ok, String text, String detail) {}
+
+    /** The Claude calls of the briefs: the files in {@code share/} are written by the implementation, not by the core. */
+    public interface BriefClaude {
+        /** The planner ({@code task_cmd plan}) with its system prompt and prompt. */
+        ClaudeAnswer plan(long taskId, String system, String prompt);
+
+        /** The reviewer ({@code runner/review.py}). */
+        ClaudeAnswer review(long taskId, String system, String prompt);
+    }
+
+    /** The short descriptions of repos for the planner ({@code router.repo_profiles(repos, ci=True)}). */
+    public interface RepoProfiles {
+        String profiles(java.util.Map<String, String> repos, boolean ci);
+    }
+
+    /** The inbox's own list of repos of new projects ({@code new-repos.json}). */
+    public interface NewRepos {
+        void add(String name, String slug);
+    }
+
+    /** The diff of a task's pushed branch against main in the service's copy of the repo. */
+    public interface Diffs {
+        java.util.List<String> changedFiles(String cache, long taskId);
+
+        String diff(String cache, long taskId, java.util.List<String> paths);
+    }
+
+    /** The outcome of the router's Claude run ({@code router.run_route}): the text, whether it failed, and stderr. */
+    public record RouteAnswer(String text, boolean error, String stderr) {}
+
+    /** The Claude call of the router ({@code runner/route.py}); the files in {@code share/r<id>} are written and removed
+     * by the implementation, not by the core. */
+    public interface RouteClaude {
+        RouteAnswer route(long taskId, String system, String prompt);
+    }
+
+    /** The history of a finished task ({@code memory.remember_task}); a failure is the caller's to log. */
+    public interface TaskHistory {
+        void remember(long taskId);
+    }
+
+    /** A PR as GitHub shows it (read only): {@code state} is open or closed. */
+    public record PrState(String state, boolean merged) {}
+
+    /** {@code gh GET /repos/<slug>/pulls/<n>} for the follow-up check; empty when GitHub gave nothing usable. */
+    public interface PrLookup {
+        java.util.Optional<PrState> get(String repoSlug, int number);
     }
 }

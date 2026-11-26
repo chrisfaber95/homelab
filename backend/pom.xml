@@ -77,6 +77,17 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
+      <plugin>
+        <!-- H-028 W1: the suite must never start the real Claude, gh, git or ntfy: ProcessCommandRunner refuses to run
+             anything while this property is set (the tests pass a fake CommandRunner). -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <inbox.commands.deny>true</inbox.commands.deny>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

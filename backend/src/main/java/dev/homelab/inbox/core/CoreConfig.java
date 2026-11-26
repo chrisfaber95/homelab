@@ -24,19 +24,25 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the inbox core (H-026 K1) in shadow: the effects are {@link ShadowEffects} unless another bean replaces them,
- * and the scheduler loop ({@link SchedulerLoop}) exists only when {@code core.scheduler.enabled=true}. Nothing here
+ * Wires the inbox core (H-026 K1): the effects are {@link ShadowEffects} unless {@code core.effects=live} wires
+ * {@link LiveEffects} (H-028 W1), and the scheduler loop ({@link SchedulerLoop}) exists only when {@code core.scheduler.enabled=true}. Nothing here
  * opens a database connection at start.
  */
 @Configuration
 class CoreConfig {
 
     @Bean
-    CoreSettings coreSettings(Settings conf, @Value("${core.scheduler.enabled:false}") boolean enabled) {
+    CoreSettings coreSettings(Settings conf, @Value("${core.scheduler.enabled:false}") boolean enabled,
+                              @Value("${core.effects:shadow}") String effects) {
+        // core.effects chooses the Effects wired in: shadow (default) or live; anything else is a configuration error.
+        if (!"shadow".equals(effects) && !"live".equals(effects)) {
+            throw new IllegalStateException("core.effects must be shadow or live, not '" + effects + "'");
+        }
         return new CoreSettings(enabled, conf.confInt("MAX_RUNNING", 4), conf.confInt("MAX_PER_REPO", 3),
                 conf.confInt("MAX_TURNS", 80), conf.confInt("MAX_MINUTES", 30), conf.confInt("CAPPED_KEEP_DAYS", 7), 2);
     }
@@ -46,9 +52,58 @@ class CoreConfig {
      * interface replaces this bean (and must then provide all of them), so shadow and real are never mixed by accident.
      */
     @Bean
+    @ConditionalOnProperty(name = "core.effects", havingValue = "shadow", matchIfMissing = true)
     @ConditionalOnMissingBean(RoundRunner.class)
     ShadowEffects shadowEffects() {
         return new ShadowEffects();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(CommandRunner.class)
+    CommandRunner commandRunner() {
+        return new ProcessCommandRunner();
+    }
+
+    /** The real effects: only with {@code core.effects=live}. The beans these effects call back into are looked up late. */
+    @Bean
+    @ConditionalOnProperty(name = "core.effects", havingValue = "live")
+    LiveEffects liveEffects(CommandRunner commands, Settings conf, TaskStore store,
+                            dev.homelab.inbox.conversation.ConversationStore conversation,
+                            org.springframework.beans.factory.ObjectProvider<RoundFlow> flow,
+                            org.springframework.beans.factory.ObjectProvider<Router> router,
+                            org.springframework.beans.factory.ObjectProvider<BriefRounds> briefRounds,
+                            org.springframework.beans.factory.ObjectProvider<JobEngine> engine, Jobs jobs,
+                            dev.homelab.inbox.memory.MemoryRepo memoryRepo, dev.homelab.inbox.memory.MemoryWriter memoryWriter,
+                            dev.homelab.inbox.read.MemoryReader memoryReader, Cancellations cancellations,
+                            CoreSettings settings) {
+        Effects.Research[] research = new Effects.Research[1];
+        LiveEffects.Late late = new LiveEffects.Late() {
+            @Override
+            public RoundFlow flow() {
+                return flow.getObject();
+            }
+
+            @Override
+            public Router router() {
+                return router.getObject();
+            }
+
+            @Override
+            public BriefRounds briefRounds() {
+                return briefRounds.getObject();
+            }
+
+            @Override
+            public Effects.Research research() {
+                if (research[0] == null) {
+                    research[0] = new JobResearch(engine.getObject(), jobs::load);
+                }
+                return research[0];
+            }
+        };
+        return new LiveEffects(commands, conf, store,
+                (author, client, kind, text, link, ref) -> conversation.append(author, client, kind, text, link, ref), late,
+                cancellations, settings, new MemoryDoor(memoryRepo, memoryWriter, memoryReader), jobs::load);
     }
 
     @Bean

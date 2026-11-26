@@ -938,3 +938,33 @@ goes through `Sessions.route`, whose real implementation, a `Router.routeTask` c
 | `ShadowModeTest` (extended with `settleRouted`) | the acceptance criterion |
 
 `tests/test_runner_route.py` cases that test the Python process itself (`test_runner_failure_codes`, `test_bad_arguments_exit_2_without_output`, `test_arguments_carry_only_the_task_id`) are the runner's contract and stay Python's, like `test_runner_contract` in K2; `RouteRunnerOutput` is the Java side that reads its output.
+
+## Real effects: `core.effects` and `LiveEffects` (H-028 W1)
+
+**The switch:** `core.effects` (env `CORE_EFFECTS`) is `shadow` (default) or `live`; any other value stops the start.
+`shadow` wires `ShadowEffects` (nothing leaves the process). `live` wires `LiveEffects`, a port of what `bin/homelab_inbox/`
+does outside the process. **The loops** (`SchedulerLoop`, `GitHubPollLoop`) start only with `core.effects=live` **and**
+`core.scheduler.enabled=true`; with shadow effects and the scheduler on, the start fails ("needs a real RoundRunner");
+with the scheduler off there is no loop in either mode. `EffectsSwitchTest` covers every combination.
+
+**Commands:** every external command goes through `CommandRunner` (`ProcessCommandRunner` is the real one; at the deadline
+SIGTERM, ten seconds later SIGKILL). Tests pass a fake (`LiveEffectsTest`, `EffectsSwitchTest`). On top of that the Maven
+test run sets `inbox.commands.deny=true` (pom, surefire), and `ProcessCommandRunner` then refuses to run anything: the suite
+can never start the real Claude, `gh`, `git` or ntfy, even by mistake.
+
+| Effect | Class | How |
+|---|---|---|
+| Round | `LiveEffects` | `python3 -I $RUNNER_DIR/round.py <id> <session> <new\|resume> [research]` (env `TASK_CMD`), NDJSON read as `rounds.stream_claude`: turns, limits, cancel, 0-turn failure; prompt files in `share/<id>/` with the memory part of the system prompt |
+| Working copies: `prepare`, `sync`, `has`, `cleanup`, `kill`, `session`, `behind` | `LiveEffects` | `homelab-inbox-task` (`TASK_CMD`) |
+| Push of `inbox/<id>`, the service's copies, repo list | `LiveEffects`, `ServiceGit` | bundle, `git fetch`, `git push --force origin refs/inbox/<id>:refs/heads/inbox/<id>`, never main; `git clone/fetch/checkout` of `repos/<name>` with the token through a credential helper |
+| PR open, merge, reads | `Gh` | `gh pr create`, `gh pr merge --merge --match-head-commit`, `gh api` (token from `/etc/homelab/inbox-github-token` as `GH_TOKEN`) |
+| Router, planner, reviewer | `LiveClaude` | `runner/route.py`, `homelab-inbox-task plan r<id>`, `runner/review.py`; `share/r<id>` and `share/v<id>` written and removed |
+| Briefs: product repo, setup/handoff PRs, review comment, diff, repo profiles, new repos | `LiveBriefs` | git in `repos/product` (commit to main, handoff branch), `gh api` |
+| Jobs: box overview, pages, GitHub, scripts, local model | `LiveJobIo` | `homelab-overview`, `curl`, `gh api`, `homelab-inbox-task script`, `curl` to the LLM helper |
+| Memory steps, history | `LiveMemory` + `MemoryDoor` | the Java memory store (`MemoryRepo`, `MemoryWriter`, `MemoryReader`) |
+| Skill proposals | `LiveSkills` | branch `skill/<name>-<id>`, `gh pr create`, row in `skill_prs` |
+| Notifications | `LiveEffects` | `curl` to ntfy (token through a curl config on stdin), conversation entry first; `NTFY_FAKE=1` only logs |
+| Task log | `LiveEffects` | `logs/<key>.log`, secrets hidden |
+
+The round flow, the router, the planner, the reviewer and the research lookups are beans of the core that call these
+effects; `LiveEffects` gets them late (`LiveEffects.Late`) to avoid a cycle.

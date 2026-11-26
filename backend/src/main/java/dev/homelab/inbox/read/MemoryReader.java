@@ -152,6 +152,11 @@ public class MemoryReader {
         return found;
     }
 
+    /** Every entry of the clone ({@code memory.MEMORY}); the live effects build the memory part of a prompt from it. */
+    public List<Map<String, Object>> entries() {
+        return load();
+    }
+
     /** How many entries the clone holds (the import and export commands print it). */
     public int countEntries() {
         return load().size();

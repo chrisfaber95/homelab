@@ -26,9 +26,9 @@ class GitHubPollLoop {
 
     GitHubPollLoop(GitHubPoller poller, Effects.GitHubWrites writes, Effects.GitHubReads reads,
                    @Value("${core.github.poll-seconds:60}") long seconds) {
-        if (writes instanceof ShadowEffects || reads instanceof ShadowEffects) {
-            throw new IllegalStateException("core.scheduler.enabled=true needs a real GitHub client (reads and writes); only the "
-                    + "shadow ones exist");
+        if (writes.getClass() == ShadowEffects.class || reads.getClass() == ShadowEffects.class) {
+            throw new IllegalStateException("core.scheduler.enabled=true needs a real RoundRunner and GitHub client (reads and "
+                    + "writes): set core.effects=live");
         }
         this.poller = poller;
         this.seconds = seconds;

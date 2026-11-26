@@ -968,3 +968,14 @@ can never start the real Claude, `gh`, `git` or ntfy, even by mistake.
 
 The round flow, the router, the planner, the reviewer and the research lookups are beans of the core that call these
 effects; `LiveEffects` gets them late (`LiveEffects.Late`) to avoid a cycle.
+
+## Task routes in Java (H-028 W2a)
+
+`core/TaskController` serves what `server.py` serves for tasks: `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /taken`,
+`GET /task/{id}`, `POST /tasks` and `POST /task/{id}/(accept|answer|cancel|attended|retry)`, with the same status codes, JSON
+and Dutch texts (`TaskPages` for the data, `TaskActions` and `FollowupChain` for the actions). The page routes answer
+`frontend/dist/index.html` (`FRONTEND_DIST`, default `frontend/dist` beside the config directory) or the 503 page while the
+build is missing. The controller does no check itself: Origin and the CSRF token are the front door's
+(`frontdoor/FrontDoorFilter`, `inbox.front-door.enabled=true`) or, while Python faces the tailnet, its facade's. Through the
+effects, so with `core.effects=shadow` a cancel, answer or retry changes the row but starts and stops nothing. Nothing forwards
+to these routes yet (`BACKEND_ROUTES` stays empty); tests: `TaskControllerTest`, mapped in `docs/inbox-test-coverage.md`.

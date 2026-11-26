@@ -82,8 +82,24 @@ Kinds of rows:
 | Python case | Java |
 |---|---|
 | `test_list_has_the_form...`, `test_task_detail_carries...`, `test_actions_follow_the_status`, `test_a_brief_build_and_its_children`, `test_the_log_so_far...`, `test_no_log_is_an_empty_chunk` | `TaskPagesTest` (gap closed) |
-| `test_unknown_task_is_a_json_404`, `test_the_box_itself_is_refused` | data half `TaskPagesTest.anUnknownTaskHasNoDetail`; the 404 body and the 403 are the route's (H-027) and `frontdoor/TailnetAccessTest`, `FrontDoorTest` |
+| `test_unknown_task_is_a_json_404`, `test_the_box_itself_is_refused` | `TaskControllerTest.anUnknownTaskIsAJson404` (also an id too big for a task); the 403 is `frontdoor/TailnetAccessTest`, `FrontDoorTest` |
 | `BriefsApi` (7) | `BriefsTest` (K4 table in `docs/inbox-backend.md`: data halves; redirects and status codes are the route's) |
+
+### Task routes (H-028 W2a): every route of `server.py` for tasks, in `TaskControllerTest` (real HTTP behind the front door)
+
+| Python route | Java test (`TaskControllerTest`) |
+|---|---|
+| `GET /api/tasks` | `listHasTheFormReposQueueAndHistory` |
+| `GET /api/tasks/{id}` | `detailCarriesTheTaskAndTheLogSoFar`, `aTaskWithoutALogHasAnEmptyChunk`, `anUnknownTaskIsAJson404` |
+| `GET /taken`, `GET /task/{id}` | `thePagesAre503WithoutABuildAndTheIndexWithOne`, `anUnknownTaskOrAQueryStringIsTheNotFoundPage` |
+| `POST /tasks` | `aNewTaskIsQueuedAndRedirectsToItsPage`, `autoIsAValidRepo`, `anUnknownRepoOrAnEmptyTextIsThe400Page` |
+| `POST /task/{id}/answer` | `anAnswerToAQuestionQueuesTheTaskAgain`, `anEmptyAnswerOrOneToARunningTaskChangesNothingButStillRedirects` |
+| `POST /task/{id}/cancel` | `cancelStopsAQueuedTaskAndLeavesAFinishedOneAlone`, `cancellingARoutedMessageCancelsTheChildrenThatAreNotDone` |
+| `POST /task/{id}/retry` | `retryPutsAFailedTaskBackInTheQueueWithTheNote`, `retryDoesNothingForABuildAnAutoTaskOrATaskThatCannotBeRetried` |
+| `POST /task/{id}/accept` | `acceptMarksTheTaskFineAndRevivesItsFollowups`, `acceptWithoutBlockedFollowupsChangesNothing` |
+| `POST /task/{id}/attended` | `attendedStopsABuildWithoutMe`, `attendedOnAnOrdinaryTaskChangesNothing` |
+| unknown task or action | `anUnknownTaskOrActionIsThe404Page` |
+| Origin and token on every mutating route | `everyMutatingTaskRouteRefusesARequestWithoutAToken` (403, also with a wrong token), `everyMutatingTaskRouteRefusesTheWrongOrNoOrigin`, `theApiReadsNeedNoTokenButOtherMethodsDo`; `FrontDoorTest.aPageFormStillUsesItsCsrfField` |
 
 ### test_inbox_research (27), test_inbox_job_delivery (12), test_inbox_agents (14), test_inbox_job_pages_api (11), test_inbox_jobs_api (7)
 

@@ -91,7 +91,8 @@ large scaffold PR is still reviewed on its code.
 
 - Working agreement (all projects): every criterion is separately checkable and tickable, and a task counts as done
   only when each one has been checked, with the result per criterion visible (the reviewer's ✅/❌/❔ list, the PR
-  description). A brief therefore writes one criterion per checkbox. The rule is in `claude/CLAUDE.md`, which
+  description). A brief therefore writes one criterion per checkbox. In a "build without me" brief, the criteria only
+  Chris can check come last. The rule is in `claude/CLAUDE.md`, which
   `scripts/18-claude.sh` installs for every session.
 - A ❌ in the first review sends the task back once (`REVIEW_REWORK_ROUNDS`) before you hear about it.
 - After that, or when everything passes, you get the notification with the verdict. The verdict is also on the task

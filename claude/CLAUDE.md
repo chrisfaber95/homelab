@@ -10,7 +10,8 @@ Chris's working agreement (2026-11-26), for all projects: when a task or brief h
 individually checkable and tickable.
 
 - Writing a brief or task: one criterion per checkbox (`- [ ]`), each stating something you can observe or run. Split
-  a criterion that bundles several checks. Mark one only Chris can check (hardware, taste) as such.
+  a criterion that bundles several checks. Mark one only Chris can check (hardware, taste) as such. In a
+  "build without me" brief, put those criteria at the end of the brief, after all the others.
 - Doing a task: a task is done only when every given criterion has been checked. Before you report, go through the
   list one by one and run the check; don't judge the whole at once.
 - Reporting (final message, PR description): list every criterion with its result (✅ met, ❌ not met, ❔ not

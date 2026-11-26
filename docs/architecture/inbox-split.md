@@ -407,6 +407,15 @@ off). Rollback for every K slice: revert (nothing runs).
 
 K2, K3, K6 and K8 can run in parallel once their dependencies are in; K4 and K5 after K2.
 
+> **Plan change (H-028).** H-027 went straight to the switch, and its X1b and X2b were refused: nothing in `backend/` was
+> wired up (no routes for tasks, drafts, runs, jobs and briefs, no live effects, nothing serving `frontend/dist`).
+> **H-028 replaces H-027 X1b and X2b.** It first wires the Java inbox up (W1 to W5: live effects, every route, the
+> doors, the SPA, the tailnet connector and the gate), then adds a **staging-port step (S1)** before the cut-over: a
+> second unit `homelab-inbox-staging` on a free port inside the existing `8100:8199` ufw range, on its own database
+> filled from a copy of the data, with `core.effects=shadow` and the scheduler off. Only after S1 do X1b (the cut-over
+> described below, with the same rollback and Q9) and X2 (the clean-up, one release later) follow. The per-route test
+> map is `docs/inbox-test-coverage.md`.
+
 **X1 Cut-over.**
 Goal: Java is the inbox. Built: a PR that switches `homelab-inbox-backend` to bind `INBOX_PORT` (8105, all
 addresses, access as K8) and the gate on 8121, turns its scheduler on, disables `homelab-inbox.service` (kept

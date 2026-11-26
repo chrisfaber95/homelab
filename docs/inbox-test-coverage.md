@@ -5,6 +5,10 @@ is a switch and not a rewrite. The brief spoke of 17 files; `tests/` now holds 4
 document maps **all** of them. Java tests are in `backend/src/test/java/dev/homelab/inbox/`; `core/` is the queue, `door/`
 the chat and kitt doors, `frontdoor/` access, CSRF and CSP.
 
+H-028 adds the route-by-route view: for each route of `bin/homelab_inbox/server.py`, and for the doors, the gate and the
+connector, the Java test that covers it (the "Route tables" sections and "Everything else, by route" below). What has no
+Java test is in "Gaps" at the end; nothing is left unlisted.
+
 Run both sides: `python3 -m unittest discover -s tests` and `cd backend && ./mvnw verify`.
 
 Kinds of rows:
@@ -193,11 +197,11 @@ exit 2, no prompt or token in the command line, fixtures, `test_runner_contract`
 
 ## Not tested anywhere yet
 
-- `Sessions.stream`, `Sessions.route`, `Sessions.plan`, the real GitHub client and the real ntfy `Push` are interfaces with
-  shadow implementations only: wiring them is the cut-over (H-027). The rules around them are tested (`RoundLimits`,
-  `RouteRunnerOutput`, `DraftRunnerOutput`, `Notifications`).
+- `Sessions.stream`, `Sessions.route`, `Sessions.plan`, the real GitHub client and the real ntfy `Push` were interfaces
+  with shadow implementations only (H-026). `LiveEffects` (H-028 W1) wires them, tested with a fake command runner
+  (`LiveEffectsTest`, `EffectsSwitchTest`); the real Claude, `gh` and ntfy are never called by the test suite.
 - The Python tests that compare both servers (`test_parity`, `test_inbox_m*_parity`) need a running Java backend; they are
-  not run by CI.
+  not run by CI. They are run against the staging unit (H-028 S1).
 
 ## Built UI and static files (H-028 W5a)
 
@@ -207,3 +211,44 @@ exit 2, no prompt or token in the command line, fixtures, `test_runner_contract`
 | `/memory/e/{id}` (only for an entry that exists) | `aMemoryEntryHasItsPageOnlyWhenItExists` |
 | `/app/*` (`dist_asset`, never leaves `frontend/dist`) | `builtAssetsComeFromDistAndNeverLeaveIt` |
 | `/static/*` (`web/`: css, js, woff2) | `staticFilesAreTheStylesheetAndFontsOfWeb`, `theStylesheetAlsoComesFromTheJarWhenNoDirectoryHasIt` |
+
+## Read routes, memory, session, ssh, forge, search, health (H-028 coverage check)
+
+| Python route (`server.py`) | Java test |
+|---|---|
+| `GET /api/overview`, `GET /api/skills` | `read/ReadControllerTest.overviewAndSkillsAreJsonReads` (status, content type, no-store); the data: `read/` tests and `tests/test_inbox_m1_parity.py` |
+| `GET /api/live` | `ReadControllerTest.liveHasItsQueueAndAnActivitySentence` |
+| `GET /api/memory[?q=]`, `GET /api/memory/e/{id}` | `ReadControllerTest.theMemoryListTakesAQueryAndAnUnknownEntryIs404`; the data: `MemoryReaderTest` |
+| `GET /api/log/{t\|r}{id}[?from=]`, `GET /api/log/live` (forge) | `ReadControllerTest.aLogIsReadByTaskOrRunAndAnythingElseIsNotFound` (the 400 for `from`, negative `from`); also `DraftRunControllerTest.apiLogReadsATaskAndARunLog`; the forge half: `ProxyControllersTest` |
+| anything else under `/api/` (404 for GET and POST, 405 for PUT, PATCH and DELETE) | `ReadControllerTest.anythingElseUnderApiIsNotFoundOrNotSupported`, `FrontDoorTest.aPutOutsideTheApiIsUnsupported` |
+| `GET /api/session` | `FrontDoorTest.sessionReturnsTheTokenOfThePages`, `sessionIsNotCachedAndIsForGetOnly`, `theBoxItselfDoesNotGetTheToken` |
+| `GET /api/ssh`, `POST /api/ssh` | `FrontDoorTest` (`theSshPageIsNotRenderedByTheServer`, `postRequestsAKey`, `postRefusalIsA400WithTheMessage`, `postWhenHomelabAdminDoesNotAnswerIsA400`, `postWithoutTheTokenDoesNotAskHomelabAdmin`) |
+| `GET /api/forge`, `POST /api/forge/(start\|stop)` | `ProxyControllersTest.forgeState`, `forgeStateReadsAStatusWordAndUnreachableIs502`, `forgeControl`; `DeadUpstreamTest.forgeIsNotReachable` |
+| `GET /api/search/filters`, `GET /api/search/results`, `POST /api/search/ask`, `POST /api/search/feedback` | `ProxyControllersTest.searchFiltersAndResultsPassThrough`, `searchErrorsAreFlattenedAndUpstreamTroubleIs502`, `searchAsk`, `searchFeedback`; `DeadUpstreamTest.searchIsNotReachable` |
+| `GET /api/backend/health` | `HealthControllerTest.healthAnswersOkAsJson` |
+| Access check, CSRF and Origin on every route; the CSP; refusals for the box itself | `frontdoor/TailnetAccessTest`, `CsrfTest`, `FrontDoorTest` (`aMissingTokenIs403OnEveryMutatingMethod`, `aWrongOriginIs403EvenWithTheToken`, `everyAnswerCarriesPythonsContentSecurityPolicy`), `FrontDoorOffTest` (off by default) |
+
+## Doors, connector and gate (H-028 W4 and W5)
+
+| Python | Java test |
+|---|---|
+| `POST /api/chat/action` (`chat_door`: bearer token per client, loopback only) | `door/ChatDoorHttpTest` (`aValidTokenReachesTheAction`, `theTokenIsPerClient`, `aMissingOrWrongTokenIs401`, `anAddressThatIsNotLoopbackIsRefusedEvenWithAValidToken`), `ChatDoorTest`, `ChatActionsTest` |
+| `/api/chat/entries`, `/api/chat/state` (data in the conversation store) | `ChatDoorTest` (through `ChatDoor`), `ConversationStoreTest`; **no HTTP test of `ConversationController`**: see Gaps |
+| kitt door: `/api/clients/kitt`, `/api/conversation`, `/api/logs*`, `/api/approvals*`, `/api/jobs*`, `/api/health` (peer uid, loopback only) | `door/KittDoorTest`, `ProcPeersTest`, and over real HTTP `KittDoorHttpTest` (`theAccountThatOwnsTheConnectionActingForChrisIsLetIn`, `anotherAccountOnTheSameMachineIsRefusedByTheSocketOwner`, `theClientHeaderAndChrisIdentityAreChecked`, `anAddressThatIsNotLoopbackIsRefusedEvenWithEveryHeader`, `aCallWithoutTheClientHeaderGoesOnToTheNormalChecks`) |
+| both doors refused on the tailnet connector | `PublicConnectorTest.theChatDoorStaysRefusedOnIt`, `theKittDoorStaysRefusedOnIt`, `pathVariantsOfTheChatDoorAreRecognised` |
+| `gate.py` (device check, forwarding to `KITT_UPSTREAM`) | `door/KittGateTest` (owner passes and forged headers are dropped, another tailnet user and the box itself refused, an unknown peer refused, kitt down is a 502, off by default, a wildcard host keeps it off, LAN refused) |
+| the tailnet connector (`inbox.public.port`; no Python equivalent: Python binds `INBOX_HOST`) | `PublicConnectorTest` (second connector answers, pages behind the front door, a missing interface stops the start, an address outside the tailnet range refused, bad ports), `PublicConnectorOffTest` (no value, no second connector) |
+| `ShadowModeTest`: in shadow no task, merge or notification starts | `core/ShadowModeTest`, `door/ShadowDoorTest`, `EffectsSwitchTest` (the scheduler starts only with `core.effects=live` and `core.scheduler.enabled=true`) |
+
+## Gaps
+
+Routes or behaviour of the Python inbox with no Java test, or no Java route, as of this check. They are listed, not
+hidden; each should be closed or accepted before S1 (staging) or X1b (cut-over).
+
+| Gap | What is missing | Effect |
+|---|---|---|
+| `POST /memory/add`, `POST /memory/e/{id}/(save\|delete)` | **No public Java route.** `MemoryController` serves only `/internal/memory/*` (called by the Python server), and `MemoryWriterTest` tests the writer, not an HTTP route. After the cut-over the memory forms of the page would get a 404. | Port the three routes (and test them with the front door and CSRF) before X1b; until then the cut-over loses editing memory from the page. |
+| `GET /api/chat/entries`, `GET /api/chat/state`, `POST /api/chat/entries` over HTTP | `ConversationController` takes the client from the `X-Inbox-Client` header behind the facade secret; the bearer-token check is Python's `chat_door`. `ChatDoorController` serves only `/api/chat/action`. No Java test sends these three with a bearer token. With the front door on, the Discord bot's calls from loopback would be refused as "the box itself". | Serve the three paths through the chat door (bearer token, loopback only) and add them to `ChatDoorHttpTest` before X1b; check it on staging with the Discord bot's contract cases. |
+| `GET /api/overview`, `/api/live`, `/api/skills`, `/api/memory*` data | `ReadControllerTest` covers status, content type and errors with an empty data directory. Content parity is a Python run (`tests/test_inbox_m1_parity.py`, `backend/parity/parity.py`), not run by CI. | Run the parity harness against the staging unit. |
+| Pages `/skills`, `/search`, `/memory` forms in HTML | Frontend (`frontend/`), not Java; covered by the TypeScript tests there. | None. |
+| Runner processes, `bin/homelab-inbox-task`, search, router, forge service, Discord bot | Python by design (see "Everything else"); not in the Java inbox. | None. |

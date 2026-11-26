@@ -348,7 +348,7 @@ inbox; only the Maven *build* uses a `DynamicUser`. The plan in `inbox-split.md`
 | `GET /api/chat/state` | Java | same body; non-GET is 405 `GET only` |
 | `GET /api/chat/entries?after=&limit=` | Java | cursor, limit 1 to 1000, `next`; 403 `refused: no permission 'read'`, 400 for non-numbers |
 | `POST /api/chat/entries` | Java | always written as Chris; kind needs `write`/`ask`/`answer`; scrubbing, 20000 characters, `ref` 80 |
-| `POST /api/chat/action` | **Python** | task queue and approvals; ported in shadow (K7, `door/`), still Python's until H-027 |
+| `POST /api/chat/action` | **Python** (and Java since H-028 W4a) | task queue and approvals; Java serves it through `ChatDoorController` and `ChatDoor` (loopback only, bearer token), the route the browser and Discord use is still Python's until the cut-over |
 
 The paths, bodies and status codes are unchanged. **Tokens:** the bearer token (`/etc/homelab/chat-<name>-token`) is still checked by
 the Python door (`conversation.authenticate`), which also checks loopback; it then calls Java with `X-Inbox-Client: <name>`. Java trusts
@@ -886,7 +886,7 @@ the Python gate still listens on 8121.
 | Class | Python | What |
 |---|---|---|
 | `ChatActions` | `chat.py` | start task (daily cap from local midnight), answer, state, jobs, run job, research, drafts, two-step approval (token in `approvals`, one use, expires) |
-| `ChatDoor` | `server.py chat_door/chat_action` | `POST /api/chat/action`: loopback only, bearer token from `chat-<name>-token`, switches, forbidden actions. `entries` and `state` stay the conversation controller's |
+| `ChatDoor` | `server.py chat_door/chat_action` | `POST /api/chat/action`: loopback only, bearer token from `chat-<name>-token`, switches, forbidden actions. `entries` and `state` stay the conversation controller's. Over HTTP since H-028 W4a: `ChatDoorController` (`POST` and `GET /api/chat/action`); `FrontDoorFilter` and `FacadeSecretFilter` (front door on) let this one path through, because its checks are the door's own (peer address must be loopback, bearer token per client) and not the owner and CSRF checks. Tests: `ChatDoorHttpTest` |
 | `KittDoor` | `kitt.py`, `server.py kitt_door` | the peer check (`identify`: client header, socket owner = kitt's account, owner login from the gate) and all kitt routes |
 | `ProcPeers` | `peer_uid`, `account_uid` | owner of the loopback socket from `/proc/net/tcp(6)`, account from passwd |
 | `KittGate` | `gate.py` | owner check, identity headers set, forged ones dropped, 502 when kitt is down. `listen` refuses a wildcard host, and in shadow every non-loopback host |

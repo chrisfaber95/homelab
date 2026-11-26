@@ -13,7 +13,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 
 /** A throwaway PostgreSQL with the Flyway schema, plus the fakes the core tests share. One cluster per JVM. */
-final class CoreFixture {
+public final class CoreFixture {
 
     private static ThrowawayPostgres pg;
     private static String url;
@@ -21,7 +21,7 @@ final class CoreFixture {
 
     private CoreFixture() {}
 
-    static synchronized ConnectionSource db() throws Exception {
+    public static synchronized ConnectionSource db() throws Exception {
         if (pg == null) {
             pg = ThrowawayPostgres.start();
             user = pg.user();
@@ -50,12 +50,12 @@ final class CoreFixture {
     }
 
     /** The JDBC url and user of the database {@link #db()} started, for a Spring test that needs the same one. */
-    static synchronized String url() throws Exception {
+    public static synchronized String url() throws Exception {
         db();
         return url;
     }
 
-    static synchronized String user() throws Exception {
+    public static synchronized String user() throws Exception {
         db();
         return user;
     }

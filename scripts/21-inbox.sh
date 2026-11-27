@@ -278,6 +278,17 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
+# H-028 X1b: after the cut-over the Java backend owns 8105 and 8121 and this old unit stays installed but disabled (rollback:
+# docs/inbox.md, "Cut-over to the Java inbox"). changes/0011-inbox-java-cutover writes the marker; while it exists this script
+# leaves the unit alone (no enable, no start, no restart), so a rerun can never fight the Java inbox for the port.
+if [[ -e /var/lib/homelab-inbox/java-cutover ]]; then
+  echo "== Java inbox owns 8105 (cut-over marker): homelab-inbox stays disabled"
+  systemctl disable homelab-inbox >/dev/null 2>&1 || true
+  [[ -n ${HOMELAB_RERUN:-} ]] || systemctl restart homelab-admin
+  echo "== Controle"
+  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$INBOX_PORT/api/backend/health")
+  [[ $code == 200 ]] || { echo "De Java-inbox antwoordt op $INBOX_PORT met $code (verwacht 200)." >&2; exit 1; }
+else
 systemctl enable homelab-inbox
 # H-024 M4: the conversation store moves to Java once the new code and the new jar are both installed (it stops and starts the inbox itself).
 bash "$REPO/scripts/conversation-import.sh"
@@ -296,6 +307,7 @@ ss -Htln "sport = :$INBOX_PORT" | grep -q . || { echo "homelab-inbox luistert ni
 # Vanaf de box zelf hoort de pagina geweigerd te worden (alleen jouw apparaten op het tailnet).
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$INBOX_PORT/")
 [[ $code == 403 ]] || { echo "De pagina antwoordt vanaf de box zelf met $code (verwacht 403)." >&2; exit 1; }
+fi
 # inbox kan niet bij GitHub-gegevens of bij claude.
 for f in /etc/homelab/inbox-github-token /home/claude/.config/gh/hosts.yml /home/claude/dev; do
   if sudo -u inbox test -r "$f"; then echo "inbox kan $f lezen." >&2; exit 1; fi

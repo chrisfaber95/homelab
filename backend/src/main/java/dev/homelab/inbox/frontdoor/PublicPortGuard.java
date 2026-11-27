@@ -17,7 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * On the tailnet connector ({@link PublicConnector}) the loopback-only doors stay refused (H-028 W5b): the chat door
  * ({@code /api/chat/action}) and any request carrying {@code X-Homelab-Client} (the kitt door) get a 403 before they
  * reach the doors, whatever the peer address. The doors check loopback themselves too; this is the second lock, by the
- * port the request came in on. Only exists when {@code inbox.public.port} has a value.
+ * port (and, when it is also the main port, the address) the request came in on. Only exists when {@code inbox.public.port} has a value.
  */
 @Component
 @ConditionalOnExpression("'${inbox.public.port:}'.trim() != ''")
@@ -25,9 +25,20 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class PublicPortGuard extends OncePerRequestFilter {
 
     private final int publicPort;
+    private final boolean sharesMainPort;
 
-    public PublicPortGuard(@Value("${inbox.public.port}") String port) {
+    public PublicPortGuard(@Value("${inbox.public.port}") String port,
+            @Value("${server.port:8130}") int mainPort) {
         this.publicPort = PublicConnector.parse(port.strip());
+        this.sharesMainPort = publicPort == mainPort;
+    }
+
+    /** On the shared port (8105 at the cut-over) the connector is told apart by the address, not the port. */
+    boolean onPublicConnector(HttpServletRequest request) {
+        if (request.getLocalPort() != publicPort) {
+            return false;
+        }
+        return !sharesMainPort || !PublicConnector.loopbackAddress(request.getLocalAddr());
     }
 
     /** The path as the router sees it: without {@code ;params}, doubled or trailing slashes. */
@@ -40,7 +51,7 @@ public class PublicPortGuard extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         boolean door = chatPath(request.getRequestURI()) || request.getHeader("X-Homelab-Client") != null;
-        if (request.getLocalPort() == publicPort && door) {
+        if (door && onPublicConnector(request)) {
             byte[] data = "{\"error\": \"loopback only\"}".getBytes(StandardCharsets.UTF_8);
             SecurityHeaders.apply(response);
             response.setStatus(403);

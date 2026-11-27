@@ -27,6 +27,15 @@ HOST=127.0.0.1
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="$(sed -n 's/^BACKEND_PORT=//p' "$REPO/config/inbox.conf" | tr -d '"')"
 PORT="${PORT:-8130}"
+UNIT_PORT=$PORT     # the port in the unit file; the drop-in of the cut-over overrides it at run time
+# H-028 X1b: after changes/0011-inbox-java-cutover the backend is the inbox: a drop-in moves it to 8105 (loopback and the tailnet
+# address), with the front door and 8121. The marker file says so; the checks below then look for that shape.
+CUTOVER_MARKER=/var/lib/homelab-inbox/java-cutover
+CUTOVER=0
+if [[ -e $CUTOVER_MARKER ]]; then
+  CUTOVER=1
+  PORT=8105
+fi
 
 if [[ $EUID -ne 0 ]]; then
   echo "Run with sudo." >&2
@@ -116,7 +125,7 @@ if [[ ! -f $UNIT ]] || ! cmp -s "$REPO/systemd/$SERVICE.service" "$UNIT"; then
   changed=1
 fi
 # The port in inbox.conf and the unit must be the same one (the exposure check reads both).
-grep -qx "Environment=BACKEND_PORT=$PORT" "$UNIT" || { echo "BACKEND_PORT in config/inbox.conf ($PORT) differs from the unit" >&2; exit 1; }
+grep -qx "Environment=BACKEND_PORT=$UNIT_PORT" "$UNIT" || { echo "BACKEND_PORT in config/inbox.conf ($UNIT_PORT) differs from the unit" >&2; exit 1; }
 grep -qx "Environment=BACKEND_HOST=$HOST" "$UNIT" || { echo "the unit must set BACKEND_HOST=$HOST (loopback only)" >&2; exit 1; }
 grep -qx "Environment=BACKEND_SECRET_FILE=$SECRET_FILE" "$UNIT" || { echo "the unit must set BACKEND_SECRET_FILE=$SECRET_FILE" >&2; exit 1; }
 # The facade secret (B6): made once, never in the repo, readable by $SERVICE_USER only (both the inbox and the backend run as it).
@@ -151,10 +160,13 @@ for _ in $(seq 1 45); do
 done
 [[ $body == *'"status":"ok"'* ]] || { echo "GET http://$HOST:$PORT/api/backend/health did not answer ok (systemctl status $SERVICE; its journal is not readable for claude)" >&2; exit 1; }
 # The facade secret (B6): without the header a non-health route is refused, with it the request gets past the filter.
-code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$HOST:$PORT/api/backend/none")"
-[[ $code == 403 ]] || { echo "a request without the facade secret got $code (expected 403)" >&2; exit 1; }
-code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H "X-Inbox-Facade: $(cat "$SECRET_FILE")" "http://$HOST:$PORT/api/backend/none")"
-[[ $code != 403 ]] || { echo "the facade secret in $SECRET_FILE is not accepted" >&2; exit 1; }
+# After the cut-over the front door answers instead (no Python facade any more): the secret is not checked then.
+if [[ $CUTOVER -eq 0 ]]; then
+  code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$HOST:$PORT/api/backend/none")"
+  [[ $code == 403 ]] || { echo "a request without the facade secret got $code (expected 403)" >&2; exit 1; }
+  code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H "X-Inbox-Facade: $(cat "$SECRET_FILE")" "http://$HOST:$PORT/api/backend/none")"
+  [[ $code != 403 ]] || { echo "the facade secret in $SECRET_FILE is not accepted" >&2; exit 1; }
+fi
 pid="$(systemctl show -p MainPID --value "$SERVICE")"
 [[ $pid =~ ^[1-9][0-9]*$ ]] || { echo "$SERVICE has no main process" >&2; exit 1; }
 [[ $(ps -o user= -p "$pid") == "$SERVICE_USER" ]] || { echo "$SERVICE does not run as $SERVICE_USER" >&2; exit 1; }
@@ -162,8 +174,15 @@ pid="$(systemctl show -p MainPID --value "$SERVICE")"
 listeners="$(ss -ltnpH)" || { echo "cannot list the listeners" >&2; exit 1; }
 mine="$(grep -E "pid=$pid," <<<"$listeners" | awk '{print $4}' || true)"
 [[ -n $mine ]] || { echo "the backend (pid $pid) listens on no TCP port" >&2; exit 1; }
-wrong="$(grep -vE '^(127\.0\.0\.1|\[::1\]):[0-9]+$' <<<"$mine" || true)"
-[[ -z $wrong ]] || { echo "the backend listens beyond loopback: $(paste -sd' ' <<<"$wrong")" >&2; exit 1; }
+# After the cut-over the listeners are exactly these three: loopback 8105, the tailnet address on 8105 (the page) and on 8121 (the kitt gate).
+if [[ $CUTOVER -eq 1 ]]; then
+  ts="$(tailscale ip -4 2>/dev/null | head -n1)"
+  want="$(printf '%s\n' "127.0.0.1:$PORT" "$ts:$PORT" "$ts:8121" | sort)"
+  [[ "$(sort <<<"$mine")" == "$want" ]] || { echo "the backend must listen only on: $(paste -sd' ' <<<"$want"); it listens on $(paste -sd' ' <<<"$mine")" >&2; exit 1; }
+else
+  wrong="$(grep -vE '^(127\.0\.0\.1|\[::1\]):[0-9]+$' <<<"$mine" || true)"
+  [[ -z $wrong ]] || { echo "the backend listens beyond loopback: $(paste -sd' ' <<<"$wrong")" >&2; exit 1; }
+fi
 grep -qx "$HOST:$PORT" <<<"$mine" || { echo "the backend does not listen on $HOST:$PORT (it listens on $(paste -sd' ' <<<"$mine"))" >&2; exit 1; }
 pg_listen="$(cd / && runuser -u postgres -- psql -AtXc 'show listen_addresses')"
 [[ -z $pg_listen ]] || { echo "PostgreSQL listens on '$pg_listen': it must stay socket only (Q2)" >&2; exit 1; }
@@ -184,4 +203,4 @@ if as_service_cmd "$JCMD" "$pid" GC.run >/dev/null 2>&1 && info="$(as_service_cm
 else
   echo "WARNING: could not measure the heap with jcmd as $SERVICE_USER; see docs/inbox-backend.md for the manual commands" >&2
 fi
-echo "inbox backend ready: http://$HOST:$PORT/api/backend/health (loopback only), jar $JAR"
+echo "inbox backend ready: http://$HOST:$PORT/api/backend/health (loopback; see above for the cut-over), jar $JAR"

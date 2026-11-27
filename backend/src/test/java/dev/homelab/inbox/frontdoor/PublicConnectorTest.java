@@ -191,9 +191,38 @@ class PublicConnectorTest {
         assertThatThrownBy(() -> PublicConnector.parse("0")).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> PublicConnector.parse("70000")).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> PublicConnector.parse("abc")).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> new PublicConnector("8130", "lo", true, 8130, "127.0.0.0/8").customize(null))
-                .hasMessageContaining("differ");
-        assertThatThrownBy(() -> new PublicConnector("8131", "lo", false, 8130, "127.0.0.0/8").customize(null))
-                .hasMessageContaining("front-door");
+        assertThatThrownBy(() -> new PublicConnector("8130", "lo", true, 8130, "127.0.0.0/8", "0.0.0.0").customize(null))
+                .hasMessageContaining("loopback");
+        assertThatThrownBy(() -> new PublicConnector("8130", "lo", true, 8130, "127.0.0.0/8", "100.85.70.34")
+                .customize(null)).hasMessageContaining("loopback");
+        assertThatThrownBy(() -> new PublicConnector("8131", "lo", false, 8130, "127.0.0.0/8", "127.0.0.1")
+                .customize(null)).hasMessageContaining("front-door");
+    }
+
+    /** The cut-over shape (X1b): the public port may equal the main port when the main address is loopback. */
+    @Test
+    void theSamePortIsAllowedBesideALoopbackMainAddress() {
+        var factory = new org.springframework.boot.tomcat.servlet.TomcatServletWebServerFactory(0);
+        new PublicConnector("8105", "lo", true, 8105, "127.0.0.0/8", "127.0.0.1").customize(factory);
+        assertThat(factory.getAdditionalConnectors()).hasSize(1);
+        assertThat(PublicConnector.loopbackAddress("127.0.0.1")).isTrue();
+        assertThat(PublicConnector.loopbackAddress("localhost")).isTrue();
+        assertThat(PublicConnector.loopbackAddress("0.0.0.0")).isFalse();
+        assertThat(PublicConnector.loopbackAddress("100.85.70.34")).isFalse();
+    }
+
+    /** On the shared port the guard tells the connectors apart by address: loopback keeps its doors. */
+    @Test
+    void theGuardOnASharedPortSeparatesByAddress() {
+        var guard = new PublicPortGuard("8105", 8105);
+        var loop = new org.springframework.mock.web.MockHttpServletRequest();
+        loop.setLocalPort(8105);
+        loop.setLocalAddr("127.0.0.1");
+        var tail = new org.springframework.mock.web.MockHttpServletRequest();
+        tail.setLocalPort(8105);
+        tail.setLocalAddr("100.85.70.34");
+        assertThat(guard.onPublicConnector(loop)).isFalse();
+        assertThat(guard.onPublicConnector(tail)).isTrue();
+        assertThat(new PublicPortGuard("8125", 8131).onPublicConnector(tail)).isFalse();
     }
 }

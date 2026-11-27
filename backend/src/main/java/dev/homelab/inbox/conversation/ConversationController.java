@@ -43,10 +43,22 @@ public class ConversationController {
 
     private final ConversationStore store;
     private final JsonMapper json;
+    private final boolean frontDoor;
 
-    public ConversationController(ConversationStore store, JsonMapper json) {
+    public ConversationController(ConversationStore store, JsonMapper json,
+                                  @org.springframework.beans.factory.annotation.Value("${inbox.front-door.enabled:false}") boolean frontDoor) {
         this.store = store;
         this.json = json;
+        this.frontDoor = frontDoor;
+    }
+
+    /**
+     * With the front door on (no Python facade) the client name in X-Inbox-Client is trusted only on a request that passed
+     * ChatEntriesFilter (loopback, bearer token). Whatever other spelling of the path reached this route (percent-encoding,
+     * dot segments), it is refused here, so nobody can name a client of their own.
+     */
+    private boolean notThroughTheDoor(HttpServletRequest in) {
+        return frontDoor && in.getAttribute(dev.homelab.inbox.frontdoor.FrontDoorFilter.DOOR_PASSED) == null;
     }
 
     // --- the chat door -----------------------------------------------------------------------------------------------
@@ -55,6 +67,9 @@ public class ConversationController {
     public void state(@RequestHeader(value = CLIENT_HEADER, required = false) String client,
                       HttpServletRequest in, HttpServletResponse out) throws IOException {
         Upstream.write(out, guarded(() -> {
+            if (notThroughTheDoor(in)) {
+                return Upstream.plainError(403, "loopback only");
+            }
             if (client == null || client.isBlank()) {
                 return Upstream.plainError(401, "unknown client or token");
             }
@@ -69,6 +84,9 @@ public class ConversationController {
     public void entries(@RequestHeader(value = CLIENT_HEADER, required = false) String client,
                         HttpServletRequest in, HttpServletResponse out) throws IOException {
         Upstream.write(out, guarded(() -> {
+            if (notThroughTheDoor(in)) {
+                return Upstream.plainError(403, "loopback only");
+            }
             if (client == null || client.isBlank()) {
                 return Upstream.plainError(401, "unknown client or token");
             }
@@ -100,6 +118,9 @@ public class ConversationController {
                        HttpServletRequest in, HttpServletResponse out) throws IOException {
         byte[] raw = in.getInputStream().readNBytes(MAX_BODY);
         Upstream.write(out, guarded(() -> {
+            if (notThroughTheDoor(in)) {
+                return Upstream.plainError(403, "loopback only");
+            }
             if (client == null || client.isBlank()) {
                 return Upstream.plainError(401, "unknown client or token");
             }

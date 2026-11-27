@@ -33,6 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class FrontDoorFilter extends OncePerRequestFilter {
 
     public static final String WHO = "inbox.who";
+    /** Request attribute set by a door that did its own checks first (ChatEntriesFilter); only server code can set it. */
+    public static final String DOOR_PASSED = "inbox.door.passed";
     static final String JSON_UTF8 = "application/json; charset=utf-8";
 
     private final TailnetAccess access;
@@ -50,7 +52,8 @@ public class FrontDoorFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         SecurityHeaders.apply(response);
         String method = request.getMethod();
-        if (isChatDoor(request)) { // its own checks: loopback, bearer token per client (ChatDoor)
+        if (isChatDoor(request) || request.getAttribute(DOOR_PASSED) != null) {
+            // its own checks: loopback, bearer token per client (ChatDoor, ChatEntriesFilter)
             chain.doFilter(request, response);
             return;
         }

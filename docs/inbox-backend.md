@@ -1044,6 +1044,8 @@ and puts `frontend/dist` in the jar under `ui/dist/`; `web/` goes in under `ui/w
 (`/usr/local/lib/homelab/`, where `scripts/21-inbox.sh` installs them) when they have a build, else the copy inside the
 jar (unpacked once to a temp directory; the unit has `PrivateTmp`).
 
+**Cut-over (X1b):** the unit gets a drop-in with `BACKEND_PORT=8105` on loopback and `INBOX_PUBLIC_PORT=8105` on the tailnet address; the public port may equal the main port only when `server.address` is a loopback address, and `PublicPortGuard` then tells the connectors apart by the address the request came in on (`docs/inbox.md`, "Cut-over to the Java inbox").
+
 **Host and port** come from `BACKEND_HOST` (default `127.0.0.1`) and `BACKEND_PORT` (default `8130`), as before.
 The second tailnet connector is described below (W5b); the kitt gate is described under "Kitt gate connector (W5c)".
 
@@ -1080,5 +1082,5 @@ start and forwards to `KITT_UPSTREAM`, with the same owner check, identity heade
 default**: it starts only with `kitt.gate.enabled=true` (env `KITT_GATE_ENABLED`). Like `gate.run()` it retries every 30 s when
 the bind fails (tailscaled may come up later); an empty or wildcard host keeps it off. Unlike `gate.py` an exposed gate also
 refuses a host outside `100.64.0.0/10` (and non-loopback), so a wrong setting cannot put it on the LAN. The Python gate keeps
-8121 until the cut-over (X1b): do not enable both. Tests: `KittGateTest` (forwarding, refused devices, exposure rules, starter off
+8121 until the cut-over (X1b, `changes/0011-inbox-java-cutover`, which enables this gate and disables the Python unit): do not enable both by hand. Tests: `KittGateTest` (forwarding, refused devices, exposure rules, starter off
 by default) and `ShadowDoorTest`.

@@ -58,7 +58,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 || { echo "account $SERVICE_USER missing: run
 systemctl is-active --quiet postgresql || { echo "PostgreSQL is not running" >&2; exit 1; }
 [[ -n $(as_postgres psql -AtXc "select 1 from pg_database where datname = 'inbox'") ]] \
   || { echo "the database inbox does not exist: run scripts/28-inbox-db.sh first" >&2; exit 1; }
-grep -qx "$PG_MAP[[:space:]]\+$SERVICE_USER[[:space:]]\+$ROLE" "$(as_postgres psql -AtXc 'show ident_file')" \
+grep -qx "${PG_MAP}[[:space:]]\+${SERVICE_USER}[[:space:]]\+${ROLE}" "$(as_postgres psql -AtXc 'show ident_file')" \
   || { echo "pg_ident has no map $PG_MAP for $SERVICE_USER: run scripts/28-inbox-db.sh first" >&2; exit 1; }
 [[ -f $LIVE/inbox.db ]] || { echo "$LIVE/inbox.db does not exist: nothing to copy" >&2; exit 1; }
 [[ -f $CUTOVER ]] || { echo "$CUTOVER is missing" >&2; exit 1; }

@@ -46,6 +46,7 @@ those two headers are dropped. Status, headers (not hop-by-hop ones) and body co
 backslashes, `//` or `%2f` are refused (400). If the backend cannot be reached, times out (30 s) or no secret is
 configured, the answer is 502 `{"error": ...}`; there is no fallback to a Python handler.
 
+With `inbox.front-door.enabled=true` (staging, cut-over: no Python facade any more) `FacadeSecretFilter` lets every request through and the front door's owner and CSRF checks decide.
 The backend (`FacadeSecretFilter`) answers 403 to every request without the right `X-Inbox-Facade` (constant-time
 compare), except `GET /api/backend/health`. Without a configured secret it refuses everything but health.
 Doors with their own token (chat, kitt) do not pass the owner check, so they cannot be forwarded.

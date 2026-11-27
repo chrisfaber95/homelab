@@ -18,15 +18,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * except {@code GET /api/backend/health} answers 403 without the right secret. With no secret configured, nothing
  * passes (fail closed). The secret comes from {@code BACKEND_SECRET} or from the file {@code BACKEND_SECRET_FILE}
  * (read on each request, so a rotated file applies at once); it is never in the repo. With the front door on
- * ({@code inbox.front-door.enabled}), {@code /api/chat/action} passes: that door has its own checks.
+ * ({@code inbox.front-door.enabled}) every request passes: the front door (or the chat door) has its own checks and
+ * no Python facade sends the secret any more (staging, H-028 S1).
  */
 @Component
 public class FacadeSecretFilter extends OncePerRequestFilter {
 
     static final String HEADER = "X-Inbox-Facade";
     static final String HEALTH = "/api/backend/health";
-
-    static final String CHAT_ACTION = "/api/chat/action";
 
     private final String secret;
     private final String secretFile;
@@ -47,8 +46,11 @@ public class FacadeSecretFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        if (frontDoor && CHAT_ACTION.equals(request.getRequestURI())) {
-            chain.doFilter(request, response); // Java faces the clients itself: the chat door checks loopback and the bearer token
+        if (frontDoor) {
+            // Java faces the clients itself (staging and cut-over, H-028): no Python facade sends the secret any more.
+            // FrontDoorFilter runs first and has already refused what is not the owner's device (or, for the chat door,
+            // left the loopback and bearer-token checks to the door), so a browser has no header to send.
+            chain.doFilter(request, response);
             return;
         }
         String expected = expectedSecret();

@@ -41,6 +41,10 @@ PAGE_PORT=8105
 GATE_PORT=8121
 OVERVIEW_PORT=8104
 JAR=/usr/local/lib/homelab/inbox-backend/inbox-backend.jar
+SCHEDULER_DROPIN=$DROPIN_DIR/20-scheduler.conf
+# What sudo needs to run homelab-inbox-task as the account inbox (setuid, setgid, audit, rlimits); the drop-in and the check use the same list.
+CAPS="CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE CAP_SYS_RESOURCE"
+TASK_BIN=/usr/local/lib/homelab/bin/homelab-inbox-task
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CUTOVER=$REPO/scripts/inbox_cutover.py
 
@@ -94,17 +98,23 @@ if [[ ! -e $MARKER ]]; then
 fi
 
 undo() {
+  set +e
   echo "== the switch failed: putting the old inbox back" >&2
-  rm -f "$DROPIN" "$MARKER"
-  rmdir "$DROPIN_DIR" 2>/dev/null || true
-  systemctl daemon-reload
-  systemctl stop "$BACKEND" || true
-  systemctl enable "$OLD" >/dev/null 2>&1 || true
-  systemctl start "$BACKEND" || true
-  systemctl start "$OLD" || true
+  rm -f "$DROPIN" "$SCHEDULER_DROPIN" "$MARKER"
+  rmdir "$DROPIN_DIR" 2>/dev/null
+  systemctl daemon-reload || echo "WARNING: daemon-reload failed" >&2
+  systemctl stop "$BACKEND" || echo "WARNING: could not stop $BACKEND" >&2
+  systemctl enable "$OLD" >/dev/null || echo "WARNING: could not enable $OLD" >&2
+  systemctl start "$BACKEND" || echo "WARNING: could not start $BACKEND" >&2
+  systemctl restart "$OLD" || echo "WARNING: could not start $OLD" >&2
+  if systemctl is-active --quiet "$OLD"; then
+    echo "the old inbox is running again (tasks that were queued run there; none ran in Java: the scheduler is off until the checks pass)" >&2
+  else
+    echo "ALERT: THE OLD INBOX IS NOT RUNNING. Look at port $PAGE_PORT ($(listening "$PAGE_PORT" | tr '\n' ' ')) and run: sudo systemctl start $OLD" >&2
+  fi
 }
 fresh=0; [[ -e $MARKER ]] || fresh=1     # only a switch made by this run is undone by this run
-switched=0     # 1 from the moment the old inbox is stopped by the import
+switched=0
 on_exit() {
   local rc=$?
   if [[ $rc -ne 0 && $switched -eq 1 && $fresh -eq 1 ]]; then undo; fi
@@ -116,9 +126,9 @@ if [[ -e $MARKER ]]; then
   echo "the cut-over marker exists ($MARKER): the final import is not repeated"
 else
   echo "== final import (scripts/inbox_cutover.py)"
+  switched=1      # the import stops the old inbox: from here a failure puts it back
   python3 "$CUTOVER"      # exit 1 on a running task or on different row counts; then the old inbox runs again and nothing is switched
 fi
-switched=1
 
 # --- 3. The switch
 systemctl disable "$OLD" >/dev/null 2>&1 || true
@@ -149,7 +159,6 @@ Environment=INBOX_PUBLIC_PORT=8105
 Environment=INBOX_PUBLIC_INTERFACE=tailscale0
 Environment=INBOX_FRONT_DOOR_ENABLED=true
 Environment=CORE_EFFECTS=live
-Environment=CORE_SCHEDULER_ENABLED=true
 Environment=KITT_GATE_ENABLED=true
 # As the old unit: the group that shares the task files, and files readable by that group.
 SupplementaryGroups=inbox-share
@@ -165,9 +174,17 @@ PrivateTmp=no
 PrivateDevices=no
 RestrictNamespaces=no
 CapabilityBoundingSet=
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_AUDIT_WRITE CAP_SYS_RESOURCE CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER
+CapabilityBoundingSet=@CAPS@
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# Tasks run as children of this process, in this cgroup: the 640M of the shadow unit would kill the JVM or a task (Claude, git, npm).
+MemoryMax=infinity
+# After a reboot the tailnet address may come a moment later than the unit: wait for it, or the second connector cannot bind.
+ExecStartPre=/bin/bash -c 'for i in $$(seq 90); do ip -4 -o addr show tailscale0 2>/dev/null | grep -q "inet 100\\." && exit 0; sleep 1; done; exit 1'
+# The scheduler is NOT switched on here: 20-scheduler.conf does it after the checks have passed (apply.sh), so a failed
+# check can never leave tasks or jobs started by Java behind an undo. After the first run both files stay.
+Environment=CORE_SCHEDULER_ENABLED=false
 UNIT
+sed -i "s|@CAPS@|$CAPS|" "$tmp"
 chmod 644 "$tmp"
 mv "$tmp" "$DROPIN"
 printf '{"at": "%s", "by": "changes/0011-inbox-java-cutover"}\n' "$(date -u +%FT%TZ)" > "$MARKER"
@@ -183,7 +200,7 @@ done
 systemctl is-active --quiet "$BACKEND" || { echo "$BACKEND is not running" >&2; exit 1; }
 code=""
 for _ in $(seq 30); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PAGE_PORT/api/backend/health")" && [[ $code == 200 ]] && break
+  code="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PAGE_PORT/api/backend/health" || true)"; [[ $code == 200 ]] && break
   sleep 1
 done
 [[ $code == 200 ]] || { echo "/api/backend/health on 127.0.0.1:$PAGE_PORT answered $code (expected 200)" >&2; exit 1; }
@@ -193,23 +210,49 @@ pid="$(systemctl show -p MainPID --value "$BACKEND")"
 mine="$(ss -ltnpH | grep -E "pid=$pid," | awk '{print $4}' | sort)"
 want="$(printf '%s\n' "127.0.0.1:$PAGE_PORT" "$TSIP:$PAGE_PORT" "$TSIP:$GATE_PORT" | sort)"
 [[ $mine == "$want" ]] || { echo "the backend listens on:$(echo; echo "$mine") but must listen only on:$(echo; echo "$want")" >&2; exit 1; }
-code="$(curl -s -o /dev/null -w '%{http_code}' "http://$TSIP:$PAGE_PORT/")"
+code="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://$TSIP:$PAGE_PORT/" || true)"
 [[ $code == 403 ]] || { echo "http://$TSIP:$PAGE_PORT/ answered $code from the box (expected 403)" >&2; exit 1; }
-code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://$TSIP:$PAGE_PORT/api/chat/action")"
+code="$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "http://$TSIP:$PAGE_PORT/api/chat/action" || true)"
 [[ $code == 403 ]] || { echo "the chat door on the tailnet address answered $code (expected 403)" >&2; exit 1; }
-code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://$TSIP:$GATE_PORT/")"
+code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$TSIP:$GATE_PORT/" || true)"
 [[ $code != 000 ]] || { echo "the kitt gate on $TSIP:$GATE_PORT does not answer" >&2; exit 1; }
 check_overview || { echo "port $OVERVIEW_PORT is no longer held by homelab-overview-web" >&2; exit 1; }
 [[ "$(ufw status | sort)" == "$UFW_BEFORE" ]] || { echo "ufw changed during the cut-over" >&2; exit 1; }
 [[ -f /etc/systemd/system/$OLD.service ]] || { echo "the old unit is no longer installed" >&2; exit 1; }
 ! systemctl is-enabled --quiet "$OLD" || { echo "$OLD is still enabled" >&2; exit 1; }
 ! systemctl is-active --quiet "$OLD" || { echo "$OLD is still running" >&2; exit 1; }
+# A runner task must be able to start from inside this sandbox: the same sudo line the backend uses, as inbox-runner, with the
+# unit's own relaxations (no new privileges off, setuid allowed, the capability list above). Fails here, before any task runs in Java.
+systemd-run --quiet --wait --pipe --collect -p User="$SERVICE_USER" -p Group="$SERVICE_USER" -p SupplementaryGroups=inbox-share \
+  -p NoNewPrivileges=no -p RestrictSUIDSGID=no -p CapabilityBoundingSet="$CAPS" \
+  -p RestrictAddressFamilies="AF_INET AF_INET6 AF_UNIX AF_NETLINK" -p ProtectKernelTunables=yes -p ProtectKernelModules=yes \
+  -p ProtectControlGroups=yes -p LockPersonality=yes -p RuntimeMaxSec=60 \
+  sudo -n -u inbox "$TASK_BIN" cleanup 0 >/dev/null \
+  || { echo "sudo -u inbox homelab-inbox-task does not work inside the unit's sandbox: runner tasks would fail (see the capability list in $DROPIN)" >&2; exit 1; }
+
+# --- 4b. Only now the scheduler: Java starts queued tasks and due jobs from this moment on.
+cat > "$SCHEDULER_DROPIN" <<'UNIT'
+# homelab: H-028 X1b, written by changes/0011-inbox-java-cutover after its checks passed: the scheduler runs (live effects).
+[Service]
+Environment=CORE_SCHEDULER_ENABLED=true
+UNIT
+chmod 644 "$SCHEDULER_DROPIN"
+systemctl daemon-reload
+systemctl restart "$BACKEND"
+code=""
+for _ in $(seq 40); do
+  code="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PAGE_PORT/api/backend/health" || true)"; [[ $code == 200 ]] && break
+  sleep 1
+done
+[[ $code == 200 ]] || { echo "after switching the scheduler on, /api/backend/health answered $code (expected 200)" >&2; exit 1; }
+# From here on Java may have started tasks: no automatic undo any more (a rollback is revert.sh, and data written since is lost, Q9).
 trap - EXIT
 
 # --- 5. The staging unit is not needed any more
 if [[ -f /etc/systemd/system/$STAGING.service || -d /var/lib/homelab-inbox-staging ]]; then
   echo "== removing the staging unit (changes/0010-inbox-staging/revert.sh)"
-  bash "$REPO/changes/0010-inbox-staging/revert.sh"
+  bash "$REPO/changes/0010-inbox-staging/revert.sh" \
+    || echo "WARNING: removing the staging unit failed; the cut-over itself is done. Run changes/0010-inbox-staging/revert.sh by hand." >&2
 fi
 echo "the Java inbox is live: http://homelab.tail4eb878.ts.net:$PAGE_PORT/ and the kitt gate on :$GATE_PORT (effects live, scheduler on); $OLD is disabled but installed"
 echo "kept for a rollback: the final inbox.db and the pg_dump in /var/backups/homelab/ (docs/inbox.md, 'Cut-over to the Java inbox')"

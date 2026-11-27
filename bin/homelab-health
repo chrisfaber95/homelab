@@ -167,7 +167,15 @@ if [[ -d $STATE_DIR ]] && command -v homelab-deploy >/dev/null; then
 fi
 
 # --- Task inbox (F-021)
-if [[ -f /etc/systemd/system/homelab-inbox.service ]]; then
+if [[ -f /var/lib/homelab-inbox/java-cutover ]]; then
+  # H-028 X1b: the Java backend is the inbox; homelab-inbox stays installed but disabled (changes/0011-inbox-java-cutover).
+  inbox_port=$(sed -n 's/^INBOX_PORT=//p' "$CONFDIR/inbox.conf" 2>/dev/null)
+  if systemctl is-active --quiet homelab-inbox-backend.service && ss -Htln "sport = :${inbox_port:-8105}" | grep -q .; then
+    report OK inbox "de Java-inbox (homelab-inbox-backend) luistert op poort ${inbox_port:-8105}"
+  else
+    report FAIL inbox "de Java-inbox draait niet ($(systemctl is-active homelab-inbox-backend.service))"
+  fi
+elif [[ -f /etc/systemd/system/homelab-inbox.service ]]; then
   inbox_port=$(sed -n 's/^INBOX_PORT=//p' "$CONFDIR/inbox.conf" 2>/dev/null)
   if systemctl is-active --quiet homelab-inbox.service && ss -Htln "sport = :${inbox_port:-8105}" | grep -q .; then
     report OK inbox "homelab-inbox luistert op poort ${inbox_port:-8105}"

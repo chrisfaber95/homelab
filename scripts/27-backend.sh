@@ -174,11 +174,15 @@ pid="$(systemctl show -p MainPID --value "$SERVICE")"
 listeners="$(ss -ltnpH)" || { echo "cannot list the listeners" >&2; exit 1; }
 mine="$(grep -E "pid=$pid," <<<"$listeners" | awk '{print $4}' || true)"
 [[ -n $mine ]] || { echo "the backend (pid $pid) listens on no TCP port" >&2; exit 1; }
-# After the cut-over the tailnet address (100.64.0.0/10) may listen too: the page on 8105 and the kitt gate on 8121.
-allowed='^(127\.0\.0\.1|\[::1\]):[0-9]+$'
-[[ $CUTOVER -eq 0 ]] || allowed='^(127\.0\.0\.1|\[::1\]|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+):[0-9]+$'
-wrong="$(grep -vE "$allowed" <<<"$mine" || true)"
-[[ -z $wrong ]] || { echo "the backend listens beyond loopback: $(paste -sd' ' <<<"$wrong")" >&2; exit 1; }
+# After the cut-over the listeners are exactly these three: loopback 8105, the tailnet address on 8105 (the page) and on 8121 (the kitt gate).
+if [[ $CUTOVER -eq 1 ]]; then
+  ts="$(tailscale ip -4 2>/dev/null | head -n1)"
+  want="$(printf '%s\n' "127.0.0.1:$PORT" "$ts:$PORT" "$ts:8121" | sort)"
+  [[ "$(sort <<<"$mine")" == "$want" ]] || { echo "the backend must listen only on: $(paste -sd' ' <<<"$want"); it listens on $(paste -sd' ' <<<"$mine")" >&2; exit 1; }
+else
+  wrong="$(grep -vE '^(127\.0\.0\.1|\[::1\]):[0-9]+$' <<<"$mine" || true)"
+  [[ -z $wrong ]] || { echo "the backend listens beyond loopback: $(paste -sd' ' <<<"$wrong")" >&2; exit 1; }
+fi
 grep -qx "$HOST:$PORT" <<<"$mine" || { echo "the backend does not listen on $HOST:$PORT (it listens on $(paste -sd' ' <<<"$mine"))" >&2; exit 1; }
 pg_listen="$(cd / && runuser -u postgres -- psql -AtXc 'show listen_addresses')"
 [[ -z $pg_listen ]] || { echo "PostgreSQL listens on '$pg_listen': it must stay socket only (Q2)" >&2; exit 1; }

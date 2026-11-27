@@ -256,7 +256,7 @@ if `apply.sh` ran first it says "too old" and stops before it touches anything, 
 | 8121 | the kitt gate, a connector of the same process (`KITT_GATE_ENABLED=true`, `KITT_GATE_HOST`/`KITT_GATE_PORT` from `config/inbox.conf`) |
 | 8104 | unchanged: `homelab-overview-web` |
 | ufw | unchanged: 8105 and 8121 are inside the existing `8100:8199` rule on `tailscale0`; the change adds none |
-| Settings | a drop-in `/etc/systemd/system/homelab-inbox-backend.service.d/10-cutover.conf`: `INBOX_FRONT_DOOR_ENABLED=true`, `CORE_EFFECTS=live`, `CORE_SCHEDULER_ENABLED=true`. It also lifts the sandbox the runners cannot live in (`NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`, `RestrictSUIDSGID`, `RestrictNamespaces`, capabilities for `sudo -u inbox`), as the old unit had none, and adds `SupplementaryGroups=inbox-share` and `UMask=0027` |
+| Settings | a drop-in `/etc/systemd/system/homelab-inbox-backend.service.d/10-cutover.conf`: `INBOX_FRONT_DOOR_ENABLED=true`, `CORE_EFFECTS=live`; the scheduler is switched on by a second drop-in (`20-scheduler.conf`) only after the checks passed, so a failed check can never leave tasks started by Java behind an undo. The unit's `MemoryMax` is lifted (tasks run in its cgroup) and it waits for the tailnet address at boot. It also lifts the sandbox the runners cannot live in (`NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`, `RestrictSUIDSGID`, `RestrictNamespaces`, capabilities `CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE CAP_SYS_RESOURCE` for `sudo -u inbox`), as the old unit had none, and adds `SupplementaryGroups=inbox-share` and `UMask=0027` |
 | Old unit | `homelab-inbox.service` is disabled and stopped but stays installed. The marker `/var/lib/homelab-inbox/java-cutover` makes `scripts/21-inbox.sh` leave it alone (it checks `/api/backend/health` instead) and `scripts/27-backend.sh` check the new shape (port 8105, tailnet listeners allowed, no facade-secret check) |
 | Chat and memory routes | `ChatEntriesFilter` (the Discord bot's `/api/chat/entries` and `/state`, bearer token, loopback only) and `MemoryPageController` (the memory forms) are what the Python facade did for them; both exist only with the front door on |
 | Staging | the unit `homelab-inbox-staging`, its database, data and ports 8125 and 8131 are removed by the last step (`changes/0010-inbox-staging/revert.sh`) |
@@ -273,9 +273,12 @@ if `apply.sh` ran first it says "too old" and stops before it touches anything, 
 5. **The switch**: the old unit is disabled, the drop-in and the marker are written, `homelab-inbox-backend` restarts.
 6. **Checks**: `/api/backend/health` on `127.0.0.1:8105` answers 200; the backend listens only on `127.0.0.1:8105`, `<tailnet>:8105` and
    `<tailnet>:8121`; the page from the box is refused (403) and so is the chat door on the tailnet address; the kitt gate answers;
-   8104 is still `homelab-overview-web`'s; ufw is unchanged; the old unit is installed, disabled and stopped. A failed check after the
+   8104 is still `homelab-overview-web`'s; ufw is unchanged; the old unit is installed, disabled and stopped. `apply.sh` also runs `sudo -u inbox homelab-inbox-task cleanup 0` inside a transient unit with the same relaxations, to prove a runner task can start. A failed check after the
    import puts the old inbox back at once (drop-in and marker removed, old unit enabled and started) and `apply.sh` fails.
-7. The staging unit is removed.
+7. The scheduler is switched on (`20-scheduler.conf`, restart, health 200). From here Java may have started tasks, so there is no automatic undo.
+8. The staging unit is removed (a failure here is a warning: the cut-over is done).
+
+`bin/homelab-health` checks the Java backend instead of the old unit while the marker exists.
 
 What Chris checks afterwards (a task is the real test of the live effects): the phone page on 8105 (tasks, a task, jobs, briefs,
 memory, search, forge, SSH); a small test task runs through to a PR; a Discord message gets an answer; kitt works on the phone.

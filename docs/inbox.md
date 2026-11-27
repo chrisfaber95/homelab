@@ -195,3 +195,48 @@ marker `cutover-import.json` next to `inbox.db` records the hash of the imported
 and only compares and backs up again. A changed `inbox.db` with already filled tables aborts: empty the tables first
 (`backend/README.md`). Options (flags or `CUTOVER_*` environment variables): `--inbox-db`, `--jar`, `--java`, `--backup-root`,
 `--runner`, `--pg-run`, `--unit`, `--database`. Tests: `python3 -m unittest tests.test_inbox_cutover`.
+
+## Staging the Java inbox (H-028 S1)
+
+`changes/0010-inbox-staging` runs the Java backend a second time, as the unit `homelab-inbox-staging`, beside the live
+inbox, before it takes over 8105 (X1b). After the merge `homelab-admin` runs `apply.sh`; it can also be run by hand from root's
+clone (`sudo bash /var/lib/homelab/repo/changes/0010-inbox-staging/apply.sh`). Merge it after `scripts/27-backend.sh` has
+rebuilt the jar (the jar needs the tailnet connector of W5b; `apply.sh` checks and says so).
+
+| What | Value |
+|---|---|
+| Tailnet port | **8125** on the tailnet address only (`INBOX_PUBLIC_PORT`), inside the existing `8100:8199` rule on `tailscale0`: ufw does not change. Not 8104, 8105 or 8121. Checked free with `ss -ltnp` (also 8131) |
+| Loopback port | 8131 (`BACKEND_PORT`; the live backend has 8130) |
+| Settings | `INBOX_FRONT_DOOR_ENABLED=true`, `CORE_EFFECTS=shadow`, `CORE_SCHEDULER_ENABLED=false`, `KITT_GATE_ENABLED=false`, `NTFY_FAKE=1`, no GitHub token (`GH_TOKEN_FILE` points nowhere) |
+| Database | its own `inbox_staging` (owner `inbox_app`, one `pg_hba` line); the live `inbox` is not opened |
+| Data | `/var/lib/homelab-inbox-staging/` (0700, `INBOX_RUNNER_HOME`): `inbox.db` is a SQLite backup-API copy of the live one (opened read-only), `memory-repo` and `jobs-repo` are copies **without their `origin`**, so staging can never push. The unit may write only this directory (`ReadWritePaths`) and may reach only loopback and the tailnet (`IPAddressDeny=any`) |
+| Import | `scripts/inbox_cutover.py --inbox-db <copy> --database inbox_staging --unit homelab-inbox-staging --backup-root /var/backups/homelab-staging`: the same import and row-count check as the cut-over, against the copy; it stops only the staging unit |
+
+The live `inbox.db`, the database `inbox` and the units `homelab-inbox` and `homelab-inbox-backend` are not changed. While a task
+runs in the live inbox, `apply.sh` waits up to 5 minutes and then stops with a message; run it again by hand later. Staging
+holds test data once it is used: a second `apply.sh` does not copy again. To refresh the copy run `revert.sh`, then `apply.sh`.
+The skills page is empty on staging (no `repos/homelab` clone in the copy). The SSH tab still talks to the real
+`homelab-admin` socket, as the page does on 8105: do not confirm a key request you did not make.
+
+### The checks
+
+The page and the JSON routes accept only the owner's own devices on the tailnet, so everything below that goes to port 8125
+runs **from such a device** (the phone, or a laptop on the tailnet), not from the box. `<staging>` is
+`http://homelab.tail4eb878.ts.net:8125`.
+
+1. **The 403 check (what `scripts/21-inbox.sh` does).** On the box: `curl -s -o /dev/null -w '%{http_code}\n' http://100.85.70.34:8125/`
+   must print `403` (the box is not one of the owner's devices). `apply.sh` does this itself. `ss -ltnp | grep 8125` must show
+   only `100.85.70.34:8125`.
+2. **Contract tests.** From an owner device with a clone of the repo:
+   `INBOX_CONTRACT_BASE_URL=<staging> python3 tests/test_inbox_contract.py`. Every case that arranges state inside the Python
+   process skips. The door cases (`ChatDoor`, `KittDoor`) are loopback-only by design and answer 403 on 8125; run those on the box
+   against the loopback port: `INBOX_CONTRACT_BASE_URL=http://127.0.0.1:8131 INBOX_CONTRACT_CHAT_TOKEN=<token of a client with read>
+   python3 -m unittest tests.test_inbox_contract.ChatDoor`. The POST cases write to staging's database only.
+3. **`/api/tasks` against 8105.** From the same device, at a moment when no task changes:
+   `curl -s http://homelab.tail4eb878.ts.net:8105/api/tasks | python3 -m json.tool --sort-keys > py.json`, the same for
+   `<staging>/api/tasks` into `java.json`, then `diff py.json java.json`. The copy was taken when `apply.sh` ran: tasks
+   that moved since then are the only expected differences (compare the ids that did not move, or run `revert.sh` and
+   `apply.sh` right before the comparison for a fresh copy). Do the same for `/api/jobs-page` if needed.
+4. **Rollback.** `sudo bash /var/lib/homelab/repo/changes/0010-inbox-staging/revert.sh` removes the unit, the database, the
+   `pg_hba` line and the data, then checks that 8125 and 8131 are free and the live database `inbox` is still there.
+   `ss -ltnp | grep -E ':(8125|8131)'` prints nothing afterwards.

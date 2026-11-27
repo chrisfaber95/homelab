@@ -223,6 +223,18 @@ class FrontDoorTest {
     }
 
     @Test
+    void aBrowserNeedsNoFacadeSecretOnceTheFrontDoorIsOn() throws Exception {
+        HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/session"))
+                .build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(r.statusCode()).isEqualTo(200);
+        WHOIS.clear(); // not the owner's device: still refused by the front door
+        tailnet.setIdentity(OWNER, Set.of("100.85.70.34"));
+        HttpResponse<String> refused = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port
+                + "/api/session")).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(refused.statusCode()).isEqualTo(403);
+    }
+
+    @Test
     void sessionIsNotCachedAndIsForGetOnly() throws Exception {
         assertThat(get("/api/session").header("Cache-Control")).isEqualTo("no-store");
         assertThat(error(call("POST", "/api/session", Map.of("X-CSRF-Token", token())), 404)).isEqualTo("Not found.");

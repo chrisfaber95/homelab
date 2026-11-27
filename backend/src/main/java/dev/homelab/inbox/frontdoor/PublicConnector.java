@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * {@code tailscale0}) on that port: never 0.0.0.0, never the LAN. Without a value there is no second connector and the
  * backend listens on {@code server.address} only, as before.
  * <p>
- * It fails the start, and does not fall back to something wider, when the port is not valid or equals the main port,
+ * It fails the start, and does not fall back to something wider, when the port is not valid or equals the main port while the main address is not loopback,
  * when the interface or its address is missing, or when the front door is off (the owner and CSRF checks are what
  * guard the pages on this connector). The loopback-only doors stay refused here: {@link PublicPortGuard}.
  */
@@ -28,13 +28,16 @@ public class PublicConnector implements WebServerFactoryCustomizer<TomcatServlet
     private final String iface;
     private final boolean frontDoor;
     private final int mainPort;
+    private final String mainAddress;
     private final String cidr;
 
     public PublicConnector(@Value("${inbox.public.port:}") String port,
             @Value("${inbox.public.interface:tailscale0}") String iface,
             @Value("${inbox.front-door.enabled:false}") boolean frontDoor,
             @Value("${server.port:8130}") int mainPort,
-            @Value("${inbox.public.cidr:100.64.0.0/10}") String cidr) {
+            @Value("${inbox.public.cidr:100.64.0.0/10}") String cidr,
+            @Value("${server.address:127.0.0.1}") String mainAddress) {
+        this.mainAddress = mainAddress.strip();
         this.cidr = cidr.strip();
         this.port = port.strip();
         this.iface = iface.strip();
@@ -48,8 +51,11 @@ public class PublicConnector implements WebServerFactoryCustomizer<TomcatServlet
             return;
         }
         int number = parse(port);
-        if (number == mainPort) {
-            throw new IllegalStateException("inbox.public.port must differ from server.port (" + mainPort + ")");
+        if (number == mainPort && !loopbackAddress(mainAddress)) {
+            // The cut-over (H-028 X1b): 8105 on loopback for the doors and on the tailnet address for the page. Two
+            // specific addresses can share a port; a wildcard or tailnet main address cannot.
+            throw new IllegalStateException("inbox.public.port may equal server.port (" + mainPort
+                    + ") only when server.address is a loopback address, not '" + mainAddress + "'");
         }
         if (!frontDoor) {
             throw new IllegalStateException("inbox.public.port needs inbox.front-door.enabled=true");
@@ -58,6 +64,15 @@ public class PublicConnector implements WebServerFactoryCustomizer<TomcatServlet
         connector.setPort(number);
         connector.setProperty("address", tailnetAddress(iface, cidr).getHostAddress());
         factory.addAdditionalConnectors(connector);
+    }
+
+    /** Whether the literal is a loopback address (127.x.x.x, ::1 or localhost); never resolves a name. */
+    static boolean loopbackAddress(String value) {
+        String v = value.strip();
+        if (v.equals("localhost") || v.equals("::1") || v.equals("[::1]")) {
+            return true;
+        }
+        return v.matches("127(\\.[0-9]{1,3}){3}");
     }
 
     static int parse(String value) {

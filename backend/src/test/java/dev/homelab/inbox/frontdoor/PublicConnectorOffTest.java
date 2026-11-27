@@ -127,8 +127,8 @@ class PublicConnectorOffTest {
     @Test
     void theCustomizerAddsNothing() {
         var factory = new org.springframework.boot.tomcat.servlet.TomcatServletWebServerFactory(0);
-        new PublicConnector("", "tailscale0", true, 8130, "100.64.0.0/10").customize(factory);
-        new PublicConnector("  ", "tailscale0", false, 8130, "100.64.0.0/10").customize(factory);
+        new PublicConnector("", "tailscale0", true, 8130, "100.64.0.0/10", "127.0.0.1").customize(factory);
+        new PublicConnector("  ", "tailscale0", false, 8130, "100.64.0.0/10", "127.0.0.1").customize(factory);
         assertThat(factory.getAdditionalConnectors()).isEmpty();
     }
 }

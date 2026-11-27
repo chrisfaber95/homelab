@@ -183,4 +183,59 @@ class ChatDoorHttpTest {
             assertThat(out.getStatus()).as(ip).isEqualTo(200);
         }
     }
+
+    HttpResponse<String> get(String path, String authorization, String client) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).GET();
+        if (authorization != null) {
+            b.header("Authorization", authorization);
+        }
+        if (client != null) {
+            b.header("X-Inbox-Client", client);
+        }
+        return HttpClient.newHttpClient().send(b.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** The Discord bot's other routes (X1b): bearer token on loopback, no owner check, no CSRF for a GET. */
+    @Test
+    void entriesAndStateAnswerForAValidToken() throws Exception {
+        HttpResponse<String> r = get("/api/chat/entries?after=0", "Bearer tok-reader", null);
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(200);
+        assertThat(json.readTree(r.body()).has("entries")).isTrue();
+        assertThat(get("/api/chat/state", "Bearer tok-reader", null).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void entriesNeedTheTokenAndANamedClientHeaderDoesNotReplaceIt() throws Exception {
+        assertThat(get("/api/chat/entries", null, null).statusCode()).isEqualTo(401);
+        assertThat(get("/api/chat/entries", "Bearer wrong", "discord").statusCode()).isEqualTo(401);
+        assertThat(get("/api/chat/entries", null, "discord").statusCode()).isEqualTo(401);
+        // the token decides the client: reader may read even when the caller names another client
+        assertThat(get("/api/chat/entries", "Bearer tok-reader", "nobody").statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void theEntriesFilterRefusesAnAddressThatIsNotLoopback() throws Exception {
+        var filter = new ChatEntriesFilter(null, json);
+        var in = new MockHttpServletRequest("GET", "/api/chat/entries");
+        in.setRemoteAddr("100.85.70.34");
+        in.addHeader("Authorization", "Bearer tok-discord");
+        var out = new MockHttpServletResponse();
+        filter.doFilter(in, out, (req, res) -> {
+            throw new AssertionError("must not pass");
+        });
+        assertThat(out.getStatus()).isEqualTo(403);
+        assertThat(json.readTree(out.getContentAsString()).path("error").asString()).isEqualTo("loopback only");
+    }
+
+    /** The memory forms are the front door's: no CSRF token, no write (the writer is not reached). */
+    @Test
+    void theMemoryFormsNeedTheCsrfToken() throws Exception {
+        for (String path : new String[] {"/memory/add", "/memory/e/regels/x/save", "/memory/e/regels/x/delete"}) {
+            HttpRequest rq = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString("text=x")).build();
+            assertThat(HttpClient.newHttpClient().send(rq, HttpResponse.BodyHandlers.ofString()).statusCode())
+                    .as(path).isEqualTo(403);
+        }
+    }
 }

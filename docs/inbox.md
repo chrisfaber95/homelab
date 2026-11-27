@@ -199,7 +199,7 @@ and only compares and backs up again. A changed `inbox.db` with already filled t
 ## Staging the Java inbox (H-028 S1)
 
 `changes/0010-inbox-staging` runs the Java backend a second time, as the unit `homelab-inbox-staging`, beside the live
-inbox, before it takes over 8105 (X1b). After the merge `homelab-admin` runs `apply.sh`; it can also be run by hand from root's
+inbox, before it takes over 8105 (X1b, "Cut-over to the Java inbox" below; the cut-over removes this unit). After the merge `homelab-admin` runs `apply.sh`; it can also be run by hand from root's
 clone (`sudo bash /var/lib/homelab/repo/changes/0010-inbox-staging/apply.sh`). Merge it after `scripts/27-backend.sh` has
 rebuilt the jar (the jar needs the tailnet connector of W5b; `apply.sh` checks and says so).
 
@@ -240,3 +240,63 @@ runs **from such a device** (the phone, or a laptop on the tailnet), not from th
 4. **Rollback.** `sudo bash /var/lib/homelab/repo/changes/0010-inbox-staging/revert.sh` removes the unit, the database, the
    `pg_hba` line and the data, then checks that 8125 and 8131 are free and the live database `inbox` is still there.
    `ss -ltnp | grep -E ':(8125|8131)'` prints nothing afterwards.
+
+## Cut-over to the Java inbox (H-028 X1b)
+
+`changes/0011-inbox-java-cutover` makes the Java backend the inbox. It replaces H-027 X1b. **Chris merges it at a moment when no
+task is running**, after the staging checks above and his phone check have passed. A task that runs during the switch is cut off,
+and `apply.sh` refuses to start while one runs (see "Order"); a merge that was refused is not run again by itself (a failed change
+only runs again when `apply.sh` changes), so run it by hand: `sudo bash /var/lib/homelab/repo/changes/0011-inbox-java-cutover/apply.sh`.
+The jar must be the new one (the shared-port connector): the merge also changes `backend/`, so `scripts/27-backend.sh` rebuilds it;
+if `apply.sh` ran first it says "too old" and stops before it touches anything, and a rerun by hand after the script does it.
+
+| After the switch | Value |
+|---|---|
+| 8105 | the Java backend (`homelab-inbox-backend`): `127.0.0.1:8105` for the doors (Discord bot, kitt adapter, `/api/chat/action`) and, through `INBOX_PUBLIC_PORT=8105`, the tailnet address only for the page. A second connector may share the port because the main address is loopback; `PublicPortGuard` tells them apart by address and keeps the doors refused on the tailnet address |
+| 8121 | the kitt gate, a connector of the same process (`KITT_GATE_ENABLED=true`, `KITT_GATE_HOST`/`KITT_GATE_PORT` from `config/inbox.conf`) |
+| 8104 | unchanged: `homelab-overview-web` |
+| ufw | unchanged: 8105 and 8121 are inside the existing `8100:8199` rule on `tailscale0`; the change adds none |
+| Settings | a drop-in `/etc/systemd/system/homelab-inbox-backend.service.d/10-cutover.conf`: `INBOX_FRONT_DOOR_ENABLED=true`, `CORE_EFFECTS=live`, `CORE_SCHEDULER_ENABLED=true`. It also lifts the sandbox the runners cannot live in (`NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`, `RestrictSUIDSGID`, `RestrictNamespaces`, capabilities for `sudo -u inbox`), as the old unit had none, and adds `SupplementaryGroups=inbox-share` and `UMask=0027` |
+| Old unit | `homelab-inbox.service` is disabled and stopped but stays installed. The marker `/var/lib/homelab-inbox/java-cutover` makes `scripts/21-inbox.sh` leave it alone (it checks `/api/backend/health` instead) and `scripts/27-backend.sh` check the new shape (port 8105, tailnet listeners allowed, no facade-secret check) |
+| Chat and memory routes | `ChatEntriesFilter` (the Discord bot's `/api/chat/entries` and `/state`, bearer token, loopback only) and `MemoryPageController` (the memory forms) are what the Python facade did for them; both exist only with the front door on |
+| Staging | the unit `homelab-inbox-staging`, its database, data and ports 8125 and 8131 are removed by the last step (`changes/0010-inbox-staging/revert.sh`) |
+
+### Order
+
+1. Merge at a quiet moment (the inbox page shows no running task). The merge also restarts the old inbox through `21-inbox.sh`'s
+   rerun if that runs first; that is the known cost of any merge on homelab.
+2. `apply.sh` as root: preconditions (jar, PostgreSQL, ufw rule, tailnet address, 8104 held by `homelab-overview-web`, old unit installed).
+3. It **refuses while a task runs** (`status = 'running'` in `inbox.db`): exit 1, nothing changed.
+4. **The final import** `scripts/inbox_cutover.py` (the data step above): it checks again, stops `homelab-inbox`, imports `inbox.db`,
+   **compares the row counts** per table and keeps the final `inbox.db` and a `pg_dump` in `/var/backups/homelab/inbox-cutover-<date>/`.
+   Different counts: the old inbox is started again and nothing is switched.
+5. **The switch**: the old unit is disabled, the drop-in and the marker are written, `homelab-inbox-backend` restarts.
+6. **Checks**: `/api/backend/health` on `127.0.0.1:8105` answers 200; the backend listens only on `127.0.0.1:8105`, `<tailnet>:8105` and
+   `<tailnet>:8121`; the page from the box is refused (403) and so is the chat door on the tailnet address; the kitt gate answers;
+   8104 is still `homelab-overview-web`'s; ufw is unchanged; the old unit is installed, disabled and stopped. A failed check after the
+   import puts the old inbox back at once (drop-in and marker removed, old unit enabled and started) and `apply.sh` fails.
+7. The staging unit is removed.
+
+What Chris checks afterwards (a task is the real test of the live effects): the phone page on 8105 (tasks, a task, jobs, briefs,
+memory, search, forge, SSH); a small test task runs through to a PR; a Discord message gets an answer; kitt works on the phone.
+`journalctl -u homelab-inbox-backend` is not readable for `claude`; ask Chris, or look at the task logs on the page.
+
+### Rollback (Q9)
+
+Revert the PR, then enable the old unit. In this order, so the files still exist:
+
+1. On the box, as root, from root's clone while the cut-over is still on `main`:
+   `sudo bash /var/lib/homelab/repo/changes/0011-inbox-java-cutover/revert.sh`. It refuses while a task runs in the Java inbox
+   (`FORCE=1` cuts it off). It removes the drop-in and the marker, restarts the backend as the shadow backend on `127.0.0.1:8130`,
+   enables and restarts `homelab-inbox`, and checks that 8105 answers 403 from the old process.
+2. Merge the revert PR of the cut-over, so `main` and the box agree again (the scripts are then the old ones; the jar rebuilds).
+   Without `revert.sh` (the revert PR already merged): `sudo rm /etc/systemd/system/homelab-inbox-backend.service.d/10-cutover.conf
+   /var/lib/homelab-inbox/java-cutover && sudo systemctl daemon-reload && sudo systemctl restart homelab-inbox-backend &&
+   sudo systemctl enable --now homelab-inbox`.
+
+**Data written after the cut-over is lost on a rollback (Q9, accepted for one release):** the old inbox starts on the last
+`inbox.db`, as it was when the final import stopped it; tasks, drafts, runs and job state made by the Java inbox since do not go back
+to SQLite. Conversation, memory and the job files were Java's already (H-024 M4 to M6) and stay. The last `inbox.db` and the `pg_dump`
+stay in `/var/backups/homelab/inbox-cutover-<date>/` (X2 removes them one release later); `pg_dump` is also the way to look at what
+Java wrote. A second try after a rollback needs the Java tables emptied by hand if `inbox.db` changed in between
+(`backend/README.md`, "One-off import"): the import refuses a database that already holds other data.

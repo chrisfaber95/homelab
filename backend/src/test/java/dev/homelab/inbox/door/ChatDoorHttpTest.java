@@ -238,4 +238,13 @@ class ChatDoorHttpTest {
                     .as(path).isEqualTo(403);
         }
     }
+
+    /** A spelling of the path that the filter does not recognise must still not let a caller name a client. */
+    @Test
+    void anEncodedPathCannotSkipTheDoor() throws Exception {
+        for (String path : new String[] {"/api/chat/%65ntries", "/api/chat/stat%65", "/api/chat/./entries"}) {
+            HttpResponse<String> r = get(path, null, "discord");
+            assertThat(r.statusCode()).as(path).isIn(400, 403, 404);
+        }
+    }
 }

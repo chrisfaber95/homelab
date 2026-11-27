@@ -237,6 +237,8 @@ cat > "$SCHEDULER_DROPIN" <<'UNIT'
 Environment=CORE_SCHEDULER_ENABLED=true
 UNIT
 chmod 644 "$SCHEDULER_DROPIN"
+# From the restart on Java may start tasks: no automatic undo any more (a rollback is revert.sh; data written since is lost, Q9).
+trap - EXIT
 systemctl daemon-reload
 systemctl restart "$BACKEND"
 code=""
@@ -245,8 +247,6 @@ for _ in $(seq 40); do
   sleep 1
 done
 [[ $code == 200 ]] || { echo "after switching the scheduler on, /api/backend/health answered $code (expected 200)" >&2; exit 1; }
-# From here on Java may have started tasks: no automatic undo any more (a rollback is revert.sh, and data written since is lost, Q9).
-trap - EXIT
 
 # --- 5. The staging unit is not needed any more
 if [[ -f /etc/systemd/system/$STAGING.service || -d /var/lib/homelab-inbox-staging ]]; then

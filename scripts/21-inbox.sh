@@ -286,7 +286,7 @@ if [[ -e /var/lib/homelab-inbox/java-cutover ]]; then
   systemctl disable homelab-inbox >/dev/null 2>&1 || true
   [[ -n ${HOMELAB_RERUN:-} ]] || systemctl restart homelab-admin
   echo "== Controle"
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$INBOX_PORT/api/backend/health")
+  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$INBOX_PORT/api/backend/health")
   [[ $code == 200 ]] || { echo "De Java-inbox antwoordt op $INBOX_PORT met $code (verwacht 200)." >&2; exit 1; }
 else
 systemctl enable homelab-inbox
